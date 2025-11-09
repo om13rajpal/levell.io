@@ -30,7 +30,7 @@ export function LoginForm({
     const res = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: "http://localhost:3000/auth/callback",
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
       },
     });
 
@@ -49,7 +49,7 @@ export function LoginForm({
       options: {
         emailRedirectTo:
           process.env.NEXT_PUBLIC_SITE_URL + "/auth/callback" ||
-          "http://localhost:3000/auth/callback",
+          "process.env.NEXT_PUBLIC_SITE_URL/auth/callback",
       },
     });
 
