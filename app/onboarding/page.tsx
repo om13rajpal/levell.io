@@ -40,6 +40,7 @@ export default function OnboardingPage({
       <div className="w-full max-w-7xl">
         <Stepper
           initialStep={1}
+          //@ts-ignore
           onStepChange={(step: number) => {
             console.log("📍 Current step:", step);
           }}
