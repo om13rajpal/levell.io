@@ -75,7 +75,7 @@ export default function CallbackPage() {
       if (existingUser && existingUser.is_onboarding_done === false) {
         console.log("👋 User onboarding not done — redirecting...");
         setTimeout(() => {
-          router.replace("/onboarding");
+            router.replace(`/onboarding?name=${encodeURIComponent(name)}&email=${encodeURIComponent(email)}`);
         }, 5500);
         return;
       }

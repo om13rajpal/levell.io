@@ -49,7 +49,7 @@ export function LoginForm({
       options: {
         emailRedirectTo:
           process.env.NEXT_PUBLIC_SITE_URL + "/auth/callback" ||
-          "process.env.NEXT_PUBLIC_SITE_URL/auth/callback",
+          "http://localhost:3000/auth/callback",
       },
     });
 

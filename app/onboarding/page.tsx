@@ -1,7 +1,106 @@
-import React from 'react'
+"use client";
 
-export default function OnboardingPage() {
+import { useState } from "react";
+import Stepper, { Step } from "@/components/Stepper";
+import { SignupForm } from "@/components/signup-form";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import ConnectTools from "@/components/ConnectTools";
+import CompanyInfoStep from "@/components/CompanyInfo";
+import Tiptap from "@/components/AiAnalysis";
+import ConfigureSalesProcessStep from "@/components/Sales";
+import ReviewBusinessProfile from "@/components/ReviewProfile";
+
+export default function OnboardingPage({
+  fullname: propFullname,
+  email: propEmail,
+}: {
+  fullname?: string;
+  email?: string;
+}) {
+  const [name, setName] = useState("");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Get fullname & email either from props or query params
+  const fullname = propFullname || searchParams.get("name") || "";
+  const email = propEmail || searchParams.get("email") || "";
+
   return (
-    <div>OnboardingPage</div>
-  )
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+      <div className="w-full max-w-7xl">
+        <Stepper
+          initialStep={1}
+          onStepChange={(step: number) => {
+            console.log("📍 Current step:", step);
+          }}
+          onFinalStepCompleted={() => {
+            console.log("🎉 All steps completed!");
+            router.replace("/dashboard");
+          }}
+          backButtonText="Previous"
+          nextButtonText="Next"
+        >
+          <Step>
+            <SignupForm fullname={fullname} email={email} />
+          </Step>
+
+          <Step>
+            <ConnectTools />
+          </Step>
+
+          <Step>
+            <CompanyInfoStep />
+          </Step>
+
+          <Step>
+            <Tiptap />
+          </Step>
+          <Step>
+            <ReviewBusinessProfile
+              companyInfo={{
+                name: "Example Corp",
+                website: "https://example.com",
+                value: "We provide exemplary services.",
+              }}
+              products={[{ name: "Product 1" }, { name: "Product 2" }]}
+              idealCustomer={{
+                industry: "Tech",
+                size: "100-500",
+                region: "North America",
+                techStack: "React, Node.js",
+                salesMotion: "B2B",
+              }}
+              buyerPersonas={[
+                {
+                  title: "Persona 1",
+                  goals: "Increase revenue",
+                  pains: "Lack of time",
+                  concerns: "Budget constraints",
+                },
+              ]}
+              talkTracks={[
+                { title: "Track 1", content: "How to sell Product 1" },
+              ]}
+              objections={[
+                { title: "Objection 1", content: "It's too expensive" },
+              ]}
+            />
+          </Step>
+          <Step>
+            <ConfigureSalesProcessStep />
+          </Step>
+        </Stepper>
+      </div>
+    </div>
+  );
 }
