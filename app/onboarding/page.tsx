@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Stepper, { Step } from "@/components/Stepper";
 import { SignupForm } from "@/components/signup-form";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -9,7 +10,7 @@ import Tiptap from "@/components/AiAnalysis";
 import ConfigureSalesProcessStep from "@/components/Sales";
 import ReviewBusinessProfile from "@/components/ReviewProfile";
 
-export default function OnboardingPage({
+function OnboardingSteps({
   fullname: propFullname,
   email: propEmail,
 }: {
@@ -19,7 +20,6 @@ export default function OnboardingPage({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Get fullname & email either from props or query params
   const fullname = propFullname || searchParams.get("name") || "";
   const email = propEmail || searchParams.get("email") || "";
 
@@ -29,9 +29,7 @@ export default function OnboardingPage({
         <Stepper
           initialStep={1}
           //@ts-ignore
-          onStepChange={(step: number) => {
-            console.log("📍 Current step:", step);
-          }}
+          onStepChange={(step: number) => console.log("📍 Current step:", step)}
           onFinalStepCompleted={() => {
             console.log("🎉 All steps completed!");
             router.replace("/dashboard");
@@ -42,15 +40,12 @@ export default function OnboardingPage({
           <Step>
             <SignupForm fullname={fullname} email={email} />
           </Step>
-
           <Step>
             <ConnectTools />
           </Step>
-
           <Step>
             <CompanyInfoStep />
           </Step>
-
           <Step>
             <Tiptap />
           </Step>
@@ -77,12 +72,8 @@ export default function OnboardingPage({
                   concerns: "Budget constraints",
                 },
               ]}
-              talkTracks={[
-                { title: "Track 1", content: "How to sell Product 1" },
-              ]}
-              objections={[
-                { title: "Objection 1", content: "It's too expensive" },
-              ]}
+              talkTracks={[{ title: "Track 1", content: "How to sell Product 1" }]}
+              objections={[{ title: "Objection 1", content: "It's too expensive" }]}
             />
           </Step>
           <Step>
@@ -91,5 +82,13 @@ export default function OnboardingPage({
         </Stepper>
       </div>
     </div>
+  );
+}
+
+export default function OnboardingPage(props: { fullname?: string; email?: string }) {
+  return (
+    <Suspense fallback={<div></div>}>
+      <OnboardingSteps {...props} />
+    </Suspense>
   );
 }
