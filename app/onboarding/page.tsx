@@ -1,19 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Stepper, { Step } from "@/components/Stepper";
 import { SignupForm } from "@/components/signup-form";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import ConnectTools from "@/components/ConnectTools";
 import CompanyInfoStep from "@/components/CompanyInfo";
 import Tiptap from "@/components/AiAnalysis";
@@ -27,7 +16,6 @@ export default function OnboardingPage({
   fullname?: string;
   email?: string;
 }) {
-  const [name, setName] = useState("");
   const router = useRouter();
   const searchParams = useSearchParams();
 
