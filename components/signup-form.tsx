@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -14,29 +15,50 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import React from "react";
 
 interface SignupFormProps extends React.ComponentProps<typeof Card> {
   fullname?: string;
   email?: string;
+  onChange?: (data: { fullname: string; email: string }) => void; // ✅ Live change callback
 }
 
 export function SignupForm({
   fullname = "",
   email = "",
+  onChange,
   ...props
 }: SignupFormProps) {
+  const [formData, setFormData] = useState({
+    fullname,
+    email,
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { id, value } = e.target;
+    const updatedData = {
+      ...formData,
+      [id === "name" ? "fullname" : "email"]: value,
+    };
+    setFormData(updatedData);
+    if (onChange) onChange(updatedData); // 🔄 Notify parent on every change
+  };
+
+  // Send initial values once
+  useEffect(() => {
+    if (onChange) onChange(formData);
+  }, []);
+
   return (
     <Card {...props} className="bg-transparent border-none shadow-none">
       <CardHeader>
         <CardTitle>Create an account</CardTitle>
         <CardDescription>
-          Enter your information below to create your account
+          Enter your information below to create your account.
         </CardDescription>
       </CardHeader>
 
       <CardContent>
-        <form>
+        <form className="space-y-6">
           <FieldGroup>
             {/* Full Name */}
             <Field>
@@ -46,7 +68,8 @@ export function SignupForm({
                 type="text"
                 placeholder="John Doe"
                 required
-                defaultValue={fullname}
+                value={formData.fullname}
+                onChange={handleChange}
               />
             </Field>
 
@@ -57,22 +80,13 @@ export function SignupForm({
                 id="email"
                 type="email"
                 placeholder="m@example.com"
-                defaultValue={email}
                 required
+                value={formData.email}
+                onChange={handleChange}
               />
               <FieldDescription>
                 We&apos;ll use this to contact you. We will not share your email
                 with anyone else.
-              </FieldDescription>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="company-name">
-                Company Name (Optional)
-              </FieldLabel>
-              <Input id="company-name" type="text" />
-              <FieldDescription>
-                Please enter your company name.
               </FieldDescription>
             </Field>
           </FieldGroup>

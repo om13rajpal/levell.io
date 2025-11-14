@@ -1,10 +1,16 @@
-"use client"
+"use client";
 
 import { LoginForm } from "@/components/login-form";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/hooks/useAuth";
+import { useEffect } from "react";
+import { toast } from "sonner";
 
 export default function Page() {
+  useEffect(() => {
+    toast.dismiss();
+  }, []);
+  
   useAuth();
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">

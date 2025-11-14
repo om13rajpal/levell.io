@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -13,9 +13,18 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
-export default function ConfigureSalesProcessStep() {
-  const [salesMotion, setSalesMotion] = useState("mid");
+export default function ConfigureSalesProcessStep({
+  onChange,
+}: {
+  onChange: (values: { sales_motion: string; framework: string }) => void;
+}) {
+  const [salesMotion, setSalesMotion] = useState("mid-market");
   const [framework, setFramework] = useState("meddic");
+
+  // Notify parent on every change
+  useEffect(() => {
+    onChange({ sales_motion: salesMotion, framework });
+  }, [salesMotion, framework]);
 
   return (
     <div className="w-full max-w-6xl mx-auto p-6 bg-background flex flex-col lg:flex-row gap-8">
@@ -25,12 +34,11 @@ export default function ConfigureSalesProcessStep() {
         <div>
           <h2 className="text-xl font-semibold">Configure Your Sales Process</h2>
           <p className="text-sm text-muted-foreground">
-            Choose your sales motion and qualification framework. You can adjust
-            weights later in settings.
+            Choose your sales motion and qualification framework.
           </p>
         </div>
 
-        {/* Sales Motion + Framework in same vertical stack */}
+        {/* Sales Motion + Framework */}
         <div className="space-y-6">
           {/* Sales Motion */}
           <Card className="border border-border rounded-xl shadow-xs">
@@ -50,15 +58,15 @@ export default function ConfigureSalesProcessStep() {
                   active={salesMotion === "smb"}
                 />
                 <OptionCard
-                  id="mid"
+                  id="mid-market"
                   title="Mid-Market"
                   desc="Blend of velocity and depth, multi-stakeholder."
-                  active={salesMotion === "mid"}
+                  active={salesMotion === "mid-market"}
                 />
                 <OptionCard
                   id="enterprise"
                   title="Enterprise"
-                  desc="Longer cycles, complex procurement, many buyers."
+                  desc="Longer cycles, complex procurement."
                   active={salesMotion === "enterprise"}
                 />
               </RadioGroup>
@@ -85,7 +93,7 @@ export default function ConfigureSalesProcessStep() {
                 <OptionCard
                   id="meddic"
                   title="MEDDIC"
-                  desc="Metrics, Economic Buyer, Decision Criteria, Identify Pain, Champion."
+                  desc="Metrics, Buyer, Criteria, Pain, Champion."
                   active={framework === "meddic"}
                 />
                 <OptionCard
@@ -100,9 +108,8 @@ export default function ConfigureSalesProcessStep() {
         </div>
       </div>
 
-      {/* ===== RIGHT SIDE (Scoring Preview) ===== */}
+      {/* RIGHT SIDE */}
       <div className="lg:w-96 flex flex-col justify-start pt-[5.25rem]">
-        {/* Pushes down the preview card to align with the Sales Motion card */}
         <Card className="border border-border bg-muted/30 rounded-xl h-fit">
           <CardHeader>
             <CardTitle className="text-base font-medium">Scoring Preview</CardTitle>
@@ -115,13 +122,12 @@ export default function ConfigureSalesProcessStep() {
             <SliderGroup label="Fit (ICP Match)" value={80} />
             <SliderGroup label="Pain/Impact Evidence" value={65} />
             <SliderGroup label="Timeline/Urgency" value={70} />
-            <SliderGroup label="Engagement (Meetings/Replies)" value={90} />
+            <SliderGroup label="Engagement" value={90} />
             <SliderGroup label="Champion Strength" value={85} />
             <SliderGroup label="Deal Economics" value={75} />
 
             <p className="text-xs text-muted-foreground mt-4">
-              These weights are based on{" "}
-              <strong>Mid-Market + MEDDIC</strong> defaults.
+              Based on <strong>{salesMotion} + {framework}</strong> defaults.
             </p>
           </CardContent>
         </Card>
@@ -131,7 +137,6 @@ export default function ConfigureSalesProcessStep() {
 }
 
 // ===== Subcomponents =====
-
 function OptionCard({
   id,
   title,
