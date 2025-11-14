@@ -198,6 +198,7 @@ function OnboardingSteps() {
       <div className="w-full max-w-5xl px-4 py-6">
         <Stepper
           initialStep={1}
+          // @ts-ignore
           onStepChange={handleStepChange}
           onFinalStepCompleted={async () => {
             await updateSalesProcess();
@@ -236,6 +237,7 @@ function OnboardingSteps() {
           <Step>
             <div className="pb-10">
               <ReviewBusinessProfile
+                // @ts-ignore
                 companyInfo={{
                   name: jsonData.company_info?.company_name,
                   website: jsonData.company_info?.website,

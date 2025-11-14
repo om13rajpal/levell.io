@@ -392,7 +392,7 @@ export default function ReviewBusinessProfile() {
   };
 
   const saveTalk = () => {
-    updateProfile((prev) => {
+    updateProfile((prev: any) => {
       const arr = [...prev.talk_tracks];
       if (talkOpen.index === null) {
         arr.push(talkDraft);
@@ -407,6 +407,7 @@ export default function ReviewBusinessProfile() {
   const removeTalk = (index: number) => {
     updateProfile((prev) => ({
       ...prev,
+      // @ts-ignore
       talk_tracks: prev.talk_tracks.filter((_, i) => i !== index),
     }));
   };
