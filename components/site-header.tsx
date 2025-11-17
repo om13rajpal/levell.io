@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 
 export function SiteHeader({ heading }: { heading?: string }) {
   return (
@@ -13,6 +14,7 @@ export function SiteHeader({ heading }: { heading?: string }) {
         />
         <h1 className="text-base font-medium">{heading}</h1>
         <div className="ml-auto flex items-center gap-2">
+          <AnimatedThemeToggler className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-md border bg-muted/60 text-muted-foreground transition-colors hover:bg-muted" />
           <Button variant="ghost" asChild size="sm" className="hidden sm:flex">
             <a
               href="https://agiready.io"

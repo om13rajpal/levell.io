@@ -19,11 +19,12 @@ export default function TeamInvitePage() {
   const router = useRouter();
   const params = useParams();
 
-  const adminId = params?.id as string;
-  console.log("ADMIN ID:", adminId);
+  const teamId = params?.id as string;
+  console.log("TEAM ID:", teamId);
 
   const [loading, setLoading] = useState(true);
-  const [admin, setAdmin] = useState<any>(null);
+  const [team, setTeam] = useState<any>(null);
+  const [owner, setOwner] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [alreadyMember, setAlreadyMember] = useState(false);
   const [error, setError] = useState("");
@@ -46,13 +47,13 @@ export default function TeamInvitePage() {
   };
 
   // ---------------------------------------------------------
-  // Fetch Admin details via adminId
+  // Fetch Team + Owner details
   // ---------------------------------------------------------
-  const fetchAdminUser = async () => {
+  const fetchTeam = async () => {
     const { data, error } = await supabase
-      .from("users")
-      .select("id, name, email, team_members")
-      .eq("id", adminId)
+      .from("teams")
+      .select("*")
+      .eq("id", teamId)
       .single();
 
     if (error || !data) {
@@ -60,43 +61,53 @@ export default function TeamInvitePage() {
       return;
     }
 
-    setAdmin(data);
+    setTeam(data);
+
+    if (data.owner) {
+      const { data: ownerRow } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("id", data.owner)
+        .maybeSingle();
+
+      if (ownerRow) setOwner(ownerRow);
+    }
   };
 
   // ---------------------------------------------------------
   // On mount → fetch user & admin
   // ---------------------------------------------------------
   useEffect(() => {
-    if (!adminId) return;
+    if (!teamId) return;
 
     (async () => {
       await fetchCurrentUser();
-      await fetchAdminUser();
+      await fetchTeam();
       setLoading(false);
     })();
-  }, [adminId]);
+  }, [teamId]);
 
   // ---------------------------------------------------------
   // Check if the logged-in user is ALREADY a team member
   // ---------------------------------------------------------
   useEffect(() => {
-    if (!admin || !user) return;
+    if (!team || !user) return;
 
-    const team = admin.team_members || [];
+    const members = team.members || [];
 
-    if (team.includes(user.id)) {
+    if (members.includes(user.id)) {
       console.log("User is already a member");
       setAlreadyMember(true);
     }
-  }, [admin, user]);
+  }, [team, user]);
 
   // ---------------------------------------------------------
   // Accept Invite
   // ---------------------------------------------------------
   const handleAcceptInvite = async () => {
-    if (!admin || !user) return;
+    if (!team || !user) return;
 
-    const members = admin.team_members || [];
+    const members = team.members || [];
 
     // user already exists in the team
     if (members.includes(user.id)) {
@@ -104,12 +115,12 @@ export default function TeamInvitePage() {
       return;
     }
 
-    const updated = [...members, user.id];
+    const updated = Array.from(new Set([...members, user.id]));
 
     const { error } = await supabase
-      .from("users")
-      .update({ team_members: updated })
-      .eq("id", adminId);
+      .from("teams")
+      .update({ members: updated })
+      .eq("id", team.id);
 
     if (error) {
       setError("Could not accept invite: " + error.message);
@@ -120,7 +131,7 @@ export default function TeamInvitePage() {
   };
 
   // 🟡 UI: Loading
-  if (loading || !adminId) {
+  if (loading || !teamId) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground animate-pulse">Loading invite…</p>
@@ -153,7 +164,10 @@ export default function TeamInvitePage() {
             </CardTitle>
             <CardDescription>
               You already have access to{" "}
-              <span className="font-semibold text-primary">{admin?.name}</span>'s team.
+              <span className="font-semibold text-primary">
+                {team?.team_name || owner?.name}
+              </span>
+              's team.
             </CardDescription>
           </CardHeader>
 
@@ -181,7 +195,7 @@ export default function TeamInvitePage() {
           </CardTitle>
 
           <CardDescription className="text-center text-base">
-            Join <span className="font-semibold text-primary">{admin?.name}</span>'s team
+            Join <span className="font-semibold text-primary">{team?.team_name || owner?.name}</span>'s team
           </CardDescription>
         </CardHeader>
 

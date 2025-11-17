@@ -175,23 +175,28 @@ export default function TeamPage() {
       setUser(u);
 
       // get team where user is inside team.members
-      const { data: teamRow } = await supabase
-        .rpc("get_team_for_user", { uid: userId });
+      const { data: teamRow, error: teamError } = await supabase
+        .from("teams")
+        .select("*")
+        .contains("members", [userId])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (!teamRow) {
+      if (!teamRow || teamError) {
         setTeam(null);
         return;
       }
 
-      setTeam(teamRow);
+      setTeam(teamRow as Team);
       setSettingsTeamName(teamRow.team_name);
 
       // load members
-      if (teamRow.members.length > 0) {
+      if ((teamRow.members || []).length > 0) {
         const { data: m } = await supabase
           .from("users")
           .select("id, name, email, created_at")
-          .in("id", teamRow.members);
+          .in("id", teamRow.members as string[]);
         setMembers(m || []);
       }
 
@@ -212,7 +217,7 @@ export default function TeamPage() {
         .eq("team_id", teamRow.id);
 
       setTags(
-        tagRows!.map((t: any) => ({
+        (tagRows || []).map((t: any) => ({
           ...t,
           permissions: { ...defaultPermissions, ...(t.permissions || {}) },
         }))
@@ -248,7 +253,7 @@ export default function TeamPage() {
     const members = [userId];
 
     const { data, error } = await supabase
-      .from("team")
+      .from("teams")
       .insert({
         team_name: createTeamName.trim(),
         owner: userId,
@@ -276,7 +281,7 @@ export default function TeamPage() {
     if (isNaN(teamIdNum)) return alert("Team ID must be numeric");
 
     const { data: teamRow, error } = await supabase
-      .from("team")
+      .from("teams")
       .select("id, members")
       .eq("id", teamIdNum)
       .single();
@@ -287,7 +292,7 @@ export default function TeamPage() {
     if (!newMembers.includes(userId)) newMembers.push(userId);
 
     await supabase
-      .from("team")
+      .from("teams")
       .update({ members: newMembers })
       .eq("id", teamIdNum);
 
@@ -306,7 +311,7 @@ export default function TeamPage() {
     const newMembers = team.members.filter((id) => id !== userId);
 
     await supabase
-      .from("team")
+      .from("teams")
       .update({ members: newMembers })
       .eq("id", team.id);
 
@@ -478,7 +483,7 @@ export default function TeamPage() {
     if (!team) return;
 
     await supabase
-      .from("team")
+      .from("teams")
       .update({ team_name: settingsTeamName.trim() })
       .eq("id", team.id);
 
@@ -499,64 +504,77 @@ export default function TeamPage() {
 
           {/* NOT IN TEAM */}
           {!isInTeam && (
-            <div className="flex flex-col items-center gap-6 mt-12">
+            <Card className="mt-10 border-dashed bg-muted/40 shadow-none">
+              <CardHeader className="text-center space-y-2">
+                <CardTitle className="text-xl font-semibold">
+                  Build your first team
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Create a workspace for your crew or join an existing one to
+                  start collaborating.
+                </p>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+                {/* CREATE TEAM BUTTON */}
+                <Dialog open={openCreateTeam} onOpenChange={setOpenCreateTeam}>
+                  <DialogTrigger asChild>
+                    <Button className="w-full sm:w-auto px-6 py-5 text-lg flex gap-2">
+                      <Plus className="h-5 w-5" /> Create Team
+                    </Button>
+                  </DialogTrigger>
 
-              {/* CREATE TEAM BUTTON */}
-              <Dialog open={openCreateTeam} onOpenChange={setOpenCreateTeam}>
-                <DialogTrigger asChild>
-                  <Button className="px-6 py-5 text-lg flex gap-2">
-                    <Plus className="h-5 w-5" /> Create Team
-                  </Button>
-                </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Create Team</DialogTitle>
+                    </DialogHeader>
 
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Create Team</DialogTitle>
-                  </DialogHeader>
+                    <div className="space-y-3 mt-2">
+                      <Label>Team Name</Label>
+                      <Input
+                        placeholder="Sales Team, RevOps Squad..."
+                        value={createTeamName}
+                        onChange={(e) => setCreateTeamName(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="space-y-3 mt-2">
-                    <Label>Team Name</Label>
-                    <Input
-                      placeholder="Sales Team, RevOps Squad..."
-                      value={createTeamName}
-                      onChange={(e) => setCreateTeamName(e.target.value)}
-                    />
-                  </div>
+                    <DialogFooter>
+                      <Button onClick={handleCreateTeam}>Create</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
-                  <DialogFooter>
-                    <Button onClick={handleCreateTeam}>Create</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                {/* JOIN TEAM BUTTON */}
+                <Dialog open={openJoinTeam} onOpenChange={setOpenJoinTeam}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto px-6 py-5 text-lg"
+                    >
+                      Join Team
+                    </Button>
+                  </DialogTrigger>
 
-              {/* JOIN TEAM BUTTON */}
-              <Dialog open={openJoinTeam} onOpenChange={setOpenJoinTeam}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="px-6 py-5 text-lg">
-                    Join Team
-                  </Button>
-                </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Join Team</DialogTitle>
+                    </DialogHeader>
 
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Join Team</DialogTitle>
-                  </DialogHeader>
+                    <div className="space-y-3 mt-2">
+                      <Label>Team ID</Label>
+                      <Input
+                        placeholder="Numeric Team ID"
+                        value={joinTeamId}
+                        onChange={(e) => setJoinTeamId(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="space-y-3 mt-2">
-                    <Label>Team ID</Label>
-                    <Input
-                      placeholder="Numeric Team ID"
-                      value={joinTeamId}
-                      onChange={(e) => setJoinTeamId(e.target.value)}
-                    />
-                  </div>
-
-                  <DialogFooter>
-                    <Button onClick={handleJoinTeam}>Join</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
+                    <DialogFooter>
+                      <Button onClick={handleJoinTeam}>Join</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
           )}
 
           {/* IN TEAM */}
