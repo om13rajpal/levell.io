@@ -68,14 +68,10 @@ export default function IntegrationsPage() {
 
     const { error } = await supabase
       .from("api_keys")
-      .upsert(
-        {
-          user_id: userId,
-          ...payload,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
+      .upsert({
+        user_id: userId,
+        ...payload,
+      }, { onConflict: "user_id" });
 
     if (error) {
       toast.error(`Could not save key: ${error.message}`);
