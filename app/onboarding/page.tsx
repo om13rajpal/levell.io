@@ -18,13 +18,18 @@ function OnboardingSteps() {
   const router = useRouter();
   const companyInfoRef = useRef<any>(null);
 
+  const initialStep =
+    typeof window !== "undefined"
+      ? Number(localStorage.getItem("onboarding_current_step") || "1")
+      : 1;
+
   const [signupData, setSignupData] = useState({
     fullname: "",
     email: "",
   });
   const [signupError, setSignupError] = useState<string | null>(null);
 
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(initialStep);
   const [isNextLoading, setIsNextLoading] = useState(false);
 
   const [salesProcess, setSalesProcess] = useState({
@@ -32,7 +37,10 @@ function OnboardingSteps() {
     framework: "meddic",
   });
 
-  const [firefliesConnected, setFirefliesConnected] = useState<boolean>(false);
+  const [firefliesConnected, setFirefliesConnected] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("onboarding_fireflies_connected") === "true";
+  });
   const [isSavingIntegration, setIsSavingIntegration] = useState(false);
 
   const [companyInfo, setCompanyInfo] = useState({
@@ -42,30 +50,10 @@ function OnboardingSteps() {
   });
   const [companyError, setCompanyError] = useState<string | null>(null);
   const [isWebhookPending, setIsWebhookPending] = useState(false);
-  const [hasWebhookData, setHasWebhookData] = useState(false);
-  const [jsonData, setJsonData] = useState<any>({});
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const savedStep = Number(localStorage.getItem("onboarding_current_step") || "1");
-    setCurrentStep(Number.isNaN(savedStep) ? 1 : savedStep);
-
-    const savedWebhookMarkdown = Boolean(localStorage.getItem("webhook_markdown"));
-    setHasWebhookData(savedWebhookMarkdown);
-
-    const savedCompanyJson = localStorage.getItem("company_json_data");
-    if (savedCompanyJson) {
-      try {
-        setJsonData(JSON.parse(savedCompanyJson));
-      } catch (error) {
-        console.error("Failed to parse saved company JSON", error);
-      }
-    }
-
-    const fireflies = localStorage.getItem("onboarding_fireflies_connected") === "true";
-    setFirefliesConnected(fireflies);
-  }, []);
+  const [hasWebhookData, setHasWebhookData] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return Boolean(localStorage.getItem("webhook_markdown"));
+  });
 
   // Get stored user details
   const getStoredAuthData = () => {
@@ -122,9 +110,42 @@ function OnboardingSteps() {
       }
     };
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedSignup = localStorage.getItem("onboarding_signup");
+    if (savedSignup) {
+      const parsed = JSON.parse(savedSignup);
+      setSignupData(parsed);
+    } else {
+      setSignupData({ fullname: storedName, email: storedEmail });
+    }
+
+    const savedCompany = localStorage.getItem("onboarding_company_info");
+    if (savedCompany) {
+      const parsed = JSON.parse(savedCompany);
+      setCompanyInfo(parsed);
+    }
+  }, [storedEmail, storedName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      const markdown = localStorage.getItem("webhook_markdown");
+      if (markdown) {
+        setHasWebhookData(true);
+        setIsWebhookPending(false);
+      }
+    };
+
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
   }, []);
+
+  // Parse company JSON
+  const jsonData =
+    typeof window !== "undefined"
+      ? JSON.parse(localStorage.getItem("company_json_data") || "{}")
+      : {};
 
   // ---- Save Basic User Info ----
   const updateUserInSupabase = async (fullname: string, email: string) => {
@@ -336,8 +357,8 @@ function OnboardingSteps() {
           <Step>
             <div className="pb-10">
               <SignupForm
-                fullname={signupData.fullname ?? storedAuth.name}
-                email={signupData.email ?? storedAuth.email}
+                fullname={signupData.fullname || storedName}
+                email={signupData.email || storedEmail}
                 onChange={(data) => {
                   setSignupData(data);
                   localStorage.setItem("onboarding_signup", JSON.stringify(data));

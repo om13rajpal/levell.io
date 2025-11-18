@@ -128,22 +128,15 @@ export default function Stepper({
               )}
               <button
                 onClick={isLastStep ? handleComplete : handleNext}
-                className={`next-button ${nextButtonDisabled || nextLoading ? 'disabled' : ''}`}
-                disabled={nextButtonDisabled || nextLoading || nextButtonProps.disabled}
+                className={`next-button ${nextButtonDisabled ? 'disabled' : ''}`}
+                disabled={nextButtonDisabled || nextButtonProps.disabled}
                 {...nextButtonProps}
               >
-                {nextLoading ? (
-                  nextLoadingContent || (
-                    <span className="loader-wrapper" aria-label="loading">
-                      <span className="loader loader-dark" />
-                      <span>Continue</span>
-                    </span>
-                  )
-                ) : isLastStep ? (
-                  'Complete'
-                ) : (
-                  nextButtonText
-                )}
+                {nextLoading
+                  ? nextLoadingContent || <span className="loader" aria-label="loading" />
+                  : isLastStep
+                    ? 'Complete'
+                    : nextButtonText}
               </button>
             </div>
           </div>
