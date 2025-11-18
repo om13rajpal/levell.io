@@ -1,19 +1,41 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
 
-const CompanyInfoStep = forwardRef((_props, ref) => {
-  const [website, setWebsite] = useState("");
-  const [companyName, setCompanyName] = useState("");
+interface CompanyInfoStepProps {
+  initialCompanyName?: string;
+  initialWebsite?: string;
+  initialCompanyEmail?: string;
+  onChange?: (data: {
+    website: string;
+    companyName: string;
+    companyEmail: string;
+  }) => void;
+}
+
+const CompanyInfoStep = forwardRef((props: CompanyInfoStepProps, ref) => {
+  const [website, setWebsite] = useState(props.initialWebsite || "");
+  const [companyName, setCompanyName] = useState(props.initialCompanyName || "");
+  const [companyEmail, setCompanyEmail] = useState(props.initialCompanyEmail || "");
+
+  useEffect(() => {
+    setWebsite(props.initialWebsite || "");
+    setCompanyName(props.initialCompanyName || "");
+    setCompanyEmail(props.initialCompanyEmail || "");
+  }, [props.initialCompanyEmail, props.initialCompanyName, props.initialWebsite]);
 
   useImperativeHandle(ref, () => ({
-    getCompanyInfo: () => ({ website, companyName }),
+    getCompanyInfo: () => ({ website, companyName, companyEmail }),
   }));
+
+  useEffect(() => {
+    props.onChange?.({ website, companyName, companyEmail });
+  }, [website, companyName, companyEmail, props]);
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 w-full max-w-6xl mx-auto p-6 bg-background">
@@ -39,6 +61,22 @@ const CompanyInfoStep = forwardRef((_props, ref) => {
                 placeholder="Enter your company name"
                 className="h-10"
                 onChange={(e) => setCompanyName(e.target.value)}
+              />
+            </div>
+
+            {/* Company Email */}
+            <div className="space-y-2">
+              <Label htmlFor="company-email">
+                Company email{" "}
+                <span className="text-red-500 text-xs align-top">Required</span>
+              </Label>
+              <Input
+                id="company-email"
+                type="email"
+                placeholder="hello@yourcompany.com"
+                className="h-10"
+                value={companyEmail}
+                onChange={(e) => setCompanyEmail(e.target.value)}
               />
             </div>
 

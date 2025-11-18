@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -25,10 +25,43 @@ import { ArrowUp, Plug } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
-export default function ConnectTools() {
+interface ConnectToolsProps {
+  onFirefliesStatusChange?: (connected: boolean) => void;
+  onSavingChange?: (saving: boolean) => void;
+}
+
+export default function ConnectTools({
+  onFirefliesStatusChange,
+  onSavingChange,
+}: ConnectToolsProps) {
   const [firefliesKey, setFirefliesKey] = useState("");
   const [openAIKey, setOpenAIKey] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const loadKeys = async () => {
+      const { data: session } = await supabase.auth.getUser();
+      if (!session?.user) return;
+
+      const { data } = await supabase
+        .from("api_keys")
+        .select("fireflies, openapi")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      if (data?.fireflies) {
+        setFirefliesKey(data.fireflies);
+        localStorage.setItem("onboarding_fireflies_connected", "true");
+        onFirefliesStatusChange?.(true);
+      }
+
+      if (data?.openapi) {
+        setOpenAIKey(data.openapi);
+      }
+    };
+
+    loadKeys();
+  }, [onFirefliesStatusChange]);
 
   // 🔥 Save key to Supabase
   const saveKeyToSupabase = async (
@@ -42,12 +75,14 @@ export default function ConnectTools() {
 
     try {
       setIsSaving(true);
+      onSavingChange?.(true);
 
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
         toast.error("No authenticated user found.");
+        onSavingChange?.(false);
         return;
       }
 
@@ -67,6 +102,10 @@ export default function ConnectTools() {
       } else {
         if (type === "fireflies") setFirefliesKey(key);
         if (type === "openai") setOpenAIKey(key);
+        if (type === "fireflies") {
+          localStorage.setItem("onboarding_fireflies_connected", "true");
+          onFirefliesStatusChange?.(true);
+        }
         toast.success(
           `${type === "fireflies" ? "Fireflies" : "OpenAI"} key saved!`
         );
@@ -76,6 +115,7 @@ export default function ConnectTools() {
       toast.error("Unexpected error saving key.");
     } finally {
       setIsSaving(false);
+      onSavingChange?.(false);
     }
   };
 
