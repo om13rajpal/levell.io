@@ -1,44 +1,121 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 import {
   Card,
   CardHeader,
   CardTitle,
   CardDescription,
   CardContent,
+  CardFooter,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Power, KeyRound } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { KeyRound, PlugZap } from "lucide-react";
 
 export default function IntegrationsPage() {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [firefliesKey, setFirefliesKey] = useState("");
+  const [openAiKey, setOpenAiKey] = useState("");
+  const [saving, setSaving] = useState<null | "fireflies" | "openai">(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+      setUserId(user.id);
+
+      const { data } = await supabase
+        .from("api_keys")
+        .select("fireflies, openapi")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (data?.fireflies) setFirefliesKey(data.fireflies);
+      if (data?.openapi) setOpenAiKey(data.openapi);
+    };
+
+    loadUser();
+  }, []);
+
+  const saveKey = async (
+    type: "fireflies" | "openai",
+    value: string
+  ) => {
+    if (!userId) {
+      toast.error("Please sign in to save integration keys.");
+      return;
+    }
+
+    if (!value.trim()) {
+      toast.error("API key cannot be empty.");
+      return;
+    }
+
+    setSaving(type);
+
+    const payload =
+      type === "fireflies"
+        ? { fireflies: value.trim() }
+        : { openapi: value.trim() };
+
+    const { error } = await supabase
+      .from("api_keys")
+      .upsert({
+        user_id: userId,
+        ...payload,
+      }, { onConflict: "user_id" });
+
+    if (error) {
+      toast.error(`Could not save key: ${error.message}`);
+    } else {
+      toast.success("Key updated successfully.");
+    }
+
+    setSaving(null);
+  };
+
   return (
-    <div className="mx-auto w-full max-w-6xl p-6 sm:p-8 space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
-        <p className="text-sm text-muted-foreground">
-          Connect and manage external tools that power your workspace.
-        </p>
+    <div className="mx-auto w-full max-w-5xl p-6 sm:p-8 space-y-8">
+      <header className="space-y-2">
+        <div className="inline-flex items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-xs text-muted-foreground">
+          <PlugZap className="h-3.5 w-3.5" />
+          Connected workspaces
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Integrations
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Securely store and manage the API keys that power your automations.
+          </p>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <IntegrationCard
-          name="Fireflies"
-          status="Active"
-          lastSynced="2h ago"
-          actions={["Test", "Reconnect", "Disconnect"]}
+          title="Fireflies"
+          description="Paste your Fireflies API token to sync meeting data."
+          value={firefliesKey}
+          onChange={setFirefliesKey}
+          onSave={() => saveKey("fireflies", firefliesKey)}
+          saving={saving === "fireflies"}
         />
+
         <IntegrationCard
-          name="HubSpot"
-          status="Needs Attention"
-          lastSynced="1d ago"
-          actions={["Test", "Reconnect", "Disconnect"]}
-          variant="warning"
-        />
-        <IntegrationCard
-          name="OpenAI"
-          status="Active"
-          lastSynced="30m ago"
-          actions={["Test", "Rotate Key", "Disconnect"]}
+          title="OpenAI"
+          description="Use your own OpenAI key for summarization and analysis."
+          value={openAiKey}
+          onChange={setOpenAiKey}
+          onSave={() => saveKey("openai", openAiKey)}
+          saving={saving === "openai"}
         />
       </div>
     </div>
@@ -46,67 +123,50 @@ export default function IntegrationsPage() {
 }
 
 function IntegrationCard({
-  name,
-  status,
-  lastSynced,
-  actions,
-  variant = "success",
+  title,
+  description,
+  value,
+  onChange,
+  onSave,
+  saving,
 }: {
-  name: string;
-  status: string;
-  lastSynced: string;
-  actions: string[];
-  variant?: "success" | "warning";
+  title: string;
+  description: string;
+  value: string;
+  onChange: (val: string) => void;
+  onSave: () => void;
+  saving: boolean;
 }) {
-  const color =
-    variant === "success"
-      ? "bg-emerald-950/40 text-emerald-300 border-emerald-900"
-      : "bg-amber-950/40 text-amber-300 border-amber-900";
-
-  const icons: Record<string, any> = {
-    Reconnect: RefreshCw,
-    Disconnect: Power,
-    "Rotate Key": KeyRound,
-  };
-
   return (
-    <Card className="border-border/60 bg-card/60 shadow-sm backdrop-blur-sm">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base font-medium">{name}</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Last synced {lastSynced}
-            </p>
-          </div>
-          <span
-            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${color}`}
-          >
-            {status}
-          </span>
-        </div>
+    <Card className="border-border/70 bg-card/70 shadow-sm">
+      <CardHeader className="space-y-2">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <KeyRound className="h-5 w-5 text-primary" />
+          {title}
+        </CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-wrap gap-2">
-        {actions.map((label, idx) => {
-          const Icon = icons[label] || null;
-          return (
-            <Button
-              key={idx}
-              size="sm"
-              variant={
-                label === "Disconnect"
-                  ? "outline"
-                  : label === "Reconnect"
-                  ? "secondary"
-                  : "default"
-              }
-              className="gap-2"
-            >
-              {Icon && <Icon className="h-4 w-4" />} {label}
-            </Button>
-          );
-        })}
+      <CardContent className="space-y-3">
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+          API key
+        </Label>
+        <Input
+          type="password"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="sk-..."
+        />
       </CardContent>
+      <CardFooter className="flex flex-col gap-3">
+        <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
+          <span>Stored securely in Supabase</span>
+          <Separator orientation="vertical" className="h-4" />
+          <span className="text-primary">Required for automation</span>
+        </div>
+        <Button className="w-full" onClick={onSave} disabled={saving}>
+          {saving ? "Saving..." : "Save key"}
+        </Button>
+      </CardFooter>
     </Card>
   );
 }

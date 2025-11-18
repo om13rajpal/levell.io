@@ -56,7 +56,6 @@ type UserRow = {
   id: string;
   name: string | null;
   email: string;
-  created_at: string;
 };
 
 type TagPermissions = {
@@ -168,30 +167,35 @@ export default function TeamPage() {
       // get user
       const { data: u } = await supabase
         .from("users")
-        .select("id, name, email, created_at")
+        .select("id, name, email")
         .eq("id", userId)
         .single();
 
       setUser(u);
 
       // get team where user is inside team.members
-      const { data: teamRow } = await supabase
-        .rpc("get_team_for_user", { uid: userId });
+      const { data: teamRow, error: teamError } = await supabase
+        .from("teams")
+        .select("*")
+        .contains("members", [userId])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (!teamRow) {
+      if (!teamRow || teamError) {
         setTeam(null);
         return;
       }
 
-      setTeam(teamRow);
+      setTeam(teamRow as Team);
       setSettingsTeamName(teamRow.team_name);
 
       // load members
-      if (teamRow.members.length > 0) {
+      if ((teamRow.members || []).length > 0) {
         const { data: m } = await supabase
           .from("users")
-          .select("id, name, email, created_at")
-          .in("id", teamRow.members);
+          .select("id, name, email")
+          .in("id", teamRow.members as string[]);
         setMembers(m || []);
       }
 
@@ -199,7 +203,7 @@ export default function TeamPage() {
       if (teamRow.owner) {
         const { data: owner } = await supabase
           .from("users")
-          .select("id, name, email, created_at")
+          .select("id, name, email")
           .eq("id", teamRow.owner)
           .single();
         setOwnerUser(owner);
@@ -212,7 +216,7 @@ export default function TeamPage() {
         .eq("team_id", teamRow.id);
 
       setTags(
-        tagRows!.map((t: any) => ({
+        (tagRows || []).map((t: any) => ({
           ...t,
           permissions: { ...defaultPermissions, ...(t.permissions || {}) },
         }))
@@ -248,7 +252,7 @@ export default function TeamPage() {
     const members = [userId];
 
     const { data, error } = await supabase
-      .from("team")
+      .from("teams")
       .insert({
         team_name: createTeamName.trim(),
         owner: userId,
@@ -276,7 +280,7 @@ export default function TeamPage() {
     if (isNaN(teamIdNum)) return alert("Team ID must be numeric");
 
     const { data: teamRow, error } = await supabase
-      .from("team")
+      .from("teams")
       .select("id, members")
       .eq("id", teamIdNum)
       .single();
@@ -287,7 +291,7 @@ export default function TeamPage() {
     if (!newMembers.includes(userId)) newMembers.push(userId);
 
     await supabase
-      .from("team")
+      .from("teams")
       .update({ members: newMembers })
       .eq("id", teamIdNum);
 
@@ -306,7 +310,7 @@ export default function TeamPage() {
     const newMembers = team.members.filter((id) => id !== userId);
 
     await supabase
-      .from("team")
+      .from("teams")
       .update({ members: newMembers })
       .eq("id", team.id);
 
@@ -478,7 +482,7 @@ export default function TeamPage() {
     if (!team) return;
 
     await supabase
-      .from("team")
+      .from("teams")
       .update({ team_name: settingsTeamName.trim() })
       .eq("id", team.id);
 
@@ -499,132 +503,155 @@ export default function TeamPage() {
 
           {/* NOT IN TEAM */}
           {!isInTeam && (
-            <div className="flex flex-col items-center gap-6 mt-12">
+            <Card className="mt-10 border-dashed bg-muted/40 shadow-none">
+              <CardHeader className="text-center space-y-2">
+                <CardTitle className="text-xl font-semibold">
+                  Build your first team
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Create a workspace for your crew or join an existing one to
+                  start collaborating.
+                </p>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+                {/* CREATE TEAM BUTTON */}
+                <Dialog open={openCreateTeam} onOpenChange={setOpenCreateTeam}>
+                  <DialogTrigger asChild>
+                    <Button className="w-full sm:w-auto px-6 py-5 text-lg flex gap-2">
+                      <Plus className="h-5 w-5" /> Create Team
+                    </Button>
+                  </DialogTrigger>
 
-              {/* CREATE TEAM BUTTON */}
-              <Dialog open={openCreateTeam} onOpenChange={setOpenCreateTeam}>
-                <DialogTrigger asChild>
-                  <Button className="px-6 py-5 text-lg flex gap-2">
-                    <Plus className="h-5 w-5" /> Create Team
-                  </Button>
-                </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Create Team</DialogTitle>
+                    </DialogHeader>
 
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Create Team</DialogTitle>
-                  </DialogHeader>
+                    <div className="space-y-3 mt-2">
+                      <Label>Team Name</Label>
+                      <Input
+                        placeholder="Sales Team, RevOps Squad..."
+                        value={createTeamName}
+                        onChange={(e) => setCreateTeamName(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="space-y-3 mt-2">
-                    <Label>Team Name</Label>
-                    <Input
-                      placeholder="Sales Team, RevOps Squad..."
-                      value={createTeamName}
-                      onChange={(e) => setCreateTeamName(e.target.value)}
-                    />
-                  </div>
+                    <DialogFooter>
+                      <Button onClick={handleCreateTeam}>Create</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
-                  <DialogFooter>
-                    <Button onClick={handleCreateTeam}>Create</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                {/* JOIN TEAM BUTTON */}
+                <Dialog open={openJoinTeam} onOpenChange={setOpenJoinTeam}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto px-6 py-5 text-lg"
+                    >
+                      Join Team
+                    </Button>
+                  </DialogTrigger>
 
-              {/* JOIN TEAM BUTTON */}
-              <Dialog open={openJoinTeam} onOpenChange={setOpenJoinTeam}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="px-6 py-5 text-lg">
-                    Join Team
-                  </Button>
-                </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Join Team</DialogTitle>
+                    </DialogHeader>
 
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Join Team</DialogTitle>
-                  </DialogHeader>
+                    <div className="space-y-3 mt-2">
+                      <Label>Team ID</Label>
+                      <Input
+                        placeholder="Numeric Team ID"
+                        value={joinTeamId}
+                        onChange={(e) => setJoinTeamId(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="space-y-3 mt-2">
-                    <Label>Team ID</Label>
-                    <Input
-                      placeholder="Numeric Team ID"
-                      value={joinTeamId}
-                      onChange={(e) => setJoinTeamId(e.target.value)}
-                    />
-                  </div>
-
-                  <DialogFooter>
-                    <Button onClick={handleJoinTeam}>Join</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
+                    <DialogFooter>
+                      <Button onClick={handleJoinTeam}>Join</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
           )}
 
           {/* IN TEAM */}
           {isInTeam && team && (
             <>
               {/* TEAM HEADER */}
-              <Card>
-                <CardHeader className="flex justify-between items-center">
-                  <div>
-                    <CardTitle className="text-lg">
-                      {team.team_name}
-                    </CardTitle>
-                    <p className="text-xs text-muted-foreground">
-                      Team ID: {team.id} · {members.length} members
-                    </p>
-
-                    {ownerUser && !isOwner && (
-                      <p className="text-xs text-muted-foreground">
-                        Team Leader:{" "}
-                        <span className="font-medium">
-                          {ownerUser.name || ownerUser.email}
-                        </span>
+              <Card className="overflow-hidden border-border/70 bg-card/80 shadow-sm">
+                <CardHeader className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-2">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
+                      <Users className="h-3.5 w-3.5" />
+                      Collaborative workspace
+                    </div>
+                    <div className="space-y-1">
+                      <CardTitle className="text-2xl font-semibold">
+                        {team.team_name}
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Team ID: {team.id} · {members.length} members
                       </p>
-                    )}
+                      {ownerUser && (
+                        <p className="text-sm text-muted-foreground">
+                          Owner: {ownerUser.name || ownerUser.email}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex gap-2">
-                    {isOwner && (
-                      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-                        <DialogTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            <Settings className="h-4 w-4 mr-1" />
-                            Settings
-                          </Button>
-                        </DialogTrigger>
+                  <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+                      <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      Active team
+                    </div>
 
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Team Settings</DialogTitle>
-                          </DialogHeader>
+                    <div className="flex flex-wrap gap-2">
+                      {isOwner && (
+                        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                          <DialogTrigger asChild>
+                            <Button variant="outline" size="sm" className="gap-2">
+                              <Settings className="h-4 w-4" />
+                              Settings
+                            </Button>
+                          </DialogTrigger>
 
-                          <div className="space-y-4 mt-3">
-                            <Label>Team Name</Label>
-                            <Input
-                              value={settingsTeamName}
-                              onChange={(e) =>
-                                setSettingsTeamName(e.target.value)
-                              }
-                            />
-                          </div>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Team Settings</DialogTitle>
+                            </DialogHeader>
 
-                          <DialogFooter>
-                            <Button onClick={saveSettings}>Save</Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    )}
+                            <div className="space-y-4 mt-3">
+                              <Label>Team Name</Label>
+                              <Input
+                                value={settingsTeamName}
+                                onChange={(e) =>
+                                  setSettingsTeamName(e.target.value)
+                                }
+                              />
+                            </div>
 
-                    {!isOwner && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={leaveTeam}
-                      >
-                        <LogOut className="h-4 w-4 mr-1" />
-                        Leave
-                      </Button>
-                    )}
+                            <DialogFooter>
+                              <Button onClick={saveSettings}>Save</Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+                      )}
+
+                      {!isOwner && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="gap-2"
+                          onClick={leaveTeam}
+                        >
+                          <LogOut className="h-4 w-4" />
+                          Leave team
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
               </Card>
@@ -690,8 +717,7 @@ export default function TeamPage() {
                             <TableHead>Name</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead>Tags</TableHead>
-                            <TableHead>Joined</TableHead>
-                            {isOwner && <TableHead />}
+                            {isOwner && <TableHead className="text-right" />}
                           </TableRow>
                         </TableHeader>
 
@@ -724,12 +750,8 @@ export default function TeamPage() {
                                   )}
                                 </TableCell>
 
-                                <TableCell>
-                                  {new Date(m.created_at).toLocaleDateString()}
-                                </TableCell>
-
                                 {isOwner && (
-                                  <TableCell>
+                                  <TableCell className="text-right">
                                     <Button
                                       variant="ghost"
                                       size="sm"
