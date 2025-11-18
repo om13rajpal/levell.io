@@ -20,18 +20,24 @@ interface SignupFormProps extends React.ComponentProps<typeof Card> {
   fullname?: string;
   email?: string;
   onChange?: (data: { fullname: string; email: string }) => void; // ✅ Live change callback
+  error?: string;
 }
 
 export function SignupForm({
   fullname = "",
   email = "",
   onChange,
+  error,
   ...props
 }: SignupFormProps) {
   const [formData, setFormData] = useState({
     fullname,
     email,
   });
+
+  useEffect(() => {
+    setFormData({ fullname, email });
+  }, [fullname, email]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
@@ -88,6 +94,11 @@ export function SignupForm({
                 We&apos;ll use this to contact you. We will not share your email
                 with anyone else.
               </FieldDescription>
+              {error ? (
+                <p className="text-sm text-red-500 mt-1" role="alert">
+                  {error}
+                </p>
+              ) : null}
             </Field>
           </FieldGroup>
         </form>

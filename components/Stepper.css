@@ -1,34 +1,25 @@
 .outer-container {
   display: flex;
+  width: 100%;
   min-height: 100%;
-  flex: 1 1 0%;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 1rem;
-}
-
-@media (min-width: 640px) {
-  .outer-container {
-    aspect-ratio: 4 / 3;
-  }
-}
-
-@media (min-width: 768px) {
-  .outer-container {
-    aspect-ratio: 2 / 1;
-  }
+  overflow: hidden;
 }
 
 .step-circle-container {
   margin-left: auto;
   margin-right: auto;
-  width: 100%;
-  max-width: none;
+  width: min(1100px, 100%);
   border-radius: 2rem;
   box-shadow:
     0 20px 25px -5px rgba(0, 0, 0, 0.1),
     0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .step-indicator-row {
@@ -41,11 +32,13 @@
 .step-content-default {
   position: relative;
   overflow: hidden;
+  width: 100%;
 }
 
 .step-default {
   padding-left: 2rem;
   padding-right: 2rem;
+  padding-bottom: 1rem;
 }
 
 .footer-container {
@@ -105,6 +98,27 @@
 
 .next-button:active {
   background-color: oklch(0.586 0.253 17.585);;
+}
+
+.next-button.disabled,
+.next-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.loader {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-top-color: #fff;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .step-indicator {

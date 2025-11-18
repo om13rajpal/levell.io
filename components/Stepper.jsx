@@ -9,6 +9,7 @@ export default function Stepper({
   children,
   initialStep = 1,
   onStepChange = () => {},
+  beforeNext,
   onFinalStepCompleted = () => {},
   stepCircleContainerClassName = '',
   stepContainerClassName = '',
@@ -18,6 +19,9 @@ export default function Stepper({
   nextButtonProps = {},
   backButtonText = 'Back',
   nextButtonText = 'Continue',
+  nextLoading = false,
+  nextButtonDisabled = false,
+  nextLoadingContent,
   disableStepIndicators = false,
   renderStepIndicator,
   ...rest
@@ -45,11 +49,16 @@ export default function Stepper({
     }
   };
 
-  const handleNext = () => {
-    if (!isLastStep) {
-      setDirection(1);
-      updateStep(currentStep + 1);
+  const handleNext = async () => {
+    if (isLastStep) return;
+
+    if (beforeNext) {
+      const allow = await beforeNext(currentStep + 1);
+      if (!allow) return;
     }
+
+    setDirection(1);
+    updateStep(currentStep + 1);
   };
 
   const handleComplete = () => {
@@ -113,8 +122,17 @@ export default function Stepper({
                   {backButtonText}
                 </button>
               )}
-              <button onClick={isLastStep ? handleComplete : handleNext} className="next-button" {...nextButtonProps}>
-                {isLastStep ? 'Complete' : nextButtonText}
+              <button
+                onClick={isLastStep ? handleComplete : handleNext}
+                className={`next-button ${nextButtonDisabled ? 'disabled' : ''}`}
+                disabled={nextButtonDisabled || nextButtonProps.disabled}
+                {...nextButtonProps}
+              >
+                {nextLoading
+                  ? nextLoadingContent || <span className="loader" aria-label="loading" />
+                  : isLastStep
+                    ? 'Complete'
+                    : nextButtonText}
               </button>
             </div>
           </div>

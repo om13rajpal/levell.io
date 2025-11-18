@@ -18,16 +18,41 @@ function OnboardingSteps() {
   const router = useRouter();
   const companyInfoRef = useRef<any>(null);
 
+  const initialStep =
+    typeof window !== "undefined"
+      ? Number(localStorage.getItem("onboarding_current_step") || "1")
+      : 1;
+
   const [signupData, setSignupData] = useState({
     fullname: "",
     email: "",
   });
+  const [signupError, setSignupError] = useState<string | null>(null);
 
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(initialStep);
+  const [isNextLoading, setIsNextLoading] = useState(false);
 
   const [salesProcess, setSalesProcess] = useState({
     sales_motion: "mid-market",
     framework: "meddic",
+  });
+
+  const [firefliesConnected, setFirefliesConnected] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("onboarding_fireflies_connected") === "true";
+  });
+  const [isSavingIntegration, setIsSavingIntegration] = useState(false);
+
+  const [companyInfo, setCompanyInfo] = useState({
+    website: "",
+    companyName: "",
+    companyEmail: "",
+  });
+  const [companyError, setCompanyError] = useState<string | null>(null);
+  const [isWebhookPending, setIsWebhookPending] = useState(false);
+  const [hasWebhookData, setHasWebhookData] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return Boolean(localStorage.getItem("webhook_markdown"));
   });
 
   // Get stored user details
@@ -53,6 +78,37 @@ function OnboardingSteps() {
   };
 
   const { name: storedName, email: storedEmail } = getStoredAuthData();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedSignup = localStorage.getItem("onboarding_signup");
+    if (savedSignup) {
+      const parsed = JSON.parse(savedSignup);
+      setSignupData(parsed);
+    } else {
+      setSignupData({ fullname: storedName, email: storedEmail });
+    }
+
+    const savedCompany = localStorage.getItem("onboarding_company_info");
+    if (savedCompany) {
+      const parsed = JSON.parse(savedCompany);
+      setCompanyInfo(parsed);
+    }
+  }, [storedEmail, storedName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      const markdown = localStorage.getItem("webhook_markdown");
+      if (markdown) {
+        setHasWebhookData(true);
+        setIsWebhookPending(false);
+      }
+    };
+
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
 
   // Parse company JSON
   const jsonData =
@@ -122,7 +178,7 @@ function OnboardingSteps() {
 
       if (!companyData?.id) return;
 
-      await fetch(
+      const response = await fetch(
         "https://omrajpal.app.n8n.cloud/webhook-test/c5b19b00-5069-4884-894a-9807e387555c",
         {
           method: "POST",
@@ -134,8 +190,11 @@ function OnboardingSteps() {
           }),
         }
       );
+
+      return response?.ok;
     } catch (err) {
       console.error("Webhook error:", err);
+      return false;
     }
   };
 
@@ -153,8 +212,8 @@ function OnboardingSteps() {
         .eq("user_id", user.id)
         .single();
 
-      if (!data || (!data.fireflies && !data.openapi)) {
-        toast.error("Please connect at least one tool before continuing.");
+      if (!data || !data.fireflies) {
+        toast.error("Please connect Fireflies before continuing.");
         return false;
       }
 
@@ -166,31 +225,79 @@ function OnboardingSteps() {
     }
   };
 
-  // ---- Step Change Logic ----
-  const handleStepChange = async (step: number) => {
-    // STEP 1 → STEP 2: Save User Info
-    if (
-      currentStep === 1 &&
-      step === 2 &&
-      signupData.fullname &&
-      signupData.email
-    ) {
+  const handleBeforeNext = async (step: number) => {
+    if (currentStep === 1) {
+      if (!signupData.fullname || !signupData.email) {
+        setSignupError("These fields are required");
+        return false;
+      }
+
+      setSignupError(null);
+      setIsNextLoading(true);
       await updateUserInSupabase(signupData.fullname, signupData.email);
+      localStorage.setItem("onboarding_signup", JSON.stringify(signupData));
+      setIsNextLoading(false);
+      return true;
     }
 
-    // 🔒 STEP 2 → STEP 3: Ensure tools are connected
-    if (currentStep === 2 && step === 3) {
+    if (currentStep === 2) {
+      setIsNextLoading(true);
       const ok = await validateConnectedTools();
-      if (!ok) return; // ⛔ BLOCK MOVING FORWARD
+      setIsNextLoading(false);
+      return ok;
     }
 
-    // STEP 3 → STEP 4: Webhook
-    if (currentStep === 3 && step === 4) {
+    if (currentStep === 3) {
       const info = companyInfoRef.current?.getCompanyInfo();
-      if (info) await sendWebsiteToWebhook(info.website, info.companyName);
+      if (!info?.companyName || !info?.companyEmail) {
+        setCompanyError("Company name and email are required");
+        return false;
+      }
+
+      setCompanyError(null);
+      setIsNextLoading(true);
+      localStorage.setItem(
+        "onboarding_company_info",
+        JSON.stringify({
+          companyName: info.companyName,
+          companyEmail: info.companyEmail,
+          website: info.website,
+        })
+      );
+
+      const ok = await sendWebsiteToWebhook(info.website, info.companyName);
+      if (!ok) {
+        toast.error("Unable to start the workflow. Please try again.");
+      } else {
+        setIsWebhookPending(true);
+      }
+      setIsNextLoading(false);
+      return ok ?? false;
     }
 
+    return true;
+  };
+
+  useEffect(() => {
+    const checkMarkdown = () => {
+      const saved = localStorage.getItem("webhook_markdown");
+      if (saved) {
+        setHasWebhookData(true);
+        setIsWebhookPending(false);
+      }
+    };
+
+    if (isWebhookPending) {
+      const interval = setInterval(checkMarkdown, 1500);
+      return () => clearInterval(interval);
+    }
+  }, [isWebhookPending]);
+
+  const handleStepChange = async (step: number) => {
     setCurrentStep(step);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("onboarding_current_step", String(step));
+    }
   };
 
   return (
@@ -200,37 +307,75 @@ function OnboardingSteps() {
           initialStep={1}
           // @ts-ignore
           onStepChange={handleStepChange}
+          beforeNext={handleBeforeNext}
           onFinalStepCompleted={async () => {
             await updateSalesProcess();
             router.replace("/dashboard");
           }}
           className="transition-all duration-300"
+          nextLoading={isNextLoading || isSavingIntegration}
+          nextButtonDisabled={
+            isNextLoading ||
+            isSavingIntegration ||
+            (currentStep === 1 && (!signupData.fullname || !signupData.email)) ||
+            (currentStep === 2 && !firefliesConnected) ||
+            (currentStep === 3 && (!companyInfo.companyName || !companyInfo.companyEmail)) ||
+            (currentStep === 4 && isWebhookPending && !hasWebhookData)
+          }
         >
           <Step>
             <div className="pb-10">
               <SignupForm
-                fullname={storedName}
-                email={storedEmail}
-                onChange={setSignupData}
+                fullname={signupData.fullname || storedName}
+                email={signupData.email || storedEmail}
+                onChange={(data) => {
+                  setSignupData(data);
+                  localStorage.setItem("onboarding_signup", JSON.stringify(data));
+                }}
+                error={signupError || undefined}
               />
             </div>
           </Step>
 
           <Step>
             <div className="pb-10">
-              <ConnectTools />
+              <ConnectTools
+                onFirefliesStatusChange={setFirefliesConnected}
+                onSavingChange={setIsSavingIntegration}
+              />
             </div>
           </Step>
 
           <Step>
             <div className="pb-10">
-              <CompanyInfoStep ref={companyInfoRef} />
+              <CompanyInfoStep
+                ref={companyInfoRef}
+                initialCompanyName={companyInfo.companyName}
+                initialWebsite={companyInfo.website}
+                initialCompanyEmail={companyInfo.companyEmail}
+                onChange={(data) => {
+                  setCompanyInfo(data);
+                  localStorage.setItem("onboarding_company_info", JSON.stringify(data));
+                }}
+              />
+              {companyError ? (
+                <p className="text-sm text-red-500 mt-2" role="alert">
+                  {companyError}
+                </p>
+              ) : null}
             </div>
           </Step>
 
           <Step>
             <div className="pb-10">
-              <Tiptap />
+              {isWebhookPending && !hasWebhookData ? (
+                <div className="w-full h-64 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <span className="loader" aria-label="waiting" />
+                  <p className="text-sm">Waiting for webhook to finish…</p>
+                </div>
+              ) : (
+                <Tiptap />
+              )}
             </div>
           </Step>
 
@@ -273,7 +418,9 @@ export default function OnboardingPage() {
   return (
     <div>
       <Suspense fallback={<div>Loading onboarding...</div>}>
-        <Navbar classname="absolute z-10 top-10 mx-auto left-0 right-0" />
+        <div className="fixed z-10 top-8 left-0 right-0 flex justify-center">
+          <Navbar classname="relative" />
+        </div>
         <div
           className="
           mt-40
