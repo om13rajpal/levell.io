@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, Children, useRef, useLayoutEffect } from 'react';
+import React, { useState, Children, useRef, useLayoutEffect, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import './Stepper.css';
@@ -9,6 +9,7 @@ export default function Stepper({
   children,
   initialStep = 1,
   onStepChange = () => {},
+  beforeNext,
   onFinalStepCompleted = () => {},
   stepCircleContainerClassName = '',
   stepContainerClassName = '',
@@ -18,6 +19,9 @@ export default function Stepper({
   nextButtonProps = {},
   backButtonText = 'Back',
   nextButtonText = 'Continue',
+  nextLoading = false,
+  nextButtonDisabled = false,
+  nextLoadingContent,
   disableStepIndicators = false,
   renderStepIndicator,
   ...rest
@@ -28,6 +32,10 @@ export default function Stepper({
   const totalSteps = stepsArray.length;
   const isCompleted = currentStep > totalSteps;
   const isLastStep = currentStep === totalSteps;
+
+  useEffect(() => {
+    setCurrentStep(initialStep);
+  }, [initialStep]);
 
   const updateStep = newStep => {
     setCurrentStep(newStep);
@@ -45,11 +53,16 @@ export default function Stepper({
     }
   };
 
-  const handleNext = () => {
-    if (!isLastStep) {
-      setDirection(1);
-      updateStep(currentStep + 1);
+  const handleNext = async () => {
+    if (isLastStep) return;
+
+    if (beforeNext) {
+      const allow = await beforeNext(currentStep + 1);
+      if (!allow) return;
     }
+
+    setDirection(1);
+    updateStep(currentStep + 1);
   };
 
   const handleComplete = () => {
@@ -113,8 +126,24 @@ export default function Stepper({
                   {backButtonText}
                 </button>
               )}
-              <button onClick={isLastStep ? handleComplete : handleNext} className="next-button" {...nextButtonProps}>
-                {isLastStep ? 'Complete' : nextButtonText}
+              <button
+                onClick={isLastStep ? handleComplete : handleNext}
+                className={`next-button ${nextButtonDisabled || nextLoading ? 'disabled' : ''}`}
+                disabled={nextButtonDisabled || nextLoading || nextButtonProps.disabled}
+                {...nextButtonProps}
+              >
+                {nextLoading ? (
+                  nextLoadingContent || (
+                    <span className="loader-wrapper" aria-label="loading">
+                      <span className="loader loader-dark" />
+                      <span>Continue</span>
+                    </span>
+                  )
+                ) : isLastStep ? (
+                  'Complete'
+                ) : (
+                  nextButtonText
+                )}
               </button>
             </div>
           </div>
