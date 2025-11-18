@@ -77,7 +77,38 @@ function OnboardingSteps() {
     return { name: "", email: "" };
   };
 
-  const { name: storedName, email: storedEmail } = getStoredAuthData();
+  const [storedAuth, setStoredAuth] = useState({ name: "", email: "" });
+
+  useEffect(() => {
+    setStoredAuth(getStoredAuthData());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedSignup = localStorage.getItem("onboarding_signup");
+    if (savedSignup) {
+      const parsed = JSON.parse(savedSignup);
+      setSignupData(parsed);
+    } else {
+      setSignupData({ fullname: storedAuth.name, email: storedAuth.email });
+    }
+
+    const savedCompany = localStorage.getItem("onboarding_company_info");
+    if (savedCompany) {
+      const parsed = JSON.parse(savedCompany);
+      setCompanyInfo(parsed);
+    }
+  }, [storedAuth.email, storedAuth.name]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      const markdown = localStorage.getItem("webhook_markdown");
+      if (markdown) {
+        setHasWebhookData(true);
+        setIsWebhookPending(false);
+      }
+    };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -304,7 +335,7 @@ function OnboardingSteps() {
     <div className="w-full flex justify-center">
       <div className="w-full max-w-5xl px-4 py-6">
         <Stepper
-          initialStep={1}
+          initialStep={currentStep}
           // @ts-ignore
           onStepChange={handleStepChange}
           beforeNext={handleBeforeNext}

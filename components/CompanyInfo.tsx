@@ -60,6 +60,7 @@ const CompanyInfoStep = forwardRef((props: CompanyInfoStepProps, ref) => {
                 type="text"
                 placeholder="Enter your company name"
                 className="h-10"
+                value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
               />
             </div>
