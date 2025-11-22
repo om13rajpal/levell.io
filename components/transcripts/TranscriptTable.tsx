@@ -41,18 +41,17 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 
 import {
   IconGripVertical,
-  IconDotsVertical,
   IconChevronLeft,
   IconChevronRight,
   IconChevronsLeft,
   IconChevronsRight,
   IconExternalLink,
   IconPlayerPlay,
+  IconRefresh,
 } from "@tabler/icons-react";
 
 import { Label } from "@/components/ui/label";
@@ -67,7 +66,7 @@ import {
   TableBody,
 } from "@/components/ui/table";
 
-import { Tabs, TabsList, TabsContent, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
   SelectTrigger,
@@ -75,6 +74,8 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+
+import { supabase } from "@/lib/supabaseClient";
 
 // ========== TYPES ========== //
 
@@ -220,14 +221,13 @@ function DraggableRow({ row }: { row: Row<Transcript> }) {
   );
 }
 
-// ========== MAIN TABLE COMPONENT (FIXED) ========== //
+// ========== MAIN TABLE COMPONENT ========== //
 
 export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
   const [data, setData] = React.useState(initialData);
+  const [syncLoading, setSyncLoading] = React.useState(false);
 
-  // 🔥🔥🔥 THE CRITICAL FIX — Sync internal state with new props
   React.useEffect(() => {
-    console.log("🔁 TranscriptTable received new data:", initialData);
     setData(initialData);
   }, [initialData]);
 
@@ -253,6 +253,33 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
     () => data.map((d) => d.id),
     [data]
   );
+
+  // ⭐ SYNC BUTTON LOGIC
+  const handleSync = async () => {
+    try {
+      setSyncLoading(true);
+
+      const tokenStr = localStorage.getItem(
+        "sb-rpowalzrbddorfnnmccp-auth-token"
+      );
+      if (!tokenStr) return;
+
+      const parsed = JSON.parse(tokenStr);
+      const userId = parsed?.user?.id;
+      if (!userId) return;
+
+      const { data: fresh } = await supabase
+        .from("transcripts")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      setData(fresh ?? []);
+      localStorage.setItem("transcripts-cache", JSON.stringify(fresh ?? []));
+    } finally {
+      setSyncLoading(false);
+    }
+  };
 
   const table = useReactTable({
     data,
@@ -293,6 +320,8 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
   return (
     <Tabs defaultValue="table" className="w-full flex flex-col gap-4">
       <TabsContent value="table" className="px-4 lg:px-6">
+
+        {/* ⭐ Toolbar Row with Columns + Sync Button */}
         <div className="flex justify-between items-center mb-4 px-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -320,6 +349,21 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
                 ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* ⭐ SYNC BUTTON (Animated) */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex items-center gap-2 border-primary/30 text-primary hover:bg-primary/10"
+            onClick={handleSync}
+            disabled={syncLoading}
+          >
+            <IconRefresh
+              size={16}
+              className={syncLoading ? "animate-spin" : ""}
+            />
+            {syncLoading ? "Syncing..." : "Sync"}
+          </Button>
         </div>
 
         <div className="rounded-lg border overflow-hidden">

@@ -67,7 +67,7 @@ export default function CallbackPage() {
 
         console.log("🆕 New user created, redirecting to onboarding...");
         setTimeout(() => {
-          router.replace("/onboarding");
+          router.replace("/onboarding/step1");
         }, 5500);
         return;
       }
@@ -75,7 +75,7 @@ export default function CallbackPage() {
       if (existingUser && existingUser.is_onboarding_done === false) {
         console.log("👋 User onboarding not done — redirecting...");
         setTimeout(() => {
-          router.replace("/onboarding");
+          router.replace("/onboarding/step1");
         }, 5500);
         return;
       }

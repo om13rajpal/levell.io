@@ -1,27 +1,23 @@
-"use client"
+"use client";
 
-import React, { useState, Children, useRef, useLayoutEffect, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, Children, useRef, useLayoutEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
 
-import './Stepper.css';
+import "./Stepper.css";
 
 export default function Stepper({
   children,
   initialStep = 1,
   onStepChange = () => {},
-  beforeNext,
   onFinalStepCompleted = () => {},
-  stepCircleContainerClassName = '',
-  stepContainerClassName = '',
-  contentClassName = '',
-  footerClassName = '',
+  stepCircleContainerClassName = "",
+  stepContainerClassName = "",
+  contentClassName = "",
+  footerClassName = "",
   backButtonProps = {},
   nextButtonProps = {},
-  backButtonText = 'Back',
-  nextButtonText = 'Continue',
-  nextLoading = false,
-  nextButtonDisabled = false,
-  nextLoadingContent,
+  backButtonText = "Back",
+  nextButtonText = "Continue",
   disableStepIndicators = false,
   renderStepIndicator,
   ...rest
@@ -33,11 +29,7 @@ export default function Stepper({
   const isCompleted = currentStep > totalSteps;
   const isLastStep = currentStep === totalSteps;
 
-  useEffect(() => {
-    setCurrentStep(initialStep);
-  }, [initialStep]);
-
-  const updateStep = newStep => {
+  const updateStep = (newStep) => {
     setCurrentStep(newStep);
     if (newStep > totalSteps) {
       onFinalStepCompleted();
@@ -53,16 +45,11 @@ export default function Stepper({
     }
   };
 
-  const handleNext = async () => {
-    if (isLastStep) return;
-
-    if (beforeNext) {
-      const allow = await beforeNext(currentStep + 1);
-      if (!allow) return;
+  const handleNext = () => {
+    if (!isLastStep) {
+      setDirection(1);
+      updateStep(currentStep + 1);
     }
-
-    setDirection(1);
-    updateStep(currentStep + 1);
   };
 
   const handleComplete = () => {
@@ -72,7 +59,10 @@ export default function Stepper({
 
   return (
     <div className="outer-container" {...rest}>
-      <div className={`step-circle-container ${stepCircleContainerClassName}`} style={{ border: '1px solid #222' }}>
+      <div
+        className={`step-circle-container ${stepCircleContainerClassName}`}
+        style={{ border: "1px solid #222" }}
+      >
         <div className={`step-indicator-row ${stepContainerClassName}`}>
           {stepsArray.map((_, index) => {
             const stepNumber = index + 1;
@@ -83,23 +73,25 @@ export default function Stepper({
                   renderStepIndicator({
                     step: stepNumber,
                     currentStep,
-                    onStepClick: clicked => {
+                    onStepClick: (clicked) => {
                       setDirection(clicked > currentStep ? 1 : -1);
                       updateStep(clicked);
-                    }
+                    },
                   })
                 ) : (
                   <StepIndicator
                     step={stepNumber}
                     disableStepIndicators={disableStepIndicators}
                     currentStep={currentStep}
-                    onClickStep={clicked => {
+                    onClickStep={(clicked) => {
                       setDirection(clicked > currentStep ? 1 : -1);
                       updateStep(clicked);
                     }}
                   />
                 )}
-                {isNotLastStep && <StepConnector isComplete={currentStep > stepNumber} />}
+                {isNotLastStep && (
+                  <StepConnector isComplete={currentStep > stepNumber} />
+                )}
               </React.Fragment>
             );
           })}
@@ -116,11 +108,15 @@ export default function Stepper({
 
         {!isCompleted && (
           <div className={`footer-container ${footerClassName}`}>
-            <div className={`footer-nav ${currentStep !== 1 ? 'spread' : 'end'}`}>
+            <div
+              className={`footer-nav ${currentStep !== 1 ? "spread" : "end"}`}
+            >
               {currentStep !== 1 && (
                 <button
                   onClick={handleBack}
-                  className={`back-button ${currentStep === 1 ? 'inactive' : ''}`}
+                  className={`back-button ${
+                    currentStep === 1 ? "inactive" : ""
+                  }`}
                   {...backButtonProps}
                 >
                   {backButtonText}
@@ -128,15 +124,10 @@ export default function Stepper({
               )}
               <button
                 onClick={isLastStep ? handleComplete : handleNext}
-                className={`next-button ${nextButtonDisabled ? 'disabled' : ''}`}
-                disabled={nextButtonDisabled || nextButtonProps.disabled}
+                className="next-button"
                 {...nextButtonProps}
               >
-                {nextLoading
-                  ? nextLoadingContent || <span className="loader" aria-label="loading" />
-                  : isLastStep
-                    ? 'Complete'
-                    : nextButtonText}
+                {isLastStep ? "Complete" : nextButtonText}
               </button>
             </div>
           </div>
@@ -146,19 +137,33 @@ export default function Stepper({
   );
 }
 
-function StepContentWrapper({ isCompleted, currentStep, direction, children, className }) {
+function StepContentWrapper({
+  isCompleted,
+  currentStep,
+  direction,
+  children,
+  className,
+}) {
   const [parentHeight, setParentHeight] = useState(0);
 
   return (
     <motion.div
       className={className}
-      style={{ position: 'relative', overflow: 'hidden' }}
+      style={{ position: "relative", overflow: "hidden" }}
       animate={{ height: isCompleted ? 0 : parentHeight }}
-      transition={{ type: 'spring', duration: 0.4 }}
+      transition={{ type: "spring", duration: 0.4 }}
     >
       <AnimatePresence initial={false} mode="sync" custom={direction}>
         {!isCompleted && (
-          <SlideTransition key={currentStep} direction={direction} onHeightReady={h => setParentHeight(h)}>
+          <SlideTransition
+            key={currentStep}
+            direction={direction}
+            onHeightReady={(newHeight) => {
+              setParentHeight((prev) =>
+                prev !== newHeight ? newHeight : prev
+              );
+            }}
+          >
             {children}
           </SlideTransition>
         )}
@@ -171,8 +176,12 @@ function SlideTransition({ children, direction, onHeightReady }) {
   const containerRef = useRef(null);
 
   useLayoutEffect(() => {
-    if (containerRef.current) onHeightReady(containerRef.current.offsetHeight);
-  }, [children, onHeightReady]);
+    if (!containerRef.current) return;
+
+    const newHeight = containerRef.current.offsetHeight;
+
+    onHeightReady(newHeight); // only update once per children render
+  }, [children]); // <-- important
 
   return (
     <motion.div
@@ -183,7 +192,7 @@ function SlideTransition({ children, direction, onHeightReady }) {
       animate="center"
       exit="exit"
       transition={{ duration: 0.4 }}
-      style={{ position: 'absolute', left: 0, right: 0, top: 0 }}
+      style={{ position: "absolute", left: 0, right: 0, top: 0 }}
     >
       {children}
     </motion.div>
@@ -191,45 +200,68 @@ function SlideTransition({ children, direction, onHeightReady }) {
 }
 
 const stepVariants = {
-  enter: dir => ({
-    x: dir >= 0 ? '100%' : '-100%',
-    opacity: 0
+  enter: (dir) => ({
+    x: dir >= 0 ? "100%" : "-100%",
+    opacity: 0,
   }),
   center: {
-    x: '0%',
-    opacity: 1
+    x: "0%",
+    opacity: 1,
   },
-  exit: dir => ({
-    x: dir >= 0 ? '-50%' : '50%',
-    opacity: 0
-  })
+  exit: (dir) => ({
+    x: dir >= 0 ? "-50%" : "50%",
+    opacity: 0,
+  }),
 };
 
 export function Step({ children }) {
   return <div className="step-default">{children}</div>;
 }
 
-function StepIndicator({ step, currentStep, onClickStep, disableStepIndicators }) {
-  const status = currentStep === step ? 'active' : currentStep < step ? 'inactive' : 'complete';
+function StepIndicator({
+  step,
+  currentStep,
+  onClickStep,
+  disableStepIndicators,
+}) {
+  const status =
+    currentStep === step
+      ? "active"
+      : currentStep < step
+      ? "inactive"
+      : "complete";
 
   const handleClick = () => {
     if (step !== currentStep && !disableStepIndicators) onClickStep(step);
   };
 
   return (
-    <motion.div onClick={handleClick} className="step-indicator" animate={status} initial={false}>
+    <motion.div
+      onClick={handleClick}
+      className="step-indicator"
+      animate={status}
+      initial={false}
+    >
       <motion.div
         variants={{
-          inactive: { scale: 1, backgroundColor: '#222', color: '#a3a3a3' },
-          active: { scale: 1, backgroundColor: 'oklch(0.586 0.253 17.585)', color: 'oklch(0.586 0.253 17.585);' },
-          complete: { scale: 1, backgroundColor: 'oklch(0.586 0.253 17.585)', color: 'oklch(0.586 0.253 17.585);' }
+          inactive: { scale: 1, backgroundColor: "#222", color: "#a3a3a3" },
+          active: {
+            scale: 1,
+            backgroundColor: "oklch(0.586 0.253 17.585)",
+            color: "oklch(0.586 0.253 17.585)",
+          },
+          complete: {
+            scale: 1,
+            backgroundColor: "oklch(0.586 0.253 17.585)",
+            color: "oklch(0.586 0.253 17.585)",
+          },
         }}
         transition={{ duration: 0.3 }}
         className="step-indicator-inner"
       >
-        {status === 'complete' ? (
+        {status === "complete" ? (
           <CheckIcon className="check-icon" />
-        ) : status === 'active' ? (
+        ) : status === "active" ? (
           <div className="active-dot" />
         ) : (
           <span className="step-number">{step}</span>
@@ -241,8 +273,8 @@ function StepIndicator({ step, currentStep, onClickStep, disableStepIndicators }
 
 function StepConnector({ isComplete }) {
   const lineVariants = {
-    incomplete: { width: 0, backgroundColor: 'transparent' },
-    complete: { width: '100%', backgroundColor: 'oklch(0.586 0.253 17.585)' }
+    incomplete: { width: 0, backgroundColor: "transparent" },
+    complete: { width: "100%", backgroundColor: "oklch(0.586 0.253 17.585)" },
   };
 
   return (
@@ -251,7 +283,7 @@ function StepConnector({ isComplete }) {
         className="step-connector-inner"
         variants={lineVariants}
         initial={false}
-        animate={isComplete ? 'complete' : 'incomplete'}
+        animate={isComplete ? "complete" : "incomplete"}
         transition={{ duration: 0.4 }}
       />
     </div>
@@ -260,11 +292,22 @@ function StepConnector({ isComplete }) {
 
 function CheckIcon(props) {
   return (
-    <svg {...props} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+    <svg
+      {...props}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      viewBox="0 0 24 24"
+    >
       <motion.path
         initial={{ pathLength: 0 }}
         animate={{ pathLength: 1 }}
-        transition={{ delay: 0.1, type: 'tween', ease: 'easeOut', duration: 0.3 }}
+        transition={{
+          delay: 0.1,
+          type: "tween",
+          ease: "easeOut",
+          duration: 0.3,
+        }}
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M5 13l4 4L19 7"

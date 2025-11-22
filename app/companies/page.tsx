@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Card,
   CardHeader,
@@ -17,59 +17,195 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Grid2X2, List, Plus, MoreHorizontal, Search } from "lucide-react";
 import {
-  Grid2X2,
-  List,
-  Plus,
-  MoreHorizontal,
-  Search,
-} from "lucide-react";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
-// -----------------------------
-// Demo Data
-// -----------------------------
-const COMPANIES = [
-  { id: "1", name: "Acme Corporation", industry: "Manufacturing", calls: 24, lastCall: "2 days ago", score: 88, risk: "Warning" },
-  { id: "2", name: "Globex", industry: "Technology", calls: 31, lastCall: "1 day ago", score: 91 },
-  { id: "3", name: "Initech", industry: "SaaS", calls: 12, lastCall: "5 days ago", score: 72, risk: "Warning" },
-  { id: "4", name: "Umbrella Corp", industry: "Healthcare", calls: 7, lastCall: "12 days ago", score: 58, risk: "Critical" },
-  { id: "5", name: "Wayne Enterprises", industry: "Finance", calls: 19, lastCall: "3 days ago", score: 86 },
-  { id: "6", name: "Stark Industries", industry: "Defense", calls: 42, lastCall: "today", score: 93 },
-];
-const INDUSTRIES = Array.from(new Set(COMPANIES.map((c) => c.industry)));
+import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 
-export default function Page() {
+// --------------------------------------------------
+// Utility – extract industry from domain
+// --------------------------------------------------
+function industryFromDomain(domain: string) {
+  if (!domain) return "Unknown";
+  if (domain.includes("tech")) return "Technology";
+  if (domain.includes("health")) return "Healthcare";
+  if (domain.includes("fin")) return "Finance";
+  if (domain.includes("soft")) return "SaaS";
+  return "General";
+}
+
+// --------------------------------------------------
+// MAIN PAGE
+// --------------------------------------------------
+export default function CompaniesPage() {
+  const [loading, setLoading] = useState(true);
+
+  const [myCompany, setMyCompany] = useState<any>(null);
+  const [detectedCompanies, setDetectedCompanies] = useState<any[]>([]);
+  const [calls, setCalls] = useState<any[]>([]);
+
+  // Filters & state
   const [view, setView] = useState<"grid" | "list">("grid");
   const [q, setQ] = useState("");
   const [industry, setIndustry] = useState("all");
   const [risk, setRisk] = useState("all");
   const [sortBy, setSortBy] = useState("calls");
+
+  // Pagination
   const [page, setPage] = useState(1);
   const pageSize = 6;
 
+  // Goal modal
+  const [selectedCompany, setSelectedCompany] = useState<any>(null);
+  const [goal, setGoal] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // --------------------------------------------------
+  // Load Data
+  // --------------------------------------------------
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1 — Your own company
+      const { data: myComp } = await supabase
+        .from("company")
+        .select("*")
+        .eq("user_id", user.id)
+        .single();
+
+      // 2 — Detected companies
+      const { data: detected } = await supabase.from("companies").select("*");
+
+      // 3 — Call counts
+      const { data: companyCalls } = await supabase
+        .from("company_calls")
+        .select("company_id, created_at");
+
+      setMyCompany(myComp || null);
+      setDetectedCompanies(detected || []);
+      setCalls(companyCalls || []);
+      setLoading(false);
+    }
+
+    load();
+  }, []);
+
+  // --------------------------------------------------
+  // Enhancing detected company objects
+  // --------------------------------------------------
+  const combinedData = useMemo(() => {
+    return detectedCompanies.map((c) => {
+      const companyCalls = calls.filter((x) => x.company_id === c.id);
+
+      const lastCall = companyCalls.length
+        ? new Date(
+            companyCalls[companyCalls.length - 1].created_at
+          ).toLocaleDateString()
+        : "No calls";
+
+      return {
+        ...c,
+        calls: companyCalls.length,
+        lastCall,
+        industry: industryFromDomain(c.domain),
+        score: Math.floor(Math.random() * 40) + 60, // Placeholder — replace with actual score later
+        risk: companyCalls.length === 0 ? "Critical" : "Low",
+      };
+    });
+  }, [detectedCompanies, calls]);
+
+  // --------------------------------------------------
+  // Filters
+  // --------------------------------------------------
   const filtered = useMemo(() => {
-    let rows = [...COMPANIES];
-    if (q.trim()) rows = rows.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
+    let rows = [...combinedData];
+
+    if (q.trim())
+      rows = rows.filter((c) =>
+        c.company_name.toLowerCase().includes(q.toLowerCase())
+      );
     if (industry !== "all") rows = rows.filter((c) => c.industry === industry);
     if (risk !== "all") rows = rows.filter((c) => (c.risk ?? "Low") === risk);
-    rows.sort((a, b) => (sortBy === "score" ? b.score - a.score : b.calls - a.calls));
-    return rows;
-  }, [q, industry, risk, sortBy]);
 
-  const total = filtered.length;
-  const maxPage = Math.ceil(total / pageSize);
+    rows.sort((a, b) =>
+      sortBy === "score" ? b.score - a.score : b.calls - a.calls
+    );
+    return rows;
+  }, [q, industry, risk, sortBy, combinedData]);
+
+  const industries = Array.from(new Set(combinedData.map((c) => c.industry)));
+
+  const maxPage = Math.ceil(filtered.length / pageSize);
   const pageItems = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   useEffect(() => {
     if (page > maxPage) setPage(1);
   }, [maxPage, page]);
+
+  // --------------------------------------------------
+  // Save Goal
+  // --------------------------------------------------
+  async function saveGoal() {
+    if (!goal.trim()) {
+      toast.error("Please enter a company goal");
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const { error } = await supabase
+        .from("companies")
+        .update({ company_goal_objective: goal })
+        .eq("id", selectedCompany.id);
+
+      if (error) throw error;
+
+      toast.success("Company goal saved!");
+      setSelectedCompany(null);
+      setGoal("");
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // --------------------------------------------------
+  // Loading State
+  // --------------------------------------------------
+  if (loading) {
+    return (
+      <div className="p-10 text-center text-muted-foreground">
+        Loading companies…
+      </div>
+    );
+  }
 
   return (
     <SidebarProvider
@@ -82,155 +218,186 @@ export default function Page() {
     >
       <AppSidebar variant="inset" />
       <SidebarInset>
-        <SiteHeader heading="Companies"/>
-        <div className="flex flex-1 flex-col">
-          <div className="@container/main flex flex-1 flex-col gap-2">
-            <div className="flex flex-col gap-4 py-6 md:gap-6 md:py-8 px-6 md:px-8">
-              {/* Header */}
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h1 className="text-2xl font-semibold tracking-tight">Company Intelligence</h1>
-                  <p className="text-sm text-muted-foreground">
-                    Track activity, risks, and momentum across your accounts.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="hidden md:flex rounded-lg border border-border/60 bg-card/60 backdrop-blur-sm">
-                    <Button
-                      variant={view === "grid" ? "secondary" : "ghost"}
-                      size="sm"
-                      className="gap-2 rounded-l-lg"
-                      onClick={() => setView("grid")}
-                    >
-                      <Grid2X2 className="h-4 w-4" />
-                      Grid
-                    </Button>
-                    <Separator orientation="vertical" />
-                    <Button
-                      variant={view === "list" ? "secondary" : "ghost"}
-                      size="sm"
-                      className="gap-2 rounded-r-lg"
-                      onClick={() => setView("list")}
-                    >
-                      <List className="h-4 w-4" />
-                      List
-                    </Button>
-                  </div>
-                  <Button className="gap-2">
-                    <Plus className="h-4 w-4" /> Add Company
-                  </Button>
-                </div>
-              </div>
+        <SiteHeader heading="Companies" />
 
-              {/* Top Stats */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <StatCard title="Total Companies" value="127" />
-                <StatCard title="Active Companies" value="76" caption="Called in last 30 days" />
-                <StatCard title="Critical Risks" value="8" valueColor="text-red-400" />
-                <StatCard title="New This Month" value="12" caption="+18% vs last month" />
-              </div>
+        <div className="flex flex-col px-6 md:px-8 py-8 gap-6">
+          {/* Your Company Snapshot */}
+          {myCompany && (
+            <Card className="border-border/60 bg-card/60 shadow-md backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold">
+                  Your Company
+                </CardTitle>
+                <CardDescription>{myCompany.company_name}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Website: {myCompany.company_url || "—"}
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
-              {/* Filters */}
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex flex-1 items-center gap-2">
-                  <div className="relative flex-1 min-w-[220px]">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search companies…"
-                      value={q}
-                      onChange={(e) => setQ(e.target.value)}
-                      className="pl-8 bg-card/60 border-border/60"
-                    />
-                  </div>
-                  <Select value={industry} onValueChange={setIndustry}>
-                    <SelectTrigger className="w-[160px] bg-card/60 border-border/60">
-                      <SelectValue placeholder="Industry" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Industries</SelectItem>
-                      {INDUSTRIES.map((i) => (
-                        <SelectItem key={i} value={i}>{i}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          {/* FILTERS + HEADER */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Detected Companies
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Auto-detected from your call transcripts using AI.
+              </p>
+            </div>
 
-                  <Select value={risk} onValueChange={setRisk}>
-                    <SelectTrigger className="w-[150px] bg-card/60 border-border/60">
-                      <SelectValue placeholder="Risk" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Risks</SelectItem>
-                      <SelectItem value="Warning">Warning</SelectItem>
-                      <SelectItem value="Critical">Critical</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={sortBy} onValueChange={setSortBy}>
-                    <SelectTrigger className="w-[180px] bg-card/60 border-border/60">
-                      <SelectValue placeholder="Sort by" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="calls">By Call Count</SelectItem>
-                      <SelectItem value="score">By Score</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => { setQ(""); setIndustry("all"); setRisk("all"); setSortBy("calls"); }}>
-                  Clear Filters
-                </Button>
-              </div>
-
-              {/* Companies Grid */}
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {pageItems.map((c) => (
-                  <CompanyCard key={c.id} company={c} />
-                ))}
-              </div>
+            <div className="flex items-center gap-2">
+              <Button className="gap-2">
+                <Plus className="h-4 w-4" /> Add Company
+              </Button>
             </div>
           </div>
+
+          {/* FILTER BAR */}
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search companies…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className="pl-8 bg-card/60 border-border/60"
+              />
+            </div>
+
+            <Select value={industry} onValueChange={setIndustry}>
+              <SelectTrigger className="w-[150px] bg-card/60 border-border/60">
+                <SelectValue placeholder="Industry" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Industries</SelectItem>
+                {industries.map((i) => (
+                  <SelectItem key={i} value={i}>
+                    {i}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={risk} onValueChange={setRisk}>
+              <SelectTrigger className="w-[140px] bg-card/60 border-border/60">
+                <SelectValue placeholder="Risk" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Risks</SelectItem>
+                <SelectItem value="Low">Low</SelectItem>
+                <SelectItem value="Warning">Warning</SelectItem>
+                <SelectItem value="Critical">Critical</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-[160px] bg-card/60 border-border/60">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="calls">By Call Count</SelectItem>
+                <SelectItem value="score">By Score</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* GRID */}
+          {filtered.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              No companies found.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {pageItems.map((c) => (
+                <CompanyCard
+                  key={c.id}
+                  company={c}
+                  onGoal={() => setSelectedCompany(c)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </SidebarInset>
+
+      {/* MODAL */}
+      <Dialog
+        open={!!selectedCompany}
+        onOpenChange={() => setSelectedCompany(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Add Goal for {selectedCompany?.company_name}
+            </DialogTitle>
+          </DialogHeader>
+
+          <Input
+            placeholder="Enter company goal/objective…"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+          />
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setSelectedCompany(null)}>
+              Cancel
+            </Button>
+            <Button onClick={saveGoal} disabled={saving}>
+              {saving ? "Saving…" : "Save Goal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 }
 
-// -------------------
-// Components
-// -------------------
-function StatCard({ title, value, caption, valueColor = "text-foreground" }: any) {
-  return (
-    <Card className="border-border/60 bg-card/60 shadow-sm backdrop-blur-sm">
-      <CardHeader className="pb-2">
-        <CardDescription className="text-xs">{title}</CardDescription>
-        <CardTitle className={`text-2xl ${valueColor}`}>{value}</CardTitle>
-        {caption && <p className="text-[11px] text-muted-foreground">{caption}</p>}
-      </CardHeader>
-    </Card>
-  );
-}
-
-function CompanyCard({ company }: any) {
+// --------------------------------------------------
+// Card Components (same design but improved)
+// --------------------------------------------------
+function CompanyCard({ company, onGoal }: any) {
   return (
     <Card className="border-border/60 bg-card/60 shadow-sm backdrop-blur-sm">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div>
-            <CardTitle className="text-base font-medium">{company.name}</CardTitle>
-            <CardDescription className="text-xs">{company.industry}</CardDescription>
+            <CardTitle className="text-base font-medium">
+              {company.company_name}
+            </CardTitle>
+            <CardDescription className="text-xs">
+              {company.industry}
+            </CardDescription>
           </div>
           <RowMenu />
         </div>
       </CardHeader>
+
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>{company.calls} calls</span>
           <span>Last call: {company.lastCall}</span>
         </div>
+
         <div className="flex items-center justify-between">
-          {company.risk ? <RiskBadge level={company.risk} /> : <div />}
+          <RiskBadge level={company.risk} />
           <ScoreDot score={company.score} />
         </div>
-        <Button variant="outline" className="w-full text-sm">View Details</Button>
+
+        <Button variant="secondary" className="w-full text-sm" onClick={onGoal}>
+          Add Company Goal
+        </Button>
+
+        <Button
+          variant="outline"
+          className="w-full text-sm"
+          onClick={() => (window.location.href = `/companies/${company.id}`)}
+        >
+          View Details
+        </Button>
       </CardContent>
     </Card>
   );
@@ -238,12 +405,15 @@ function CompanyCard({ company }: any) {
 
 function RiskBadge({ level }: any) {
   const map = {
+    Low: "bg-emerald-950/40 text-emerald-300 border-emerald-900",
     Warning: "bg-amber-950/40 text-amber-300 border-amber-900",
     Critical: "bg-red-950/40 text-red-300 border-red-900",
   };
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${map[level]}`}>
-      {level === "Critical" ? "Critical Risk" : level}
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${map[level]}`}
+    >
+      {level === "Low" ? "Healthy" : level}
     </span>
   );
 }
@@ -255,6 +425,7 @@ function ScoreDot({ score }: any) {
       : score >= 70
       ? "bg-amber-950/40 text-amber-300 border-amber-900"
       : "bg-red-950/40 text-red-300 border-red-900";
+
   return (
     <div
       className={`inline-flex h-8 w-8 items-center justify-center rounded-full border text-xs ${ring}`}
@@ -269,7 +440,11 @@ function RowMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground"
+        >
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
