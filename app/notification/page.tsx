@@ -78,20 +78,38 @@ export default function NotificationsPage() {
 
     setSaving(true);
 
-    const { error } = await supabase
+    const notificationData = {
+      user_id: userId,
+      weekly_performance: emailWeekly,
+      task_reminders: emailReminders,
+      integration_status: inAppIntegration,
+      call_processed: inAppProcessed,
+      product_updates: inAppUpdates,
+      mentions: inAppMentions,
+    };
+
+    // Check if record exists
+    const { data: existing } = await supabase
       .from("notifications")
-      .upsert(
-        {
-          user_id: userId,
-          weekly_performance: emailWeekly,
-          task_reminders: emailReminders,
-          integration_status: inAppIntegration,
-          call_processed: inAppProcessed,
-          product_updates: inAppUpdates,
-          mentions: inAppMentions,
-        },
-        { onConflict: "user_id" },
-      );
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    let error;
+    if (existing) {
+      // Update existing record
+      const result = await supabase
+        .from("notifications")
+        .update(notificationData)
+        .eq("user_id", userId);
+      error = result.error;
+    } else {
+      // Insert new record
+      const result = await supabase
+        .from("notifications")
+        .insert(notificationData);
+      error = result.error;
+    }
 
     if (error) {
       toast.error(`Could not save preferences: ${error.message}`);

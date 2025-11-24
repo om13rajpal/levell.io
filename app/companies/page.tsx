@@ -33,6 +33,15 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Label } from "@/components/ui/label";
 
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -78,6 +87,13 @@ export default function CompaniesPage() {
   const [selectedCompany, setSelectedCompany] = useState<any>(null);
   const [goal, setGoal] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Add Company modal
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyDomain, setNewCompanyDomain] = useState("");
+  const [newCompanyUrl, setNewCompanyUrl] = useState("");
+  const [addingSaving, setAddingSaving] = useState(false);
 
   // --------------------------------------------------
   // Load Data
@@ -197,6 +213,58 @@ export default function CompaniesPage() {
   }
 
   // --------------------------------------------------
+  // Add New Company
+  // --------------------------------------------------
+  async function addNewCompany() {
+    if (!newCompanyName.trim()) {
+      toast.error("Please enter a company name");
+      return;
+    }
+
+    try {
+      setAddingSaving(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("User not authenticated");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("companies")
+        .insert([
+          {
+            company_name: newCompanyName,
+            domain: newCompanyDomain || null,
+            company_url: newCompanyUrl || null,
+            user_id: user.id,
+          },
+        ])
+        .select();
+
+      if (error) throw error;
+
+      toast.success("Company added successfully!");
+
+      // Refresh the companies list
+      const { data: detected } = await supabase.from("companies").select("*");
+      setDetectedCompanies(detected || []);
+
+      // Reset form and close dialog
+      setNewCompanyName("");
+      setNewCompanyDomain("");
+      setNewCompanyUrl("");
+      setAddDialogOpen(false);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setAddingSaving(false);
+    }
+  }
+
+  // --------------------------------------------------
   // Loading State
   // --------------------------------------------------
   if (loading) {
@@ -250,7 +318,27 @@ export default function CompaniesPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button className="gap-2">
+              {/* View Toggle */}
+              <div className="flex items-center border border-border/60 rounded-md">
+                <Button
+                  variant={view === "grid" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setView("grid")}
+                  className="rounded-r-none"
+                >
+                  <Grid2X2 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={view === "list" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setView("list")}
+                  className="rounded-l-none"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
                 <Plus className="h-4 w-4" /> Add Company
               </Button>
             </div>
@@ -305,12 +393,12 @@ export default function CompaniesPage() {
             </Select>
           </div>
 
-          {/* GRID */}
+          {/* GRID OR LIST VIEW */}
           {filtered.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground">
               No companies found.
             </div>
-          ) : (
+          ) : view === "grid" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {pageItems.map((c) => (
                 <CompanyCard
@@ -320,11 +408,74 @@ export default function CompaniesPage() {
                 />
               ))}
             </div>
+          ) : (
+            <Card className="border-border/60 bg-card/60 shadow-sm backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-base font-medium">
+                  All Companies
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Company Name</TableHead>
+                      <TableHead>Industry</TableHead>
+                      <TableHead>Calls</TableHead>
+                      <TableHead>Last Call</TableHead>
+                      <TableHead>Risk</TableHead>
+                      <TableHead>Score</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageItems.map((c) => (
+                      <TableRow
+                        key={c.id}
+                        className="hover:bg-muted/50 cursor-pointer transition-colors"
+                        onClick={() =>
+                          (window.location.href = `/companies/${c.id}`)
+                        }
+                      >
+                        <TableCell className="font-medium">
+                          {c.company_name}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {c.industry}
+                        </TableCell>
+                        <TableCell>{c.calls}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {c.lastCall}
+                        </TableCell>
+                        <TableCell>
+                          <RiskBadge level={c.risk} />
+                        </TableCell>
+                        <TableCell>
+                          <ScoreDot score={c.score} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedCompany(c);
+                            }}
+                          >
+                            Add Goal
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
         </div>
       </SidebarInset>
 
-      {/* MODAL */}
+      {/* GOAL MODAL */}
       <Dialog
         open={!!selectedCompany}
         onOpenChange={() => setSelectedCompany(null)}
@@ -348,6 +499,64 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={saveGoal} disabled={saving}>
               {saving ? "Saving…" : "Save Goal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ADD COMPANY MODAL */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Company</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="company-name">Company Name *</Label>
+              <Input
+                id="company-name"
+                placeholder="Enter company name"
+                value={newCompanyName}
+                onChange={(e) => setNewCompanyName(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="company-domain">Domain</Label>
+              <Input
+                id="company-domain"
+                placeholder="e.g., technology, finance"
+                value={newCompanyDomain}
+                onChange={(e) => setNewCompanyDomain(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="company-url">Company Website</Label>
+              <Input
+                id="company-url"
+                placeholder="https://example.com"
+                value={newCompanyUrl}
+                onChange={(e) => setNewCompanyUrl(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setAddDialogOpen(false);
+                setNewCompanyName("");
+                setNewCompanyDomain("");
+                setNewCompanyUrl("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={addNewCompany} disabled={addingSaving}>
+              {addingSaving ? "Adding…" : "Add Company"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -404,14 +613,14 @@ function CompanyCard({ company, onGoal }: any) {
 }
 
 function RiskBadge({ level }: any) {
-  const map = {
-    Low: "bg-emerald-950/40 text-emerald-300 border-emerald-900",
-    Warning: "bg-amber-950/40 text-amber-300 border-amber-900",
-    Critical: "bg-red-950/40 text-red-300 border-red-900",
+  const map: Record<string, string> = {
+    Low: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+    Warning: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+    Critical: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
   };
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${map[level]}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${map[level] || "bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-950/40 dark:text-gray-300 dark:border-gray-900"}`}
     >
       {level === "Low" ? "Healthy" : level}
     </span>
@@ -421,10 +630,10 @@ function RiskBadge({ level }: any) {
 function ScoreDot({ score }: any) {
   const ring =
     score >= 85
-      ? "bg-emerald-950/40 text-emerald-300 border-emerald-900"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900"
       : score >= 70
-      ? "bg-amber-950/40 text-amber-300 border-amber-900"
-      : "bg-red-950/40 text-red-300 border-red-900";
+      ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900"
+      : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900";
 
   return (
     <div

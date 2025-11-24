@@ -28,7 +28,12 @@ export default function Step3() {
 
     setPending(true);
     const ok = await sendWebsiteToWebhook(info.website, info.companyName);
-    if (!ok) return;
+    setPending(false);
+
+    if (!ok) {
+      setError("Failed to send data to webhook. Please try again.");
+      return;
+    }
 
     localStorage.setItem("onboarding_current_step", "4");
     router.push("/onboarding/step4");

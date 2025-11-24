@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
-interface SignupFormProps extends React.ComponentProps<typeof Card> {
+interface SignupFormProps {
   fullname?: string;
   email?: string;
   onChange?: (data: { fullname: string; email: string }) => void; // ✅ Live change callback

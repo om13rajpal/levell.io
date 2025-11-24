@@ -499,38 +499,37 @@ export default function TeamPage() {
 
           {/* ---------------- NO TEAM ---------------- */}
           {!loading && !isInTeam && (
-            <Card className="mt-4 border border-dashed bg-background shadow-sm rounded-2xl">
-              <CardHeader className="text-center space-y-2">
-                <div className="inline-flex items-center justify-center rounded-full bg-primary/10 px-3 py-1 text-xs text-primary mb-1">
-                  <Users className="h-3.5 w-3.5 mr-1" />
-                  No team yet
+            <Card className="mt-4 border-0 shadow-lg rounded-2xl bg-gradient-to-br from-card via-card to-card/80">
+              <CardHeader className="text-center space-y-3 pb-4">
+                <div className="inline-flex items-center justify-center rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-medium text-primary ring-1 ring-primary/20 mx-auto">
+                  <Users className="h-3.5 w-3.5 mr-1.5" />
+                  No Team Yet
                 </div>
-                <CardTitle className="text-xl font-semibold">Build your first workspace</CardTitle>
-                <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  Create a shared space for your sales calls, transcripts and AI analysis, 
+                <CardTitle className="text-2xl font-bold">Build Your First Workspace</CardTitle>
+                <p className="text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
+                  Create a shared space for your sales calls, transcripts and AI analysis,
                   or join an existing team with an invite ID.
                 </p>
               </CardHeader>
 
-              <CardContent className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-
+              <CardContent className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center pb-8">
                 {/* CREATE TEAM */}
                 <Dialog open={openCreateTeam} onOpenChange={setOpenCreateTeam}>
                   <DialogTrigger asChild>
-                    <Button className="w-full sm:w-auto px-6 py-5">
-                      <Plus className="h-4 w-4" /> Create team
+                    <Button className="w-full sm:w-auto px-8 py-6 rounded-xl shadow-sm hover:shadow-md transition-all">
+                      <Plus className="h-4 w-4 mr-2" /> Create Team
                     </Button>
                   </DialogTrigger>
 
                   <DialogContent className="max-w-md rounded-2xl">
                     <DialogHeader>
-                      <DialogTitle>Create team</DialogTitle>
+                      <DialogTitle>Create Team</DialogTitle>
                     </DialogHeader>
 
                     <div className="space-y-3 mt-2">
-                      <Label>Team name</Label>
+                      <Label>Team Name</Label>
                       <Input
-                        placeholder="GTMB Squad..."
+                        placeholder="e.g., GTMB Squad"
                         value={createTeamName}
                         onChange={(e) => setCreateTeamName(e.target.value)}
                       />
@@ -547,14 +546,14 @@ export default function TeamPage() {
                 {/* JOIN TEAM */}
                 <Dialog open={openJoinTeam} onOpenChange={setOpenJoinTeam}>
                   <DialogTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-auto px-6 py-5 border-dashed">
+                    <Button variant="outline" className="w-full sm:w-auto px-8 py-6 rounded-xl border-dashed shadow-sm hover:shadow-md transition-all">
                       Join by ID
                     </Button>
                   </DialogTrigger>
 
                   <DialogContent className="max-w-md rounded-2xl">
                     <DialogHeader>
-                      <DialogTitle>Join an existing team</DialogTitle>
+                      <DialogTitle>Join an Existing Team</DialogTitle>
                     </DialogHeader>
 
                     <div className="space-y-3 mt-2">
@@ -567,11 +566,10 @@ export default function TeamPage() {
                     </div>
 
                     <DialogFooter className="mt-4">
-                      <Button onClick={handleJoinTeam}>Join team</Button>
+                      <Button onClick={handleJoinTeam}>Join Team</Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
-
               </CardContent>
             </Card>
           )}
@@ -579,50 +577,60 @@ export default function TeamPage() {
           {/* ---------------- TEAM PAGE ---------------- */}
           {!loading && isInTeam && team && (
             <>
-              {/* -------------------------------- Team Header (NO GRADIENT) -------------------------------- */}
-              <Card className="overflow-hidden border shadow-sm rounded-2xl bg-background">
-                <CardHeader className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="space-y-3">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
+              {/* -------------------------------- Team Header -------------------------------- */}
+              <Card className="overflow-hidden border-0 shadow-lg rounded-2xl bg-gradient-to-br from-card via-card to-card/80 backdrop-blur">
+                <CardHeader className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between pb-6">
+                  <div className="space-y-4 flex-1">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-medium text-primary ring-1 ring-primary/20">
                       <Users className="h-3.5 w-3.5" />
-                      Collaborative workspace
+                      Collaborative Workspace
                     </div>
 
-                    <div className="space-y-1.5">
-                      <CardTitle className="text-2xl font-semibold">
+                    <div className="space-y-2">
+                      <CardTitle className="text-3xl font-bold tracking-tight">
                         {team.team_name}
                       </CardTitle>
 
-                      <p className="text-sm text-muted-foreground flex flex-wrap gap-2">
-                        <span>Team ID: {team.id}</span>
-                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 self-center" />
-                        <span>{members.length} members</span>
-                      </p>
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded">
+                            ID: {team.id}
+                          </span>
+                        </div>
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40" />
+                        <span className="font-medium">{members.length} {members.length === 1 ? 'member' : 'members'}</span>
+                      </div>
 
                       {ownerUser && (
-                        <p className="text-xs text-muted-foreground">
-                          Owner:{" "}
-                          <span className="font-medium">
-                            {ownerUser.name || ownerUser.email}
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-amber-500/10 text-xs font-semibold text-amber-600">
+                            {ownerUser.name ? ownerUser.name[0].toUpperCase() : ownerUser.email[0].toUpperCase()}
                           </span>
-                        </p>
+                          <p className="text-xs text-muted-foreground">
+                            Owned by{" "}
+                            <span className="font-semibold text-foreground">
+                              {ownerUser.name || ownerUser.email}
+                            </span>
+                          </p>
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex w-full flex-col gap-3 sm:w-auto sm:items-end">
-
-                    <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
-                      <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                      Active workspace
+                  <div className="flex flex-col gap-3 sm:items-end">
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 ring-1 ring-emerald-500/20">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      Active Now
                     </div>
 
                     <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
-
                       {isAdmin && (
                         <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
                           <DialogTrigger asChild>
-                            <Button variant="outline" size="sm" className="gap-2 rounded-xl">
+                            <Button variant="outline" size="sm" className="gap-2 rounded-xl shadow-sm hover:shadow">
                               <Settings className="h-4 w-4" />
                               Settings
                             </Button>
@@ -644,7 +652,7 @@ export default function TeamPage() {
                             </div>
 
                             <DialogFooter className="mt-4">
-                              <Button onClick={saveSettings}>Save</Button>
+                              <Button onClick={saveSettings}>Save Changes</Button>
                             </DialogFooter>
                           </DialogContent>
                         </Dialog>
@@ -654,29 +662,33 @@ export default function TeamPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="gap-2 rounded-xl text-destructive hover:bg-destructive/10"
+                          className="gap-2 rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={leaveTeam}
                         >
                           <LogOut className="h-4 w-4" />
-                          Leave team
+                          Leave Team
                         </Button>
                       )}
                     </div>
-
                   </div>
                 </CardHeader>
               </Card>
 
-              {/* -------------------------------- Members (NO WRAPPING DIV) -------------------------------- */}
-              <Card className="rounded-2xl border shadow-sm">
-                <CardHeader className="pb-3 flex justify-between items-center">
-                  <CardTitle className="text-sm font-medium">Members</CardTitle>
+              {/* -------------------------------- Members Table -------------------------------- */}
+              <Card className="rounded-2xl border-0 shadow-md bg-card/50 backdrop-blur-sm">
+                <CardHeader className="pb-4 flex flex-row justify-between items-center border-b">
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg font-semibold">Team Members</CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      {members.length} {members.length === 1 ? 'member' : 'members'} in your workspace
+                    </p>
+                  </div>
 
                   {isAdmin && (
                     <Dialog open={openInviteDialog} onOpenChange={setOpenInviteDialog}>
                       <DialogTrigger asChild>
-                        <Button size="sm" className="rounded-xl gap-2">
-                          <UserPlus className="h-4 w-4" /> Invite
+                        <Button size="sm" className="rounded-xl gap-2 shadow-sm">
+                          <UserPlus className="h-4 w-4" /> Invite Member
                         </Button>
                       </DialogTrigger>
 
@@ -705,15 +717,15 @@ export default function TeamPage() {
                   )}
                 </CardHeader>
 
-                <CardContent className="pt-0">
-                  <div className="rounded-xl border bg-background overflow-hidden">
+                <CardContent className="pt-0 px-0">
+                  <div className="overflow-hidden">
                     <Table>
                       <TableHeader>
-                        <TableRow className="bg-muted/40">
-                          <TableHead className="w-1/3">Name</TableHead>
-                          <TableHead className="w-1/3">Email</TableHead>
-                          <TableHead className="w-1/6">Role</TableHead>
-                          {isAdmin && <TableHead className="text-right w-1/6">Actions</TableHead>}
+                        <TableRow className="bg-muted/30 border-b hover:bg-muted/30">
+                          <TableHead className="w-1/3 font-semibold">Name</TableHead>
+                          <TableHead className="w-1/3 font-semibold">Email</TableHead>
+                          <TableHead className="w-1/6 font-semibold">Role</TableHead>
+                          {isAdmin && <TableHead className="text-right w-1/6 font-semibold">Actions</TableHead>}
                         </TableRow>
                       </TableHeader>
 
@@ -725,54 +737,52 @@ export default function TeamPage() {
                           return (
                             <TableRow
                               key={m.id}
-                              className="hover:bg-muted/30 transition-colors"
+                              className="hover:bg-muted/20 transition-all duration-200 border-b last:border-b-0"
                             >
-                              <TableCell className="flex items-center gap-2">
-                                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                              <TableCell className="flex items-center gap-3 py-4">
+                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-sm font-semibold text-primary">
                                   {m.name ? m.name[0].toUpperCase() : m.email[0].toUpperCase()}
                                 </span>
 
                                 <div className="flex flex-col">
                                   <span className="text-sm font-medium">{m.name || "No name"}</span>
-                                  <span className="text-[11px] text-muted-foreground">
-                                    {isMemberOwner ? "Owner" : "Member"}
-                                  </span>
+                                  {isMemberOwner && (
+                                    <span className="text-[11px] text-amber-600 font-medium">
+                                      Team Owner
+                                    </span>
+                                  )}
                                 </div>
-
-                                {isMemberOwner && (
-                                  <Badge variant="outline" className="ml-1 border-amber-500/40 text-amber-700 text-[10px] px-1.5 py-0">
-                                    Owner
-                                  </Badge>
-                                )}
                               </TableCell>
 
-                              <TableCell className="text-sm">{m.email}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{m.email}</TableCell>
 
                               <TableCell>{renderRoleBadge(role)}</TableCell>
 
                               {isAdmin && (
-                                <TableCell className="text-right space-x-2">
-                                  {m.id !== userId && !isMemberOwner && (
-                                    <>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-xs"
-                                        onClick={() => openRoleDialog(m)}
-                                      >
-                                        Change
-                                      </Button>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {m.id !== userId && !isMemberOwner && (
+                                      <>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="text-xs h-8 px-3 hover:bg-primary/10"
+                                          onClick={() => openRoleDialog(m)}
+                                        >
+                                          Change Role
+                                        </Button>
 
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-destructive hover:bg-destructive/10"
-                                        onClick={() => removeMember(m.id)}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </>
-                                  )}
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                          onClick={() => removeMember(m.id)}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
                                 </TableCell>
                               )}
                             </TableRow>

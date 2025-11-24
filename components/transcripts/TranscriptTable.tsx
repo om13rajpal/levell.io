@@ -88,6 +88,7 @@ export type Transcript = {
   transcript_url: string;
   meeting_link?: string;
   created_at: string;
+  ai_overall_score?: number | null;
 };
 
 // ========== DRAG HANDLE ========== //
@@ -133,6 +134,35 @@ export const transcriptColumns: ColumnDef<Transcript>[] = [
     cell: ({ row }) => (
       <Badge variant="outline">{Math.round(row.original.duration)} sec</Badge>
     ),
+  },
+
+  {
+    accessorKey: "ai_overall_score",
+    header: "Score",
+    cell: ({ row }) => {
+      const score = row.original.ai_overall_score;
+      if (score == null || isNaN(score)) {
+        return (
+          <Badge variant="outline" className="text-muted-foreground">
+            —
+          </Badge>
+        );
+      }
+      return (
+        <Badge
+          variant="outline"
+          className={
+            score >= 80
+              ? "border-green-500/50 text-green-700 dark:text-green-400"
+              : score >= 60
+              ? "border-yellow-500/50 text-yellow-700 dark:text-yellow-400"
+              : "border-red-500/50 text-red-700 dark:text-red-400"
+          }
+        >
+          {Math.round(score)}
+        </Badge>
+      );
+    },
   },
 
   {

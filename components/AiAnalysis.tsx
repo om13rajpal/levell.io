@@ -281,19 +281,6 @@ export default function ReviewAIEditor() {
   // ⭐ Realtime Supabase listener
   //
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const saved = localStorage.getItem("webhook_markdown");
-    if (saved) {
-      console.log("📦 Loaded markdown from localStorage");
-      setMarkdown(saved);
-    }
-  }, []);
-
-  //
-  // ⭐ Realtime Supabase listener
-  //
-  useEffect(() => {
     const channel = supabase
       .channel("realtime:webhook_data")
       .on(

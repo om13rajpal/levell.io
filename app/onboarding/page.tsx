@@ -414,18 +414,10 @@
 //   );
 // }
 
-// export default function OnboardingPage() {
-//   return (
-//     <div>
-//       <Suspense fallback={<div>Loading onboarding...</div>}>
-//         <div className="fixed z-10 top-8 left-0 right-0 flex justify-center">
-//           <Navbar classname="relative" />
-//         </div>
-
-//         <div className="mt-40 min-h-screen flex flex-col bg-background overflow-y-auto scrollbar-thin scrollbar-thumb-muted-foreground/30">
-//           <OnboardingSteps />
-//         </div>
-//       </Suspense>
-//     </div>
-//   );
-// }
+export default function OnboardingPage() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <p>Onboarding redirects to individual steps</p>
+    </div>
+  );
+}

@@ -5,6 +5,7 @@ import {
   Button
 } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -17,11 +18,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
 import {
-  Info,
-  Plus,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+  IconSparkles,
+  IconCheck,
+  IconInfoCircle,
+  IconUsers,
+  IconBriefcase,
+  IconBuildingStore,
+  IconTarget,
+  IconMessages,
+  IconAlertCircle,
+  IconPlus,
+  IconPencil,
+  IconTrash,
+} from "@tabler/icons-react";
 
 /* ---------------- TYPES ---------------- */
 type CompanyInfo = {
@@ -211,21 +220,21 @@ export default function ReviewBusinessProfile() {
   /* ================================================================= */
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-6 space-y-10">
+    <div className="w-full max-w-4xl mx-auto p-6 space-y-12">
 
       {/* HEADER */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Business Profile Review</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          This clean linear layout matches your Call Detail Page and feels premium.
+          Review and refine your company profile to ensure AI-powered call analysis is accurate and personalized.
         </p>
       </div>
 
       {/* INFO */}
-      <Alert className="bg-blue-500/5 border border-blue-500/20 rounded-xl">
-        <Info className="h-4 w-4 text-blue-600" />
+      <Alert className="bg-indigo-500/5 border border-indigo-200/40 dark:border-indigo-500/20 rounded-xl">
+        <IconInfoCircle className="h-4 w-4 text-indigo-600" />
         <AlertDescription className="text-sm">
-          Quickly verify your company details. Edits auto-save locally.
+          Quickly verify your company details. All edits auto-save locally.
         </AlertDescription>
       </Alert>
 
@@ -234,6 +243,8 @@ export default function ReviewBusinessProfile() {
       {/* ======================================================= */}
       <SectionBlock
         title="Company Information"
+        icon={<IconBuildingStore className="h-5 w-5 text-sky-500" />}
+        colorScheme="blue"
         onEdit={() => {
           setCompanyDraft(profile.company_info);
           setCompanyOpen(true);
@@ -249,6 +260,8 @@ export default function ReviewBusinessProfile() {
       {/* ======================================================= */}
       <SectionBlock
         title="Ideal Customer Profile"
+        icon={<IconTarget className="h-5 w-5 text-violet-500" />}
+        colorScheme="purple"
         onEdit={() => {
           setIcpDraft(profile.ideal_customer_profile);
           setIcpOpen(true);
@@ -266,19 +279,21 @@ export default function ReviewBusinessProfile() {
       {/* ======================================================= */}
       <SectionBlock
         title="Products & Services"
-        actionLabel="Add"
+        icon={<IconBriefcase className="h-5 w-5 text-emerald-500" />}
+        colorScheme="emerald"
+        actionLabel="Add Product"
         onAction={() => setProductOpen({ open: true, index: null })}
+        showOuterBox={false}
       >
-        {profile.products_and_services.length === 0 && (
+        {profile.products_and_services.length === 0 ? (
           <p className="text-sm text-muted-foreground">No products added yet.</p>
-        )}
-
-        <div className="space-y-3">
-          {profile.products_and_services.map((p, i) => (
+        ) : (
+          profile.products_and_services.map((p, i) => (
             <SubItem
               key={i}
               title={p.name}
               description={p.description}
+              colorScheme="emerald"
               onEdit={() => {
                 setProductDraft(p);
                 setProductOpen({ open: true, index: i });
@@ -290,8 +305,8 @@ export default function ReviewBusinessProfile() {
                 }))
               }
             />
-          ))}
-        </div>
+          ))
+        )}
       </SectionBlock>
 
       {/* ======================================================= */}
@@ -299,20 +314,22 @@ export default function ReviewBusinessProfile() {
       {/* ======================================================= */}
       <SectionBlock
         title="Talk Tracks"
-        actionLabel="Add"
+        icon={<IconMessages className="h-5 w-5 text-amber-500" />}
+        colorScheme="amber"
+        actionLabel="Add Track"
         onAction={() => setTalkOpen({ open: true, index: null })}
+        showOuterBox={false}
       >
-        {profile.talk_tracks.length === 0 && (
+        {profile.talk_tracks.length === 0 ? (
           <p className="text-sm text-muted-foreground">No talk tracks yet.</p>
-        )}
-
-        <div className="space-y-3">
-          {profile.talk_tracks.map((t: any, i: number) => {
+        ) : (
+          profile.talk_tracks.map((t: any, i: number) => {
             const text = typeof t === "string" ? t : t.text || "";
             return (
               <SubItem
                 key={i}
                 title={`"${text}"`}
+                colorScheme="amber"
                 onEdit={() => {
                   setTalkDraft(text);
                   setTalkOpen({ open: true, index: i });
@@ -320,13 +337,13 @@ export default function ReviewBusinessProfile() {
                 onDelete={() =>
                   updateProfile((prev) => ({
                     ...prev,
-                    talk_tracks: prev.talk_tracks.filter((_, x) => x !== i),
+                    talk_tracks: prev.talk_tracks.filter((_, x) => x !== i) as string[] | { text: string }[],
                   }))
                 }
               />
             );
-          })}
-        </div>
+          })
+        )}
       </SectionBlock>
 
       {/* ======================================================= */}
@@ -334,19 +351,21 @@ export default function ReviewBusinessProfile() {
       {/* ======================================================= */}
       <SectionBlock
         title="Buyer Personas"
-        actionLabel="Add"
+        icon={<IconUsers className="h-5 w-5 text-rose-500" />}
+        colorScheme="rose"
+        actionLabel="Add Persona"
         onAction={() => setPersonaOpen({ open: true, index: null })}
+        showOuterBox={false}
       >
-        {profile.buyer_personas.length === 0 && (
+        {profile.buyer_personas.length === 0 ? (
           <p className="text-sm text-muted-foreground">No personas yet.</p>
-        )}
-
-        <div className="space-y-3">
-          {profile.buyer_personas.map((p, i) => (
+        ) : (
+          profile.buyer_personas.map((p, i) => (
             <SubItem
               key={i}
               title={p.name}
               description={`${p.job_title}`}
+              colorScheme="rose"
               onEdit={() => {
                 setPersonaDraft(p);
                 setPersonaOpen({ open: true, index: i });
@@ -358,8 +377,8 @@ export default function ReviewBusinessProfile() {
                 }))
               }
             />
-          ))}
-        </div>
+          ))
+        )}
       </SectionBlock>
 
       {/* ======================================================= */}
@@ -367,19 +386,21 @@ export default function ReviewBusinessProfile() {
       {/* ======================================================= */}
       <SectionBlock
         title="Objection Handling"
-        actionLabel="Add"
+        icon={<IconAlertCircle className="h-5 w-5 text-orange-500" />}
+        colorScheme="orange"
+        actionLabel="Add Objection"
         onAction={() => setObjectionOpen({ open: true, index: null })}
+        showOuterBox={false}
       >
-        {profile.objection_handling.length === 0 && (
+        {profile.objection_handling.length === 0 ? (
           <p className="text-sm text-muted-foreground">No objections yet.</p>
-        )}
-
-        <div className="space-y-3">
-          {profile.objection_handling.map((o, i) => (
+        ) : (
+          profile.objection_handling.map((o, i) => (
             <SubItem
               key={i}
               title={o.objection}
               description={o.response}
+              colorScheme="orange"
               onEdit={() => {
                 setObjectionDraft(o);
                 setObjectionOpen({ open: true, index: i });
@@ -391,8 +412,8 @@ export default function ReviewBusinessProfile() {
                 }))
               }
             />
-          ))}
-        </div>
+          ))
+        )}
       </SectionBlock>
 
       {/* --------------------------- DIALOGS --------------------------- */}
@@ -570,39 +591,64 @@ export default function ReviewBusinessProfile() {
 
 function SectionBlock({
   title,
+  icon,
   children,
   onEdit,
   onAction,
   actionLabel = "Add",
+  colorScheme = "indigo",
+  showOuterBox = true,
 }: {
   title: string;
+  icon?: React.ReactNode;
   children: React.ReactNode;
   onEdit?: () => void;
   onAction?: () => void;
   actionLabel?: string;
+  colorScheme?: "blue" | "purple" | "emerald" | "amber" | "rose" | "orange" | "indigo";
+  showOuterBox?: boolean;
 }) {
+  const colorMap = {
+    blue: "bg-sky-500/5 border-sky-200/40 dark:border-sky-500/20",
+    purple: "bg-violet-500/5 border-violet-200/40 dark:border-violet-500/20",
+    emerald: "bg-emerald-500/5 border-emerald-200/40 dark:border-emerald-500/20",
+    amber: "bg-amber-500/5 border-amber-200/40 dark:border-amber-500/20",
+    rose: "bg-rose-500/5 border-rose-200/40 dark:border-rose-500/20",
+    orange: "bg-orange-500/5 border-orange-200/40 dark:border-orange-500/20",
+    indigo: "bg-indigo-500/5 border-indigo-200/40 dark:border-indigo-500/20",
+  };
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
 
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+        <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
+          {icon}
+          {title}
+        </h2>
 
         {onEdit && (
           <Button variant="outline" size="sm" onClick={onEdit}>
-            <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+            <IconPencil className="h-3.5 w-3.5 mr-1" /> Edit
           </Button>
         )}
 
         {onAction && (
-          <Button variant="ghost" size="sm" onClick={onAction} className="gap-1">
-            <Plus className="h-4 w-4" /> {actionLabel}
+          <Button variant="outline" size="sm" onClick={onAction} className="gap-1">
+            <IconPlus className="h-4 w-4" /> {actionLabel}
           </Button>
         )}
       </div>
 
-      <div className="bg-muted/30 border border-border rounded-xl p-5 space-y-4">
-        {children}
-      </div>
+      {showOuterBox ? (
+        <div className={`${colorMap[colorScheme]} border rounded-xl p-5 space-y-4`}>
+          {children}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -610,7 +656,7 @@ function SectionBlock({
 function Field({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
   return (
     <div className="space-y-1">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium">{label}</div>
       <div className={`text-sm ${multiline ? "leading-relaxed" : ""}`}>
         {value}
       </div>
@@ -623,23 +669,65 @@ function SubItem({
   description,
   onEdit,
   onDelete,
+  colorScheme = "indigo",
 }: {
   title: string;
   description?: string;
   onEdit: () => void;
   onDelete: () => void;
+  colorScheme?: "blue" | "purple" | "emerald" | "amber" | "rose" | "orange" | "indigo";
 }) {
-  return (
-    <div className="rounded-lg border border-border p-4 bg-background/40 flex flex-col space-y-2">
-      <div className="font-medium text-sm">{title}</div>
-      {description && <div className="text-xs text-muted-foreground">{description}</div>}
+  const colorMap = {
+    blue: {
+      border: "border-sky-200/40 dark:border-sky-500/20",
+      bg: "bg-sky-500/5",
+      hover: "hover:bg-sky-500/10",
+    },
+    purple: {
+      border: "border-violet-200/40 dark:border-violet-500/20",
+      bg: "bg-violet-500/5",
+      hover: "hover:bg-violet-500/10",
+    },
+    emerald: {
+      border: "border-emerald-200/40 dark:border-emerald-500/20",
+      bg: "bg-emerald-500/5",
+      hover: "hover:bg-emerald-500/10",
+    },
+    amber: {
+      border: "border-amber-200/40 dark:border-amber-500/20",
+      bg: "bg-amber-500/5",
+      hover: "hover:bg-amber-500/10",
+    },
+    rose: {
+      border: "border-rose-200/40 dark:border-rose-500/20",
+      bg: "bg-rose-500/5",
+      hover: "hover:bg-rose-500/10",
+    },
+    orange: {
+      border: "border-orange-200/40 dark:border-orange-500/20",
+      bg: "bg-orange-500/5",
+      hover: "hover:bg-orange-500/10",
+    },
+    indigo: {
+      border: "border-indigo-200/40 dark:border-indigo-500/20",
+      bg: "bg-indigo-500/5",
+      hover: "hover:bg-indigo-500/10",
+    },
+  };
 
-      <div className="flex gap-2 pt-1">
-        <Button variant="outline" size="sm" onClick={onEdit}>
-          <Pencil className="h-3 w-3" />
+  const colors = colorMap[colorScheme];
+
+  return (
+    <div className={`rounded-xl border ${colors.border} ${colors.bg} p-4 flex flex-col space-y-2 transition-all duration-200 ${colors.hover}`}>
+      <div className="font-medium text-sm">{title}</div>
+      {description && <div className="text-xs text-muted-foreground leading-relaxed">{description}</div>}
+
+      <div className="flex gap-2 pt-2">
+        <Button variant="outline" size="sm" onClick={onEdit} className="h-8">
+          <IconPencil className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="sm" onClick={onDelete}>
-          <Trash2 className="h-3 w-3" />
+        <Button variant="ghost" size="sm" onClick={onDelete} className="h-8 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10">
+          <IconTrash className="h-3 w-3" />
         </Button>
       </div>
     </div>

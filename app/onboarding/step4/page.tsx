@@ -11,9 +11,10 @@ export default function Step4() {
 
   const [pending, setPending] = useState(true);
   const [hasData, setHasData] = useState(false);
+  const [timeoutError, setTimeoutError] = useState(false);
 
   // ----------------------------
-  // 1️⃣ LocalStorage Polling
+  // 1️⃣ LocalStorage Polling with Timeout
   // ----------------------------
   useEffect(() => {
     const check = () => {
@@ -26,8 +27,20 @@ export default function Step4() {
 
     check(); // immediate
     const interval = setInterval(check, 1200);
-    return () => clearInterval(interval);
-  }, []);
+
+    // Set 5-minute timeout (300000ms)
+    const timeout = setTimeout(() => {
+      if (!hasData) {
+        setPending(false);
+        setTimeoutError(true);
+      }
+    }, 300000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [hasData]);
 
   // ----------------------------
   // 2️⃣ Supabase Realtime Listener (MATCHES EDITOR)
@@ -43,9 +56,9 @@ export default function Step4() {
 
           // extract markdown
           const md =
-            payload.new?.markdown ||
-            payload.new?.payload?.markdown ||
-            payload.new?.payload?.data ||
+            (payload.new as any)?.markdown ||
+            (payload.new as any)?.payload?.markdown ||
+            (payload.new as any)?.payload?.data ||
             "";
 
           if (md) {
@@ -55,9 +68,9 @@ export default function Step4() {
           }
 
           // extract JSON
-          let jsonVal = payload.new?.json_val;
-          if (!jsonVal && payload.new?.payload?.json_val) {
-            jsonVal = payload.new?.payload?.json_val;
+          let jsonVal = (payload.new as any)?.json_val;
+          if (!jsonVal && (payload.new as any)?.payload?.json_val) {
+            jsonVal = (payload.new as any)?.payload?.json_val;
           }
 
           if (jsonVal) {
@@ -79,6 +92,14 @@ export default function Step4() {
           <span className="loader" />
           <p>Waiting for workflow…</p>
         </div>
+      ) : timeoutError ? (
+        <div className="flex flex-col items-center gap-4 text-center py-20">
+          <p className="text-red-500 font-semibold">Workflow timeout</p>
+          <p className="text-sm text-muted-foreground max-w-md">
+            The AI analysis is taking longer than expected. Please go back and try again,
+            or contact support if the issue persists.
+          </p>
+        </div>
       ) : (
         <Tiptap />
       )}
@@ -88,7 +109,7 @@ export default function Step4() {
           Back
         </Button>
 
-        <Button disabled={!hasData} onClick={() => router.push("/onboarding/step5")}>
+        <Button disabled={!hasData || timeoutError} onClick={() => router.push("/onboarding/step5")}>
           Next
         </Button>
       </div>
