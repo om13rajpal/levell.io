@@ -84,7 +84,7 @@ export async function sendWebsiteToWebhook(website: string, company: string) {
     if (!companyData?.id) return false;
 
     const res = await fetch(
-      "https://n8n.omrajpal.tech/webhook-test/c5b19b00-5069-4884-894a-9807e387555c",
+      "https://n8n.omrajpal.tech/webhook/c5b19b00-5069-4884-894a-9807e387555c",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
