@@ -324,7 +324,11 @@ export default function ReviewAIEditor() {
           console.log("🟢 JSON received:", jsonData);
 
           if (jsonData) {
-            localStorage.setItem("company_json_data", JSON.stringify(jsonData));
+            // If jsonData is already a string, store it directly; otherwise stringify it
+            const jsonString = typeof jsonData === "string"
+              ? jsonData
+              : JSON.stringify(jsonData);
+            localStorage.setItem("company_json_data", jsonString);
             console.log("📦 Saved company_json_data to localStorage");
           }
         }

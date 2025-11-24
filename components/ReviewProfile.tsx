@@ -77,52 +77,21 @@ type ProfileJson = {
 };
 
 /* ---------------- DEFAULT JSON ---------------- */
-const DEFAULT_PROFILE: ProfileJson = {
+const EMPTY_PROFILE: ProfileJson = {
   talk_tracks: [],
   company_info: {
     website: "",
-    company_name: "NOT@MRP",
-    value_proposition:
-      'NOT@MRP aims to empower small businesses and simplify shopping for users by creating a seamless platform for local commerce.',
+    company_name: "",
+    value_proposition: "",
   },
-  buyer_personas: [
-    {
-      name: "The Small Business Owner",
-      goals: [
-        "Increase revenue",
-        "Improve customer reach",
-        "Digitize business operations",
-      ],
-      job_title: "Owner / Proprietor",
-      pain_points: [
-        "Limited digital presence",
-        "Low marketing expertise",
-        "Difficulty competing with big companies",
-      ],
-      responsibilities: [
-        "Daily operations",
-        "Sales",
-        "Customer management",
-      ],
-      decision_influence: "Main decision-maker",
-      information_sources: [
-        "Word of mouth",
-        "Business associations",
-        "Local community",
-      ],
-    },
-  ],
+  buyer_personas: [],
   objection_handling: [],
-  products_and_services: [
-    { name: "LocalMart", description: "Marketplace for local stores" },
-    { name: "Events", description: "Event discovery & tickets" },
-    { name: "Laundry", description: "Laundry pickup and delivery" },
-  ],
+  products_and_services: [],
   ideal_customer_profile: {
-    region: "Urban & semi-urban India",
-    industry: "Retail, food, services",
-    tech_stack: "Low–mid maturity",
-    company_size: "1–15 employees",
+    region: "",
+    industry: "",
+    tech_stack: "",
+    company_size: "",
     sales_motion: "",
   },
 };
@@ -131,18 +100,29 @@ const DEFAULT_PROFILE: ProfileJson = {
 const STORAGE_KEY = "company_json_data";
 
 function ensureProfile(data: any): ProfileJson {
+  // Handle products_and_services - convert strings to objects if needed
+  let products: ProductService[] = [];
+  if (Array.isArray(data?.products_and_services)) {
+    products = data.products_and_services.map((p: any) => {
+      if (typeof p === "string") {
+        return { name: p, description: "" };
+      }
+      return { name: p.name || "", description: p.description || "" };
+    });
+  }
+
   return {
-    ...DEFAULT_PROFILE,
+    ...EMPTY_PROFILE,
     ...data,
-    company_info: { ...DEFAULT_PROFILE.company_info, ...data?.company_info },
+    company_info: { ...EMPTY_PROFILE.company_info, ...data?.company_info },
     ideal_customer_profile: {
-      ...DEFAULT_PROFILE.ideal_customer_profile,
+      ...EMPTY_PROFILE.ideal_customer_profile,
       ...data?.ideal_customer_profile,
     },
-    products_and_services: data?.products_and_services || DEFAULT_PROFILE.products_and_services,
-    buyer_personas: data?.buyer_personas || DEFAULT_PROFILE.buyer_personas,
-    talk_tracks: data?.talk_tracks || DEFAULT_PROFILE.talk_tracks,
-    objection_handling: data?.objection_handling || DEFAULT_PROFILE.objection_handling,
+    products_and_services: products,
+    buyer_personas: data?.buyer_personas || [],
+    talk_tracks: data?.talk_tracks || [],
+    objection_handling: data?.objection_handling || [],
   };
 }
 
@@ -151,7 +131,7 @@ function ensureProfile(data: any): ProfileJson {
 /* ================================================================= */
 
 export default function ReviewBusinessProfile() {
-  const [profile, setProfile] = useState<ProfileJson>(DEFAULT_PROFILE);
+  const [profile, setProfile] = useState<ProfileJson>(EMPTY_PROFILE);
 
   // Dialog states
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -174,8 +154,8 @@ export default function ReviewBusinessProfile() {
   });
 
   // Draft states
-  const [companyDraft, setCompanyDraft] = useState<CompanyInfo>(DEFAULT_PROFILE.company_info);
-  const [icpDraft, setIcpDraft] = useState<IdealCustomerProfile>(DEFAULT_PROFILE.ideal_customer_profile);
+  const [companyDraft, setCompanyDraft] = useState<CompanyInfo>(EMPTY_PROFILE.company_info);
+  const [icpDraft, setIcpDraft] = useState<IdealCustomerProfile>(EMPTY_PROFILE.ideal_customer_profile);
   const [productDraft, setProductDraft] = useState<ProductService>({ name: "", description: "" });
   const [personaDraft, setPersonaDraft] = useState<BuyerPersona>({
     name: "",
@@ -196,10 +176,32 @@ export default function ReviewBusinessProfile() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
+      console.log("📦 Raw company_json_data from localStorage:", stored);
       if (stored) {
-        setProfile(ensureProfile(JSON.parse(stored)));
-      } else {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_PROFILE));
+        let parsed: any = stored;
+
+        // Keep parsing while it's a string (handles multiple levels of stringification)
+        let parseAttempts = 0;
+        while (typeof parsed === "string" && parseAttempts < 5) {
+          console.log(`📦 Parse attempt ${parseAttempts + 1}, type: ${typeof parsed}`);
+          parsed = JSON.parse(parsed);
+          parseAttempts++;
+        }
+
+        console.log("📦 Final parsed company_json_data:", parsed);
+        console.log("📦 Type:", typeof parsed);
+        console.log("📦 Keys:", parsed ? Object.keys(parsed) : "null");
+        console.log("📦 products_and_services:", parsed?.products_and_services);
+        if (parsed?.products_and_services?.[0]) {
+          console.log("📦 First product keys:", Object.keys(parsed.products_and_services[0]));
+          console.log("📦 First product:", parsed.products_and_services[0]);
+        }
+
+        if (parsed && typeof parsed === "object") {
+          const ensured = ensureProfile(parsed);
+          console.log("📦 After ensureProfile:", ensured);
+          setProfile(ensured);
+        }
       }
     } catch (err) {
       console.error("Load error:", err);

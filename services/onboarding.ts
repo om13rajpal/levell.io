@@ -68,12 +68,18 @@ export async function validateConnectedTools() {
   }
 }
 
-export async function sendWebsiteToWebhook(website: string, company: string) {
+export interface WebhookResponse {
+  success: boolean;
+  markdown?: string;
+  json_val?: any;
+}
+
+export async function sendWebsiteToWebhook(website: string, company: string): Promise<WebhookResponse> {
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return false;
+    if (!user) return { success: false };
 
     const { data: companyData } = await supabase
       .from("company")
@@ -81,7 +87,7 @@ export async function sendWebsiteToWebhook(website: string, company: string) {
       .eq("user_id", user.id)
       .single();
 
-    if (!companyData?.id) return false;
+    if (!companyData?.id) return { success: false };
 
     const res = await fetch(
       "https://n8n.omrajpal.tech/webhook/c5b19b00-5069-4884-894a-9807e387555c",
@@ -96,9 +102,21 @@ export async function sendWebsiteToWebhook(website: string, company: string) {
       }
     );
 
-    return res.ok;
+    if (!res.ok) return { success: false };
+
+    const data = await res.json();
+
+    // Extract markdown and json_val from response
+    const markdown = data?.markdown || data?.payload?.markdown || data?.payload?.data || "";
+    const json_val = data?.json_val || data?.payload?.json_val || null;
+
+    return {
+      success: true,
+      markdown,
+      json_val,
+    };
   } catch {
-    return false;
+    return { success: false };
   }
 }
 

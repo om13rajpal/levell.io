@@ -37,6 +37,7 @@ export default function ConnectTools({
   const [firefliesKey, setFirefliesKey] = useState("");
   const [openAIKey, setOpenAIKey] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isFirefliesDialogOpen, setIsFirefliesDialogOpen] = useState(false);
 
   useEffect(() => {
     const loadKeys = async () => {
@@ -82,6 +83,7 @@ export default function ConnectTools({
       } = await supabase.auth.getUser();
       if (!user) {
         toast.error("No authenticated user found.");
+        setIsSaving(false);
         onSavingChange?.(false);
         return;
       }
@@ -99,17 +101,56 @@ export default function ConnectTools({
       if (error) {
         console.error(error);
         toast.error(`Failed to save ${type} key: ${error.message}`);
-      } else {
-        if (type === "fireflies") setFirefliesKey(key);
-        if (type === "openai") setOpenAIKey(key);
-        if (type === "fireflies") {
-          localStorage.setItem("onboarding_fireflies_connected", "true");
-          onFirefliesStatusChange?.(true);
-        }
-        toast.success(
-          `${type === "fireflies" ? "Fireflies" : "OpenAI"} key saved!`
-        );
+        setIsSaving(false);
+        onSavingChange?.(false);
+        return;
       }
+
+      // If saving Fireflies key, make POST request to webhook
+      if (type === "fireflies") {
+        try {
+          const webhookResponse = await fetch(
+            "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                token: key,
+                userid: user.id,
+                skip: 0,
+              }),
+            }
+          );
+
+          if (!webhookResponse.ok) {
+            toast.error("Failed to sync with webhook. Please try again.");
+            setIsSaving(false);
+            onSavingChange?.(false);
+            return;
+          }
+        } catch (webhookError) {
+          console.error("Webhook error:", webhookError);
+          toast.error("Failed to sync with webhook. Please try again.");
+          setIsSaving(false);
+          onSavingChange?.(false);
+          return;
+        }
+      }
+
+      // Success - update state and close dialog
+      if (type === "fireflies") {
+        setFirefliesKey(key);
+        localStorage.setItem("onboarding_fireflies_connected", "true");
+        onFirefliesStatusChange?.(true);
+        setIsFirefliesDialogOpen(false);
+      }
+      if (type === "openai") {
+        setOpenAIKey(key);
+      }
+
+      toast.success(
+        `${type === "fireflies" ? "Fireflies" : "OpenAI"} key saved!`
+      );
     } catch (err) {
       console.error(err);
       toast.error("Unexpected error saving key.");
@@ -157,7 +198,7 @@ export default function ConnectTools({
                 </Badge>
               </CardHeader>
               <CardContent className="flex gap-3">
-                <Dialog>
+                <Dialog open={isFirefliesDialogOpen} onOpenChange={setIsFirefliesDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm">
                       <Plug className="h-4 w-4" />
