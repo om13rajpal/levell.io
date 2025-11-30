@@ -76,6 +76,7 @@ import {
 } from "@/components/ui/select";
 
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 
 // ========== TYPES ========== //
 
@@ -93,7 +94,7 @@ export type Transcript = {
 
 // ========== DRAG HANDLE ========== //
 
-function DragHandle({ id }: { id: number }) {
+const DragHandle = React.memo(function DragHandle({ id }: { id: number }) {
   const { attributes, listeners } = useSortable({ id });
 
   return (
@@ -107,7 +108,7 @@ function DragHandle({ id }: { id: number }) {
       <IconGripVertical size={16} />
     </Button>
   );
-}
+});
 
 // ========== TABLE COLUMNS ========== //
 
@@ -137,7 +138,7 @@ export const transcriptColumns: ColumnDef<Transcript>[] = [
   },
 
   {
-    accessorKey: "ai_overall_score",
+    accessorKey: "Call Score",
     header: "Score",
     cell: ({ row }) => {
       const score = row.original.ai_overall_score;
@@ -227,7 +228,7 @@ export const transcriptColumns: ColumnDef<Transcript>[] = [
 
 // ========== DRAGGABLE ROW ========== //
 
-function DraggableRow({ row }: { row: Row<Transcript> }) {
+const DraggableRow = React.memo(function DraggableRow({ row }: { row: Row<Transcript> }) {
   const { transform, transition, setNodeRef, isDragging } = useSortable({
     id: row.original.id,
   });
@@ -249,7 +250,7 @@ function DraggableRow({ row }: { row: Row<Transcript> }) {
       ))}
     </TableRow>
   );
-}
+});
 
 // ========== MAIN TABLE COMPONENT ========== //
 
@@ -285,7 +286,7 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
   );
 
   // ⭐ SYNC BUTTON LOGIC
-  const handleSync = async () => {
+  const handleSync = React.useCallback(async () => {
     try {
       setSyncLoading(true);
 
@@ -298,18 +299,38 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
       const userId = parsed?.user?.id;
       if (!userId) return;
 
-      const { data: fresh } = await supabase
-        .from("transcripts")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+      // Get current transcript count for skip parameter
+      const skip = data.length;
 
-      setData(fresh ?? []);
-      localStorage.setItem("transcripts-cache", JSON.stringify(fresh ?? []));
-    } finally {
+      // Make request to n8n webhook
+      const webhookUrl = "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89";
+
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userid: userId,
+          skip: skip,
+          token: "936d3a85-de3a-42be-a462-9609d2080048",
+        }),
+      }).catch((err) => {
+        console.error("Webhook request failed:", err);
+      });
+
+      // Show toast notification
+      toast.success("Syncing started");
+
+      // Stop animation after 2 seconds
+      setTimeout(() => {
+        setSyncLoading(false);
+      }, 2000);
+    } catch (err) {
+      console.error("Sync error:", err);
       setSyncLoading(false);
     }
-  };
+  }, [data.length]);
 
   const table = useReactTable({
     data,
@@ -336,16 +357,16 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
     getSortedRowModel: getSortedRowModel(),
   });
 
-  function handleDragEnd(event: DragEndEvent) {
+  const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
     if (active && over && active.id !== over.id) {
       setData((prev) => {
-        const oldIndex = dataIds.indexOf(active.id);
-        const newIndex = dataIds.indexOf(over.id);
+        const oldIndex = prev.findIndex(d => d.id === active.id);
+        const newIndex = prev.findIndex(d => d.id === over.id);
         return arrayMove(prev, oldIndex, newIndex);
       });
     }
-  }
+  }, []);
 
   return (
     <Tabs defaultValue="table" className="w-full flex flex-col gap-4">

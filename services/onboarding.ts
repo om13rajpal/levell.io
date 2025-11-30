@@ -3,19 +3,51 @@
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
+// Simple in-memory cache for frequently accessed data
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCachedData<T>(key: string): T | null {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data as T;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCachedData(key: string, data: any): void {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+export function clearCache(key?: string): void {
+  if (key) {
+    cache.delete(key);
+  } else {
+    cache.clear();
+  }
+}
+
 export function getStoredAuth() {
+  // Check cache first
+  const cached = getCachedData<{ name: string; email: string }>("storedAuth");
+  if (cached) return cached;
+
   try {
     const token = localStorage.getItem("sb-rpowalzrbddorfnnmccp-auth-token");
     if (!token) return { name: "", email: "" };
 
     const parsed = JSON.parse(token);
-    return {
+    const result = {
       name:
         parsed?.user?.user_metadata?.full_name ||
         parsed?.user?.user_metadata?.name ||
         "",
       email: parsed?.user?.email || "",
     };
+
+    setCachedData("storedAuth", result);
+    return result;
   } catch {
     return { name: "", email: "" };
   }
@@ -45,6 +77,11 @@ export async function updateUserInSupabase(fullname: string, email: string) {
 }
 
 export async function validateConnectedTools() {
+  // Check cache first
+  const cacheKey = "connectedTools";
+  const cached = getCachedData<boolean>(cacheKey);
+  if (cached !== null) return cached;
+
   try {
     const {
       data: { user },
@@ -62,6 +99,7 @@ export async function validateConnectedTools() {
       return false;
     }
 
+    setCachedData(cacheKey, true);
     return true;
   } catch {
     return false;
@@ -90,7 +128,7 @@ export async function sendWebsiteToWebhook(website: string, company: string): Pr
     if (!companyData?.id) return { success: false };
 
     const res = await fetch(
-      "https://n8n.omrajpal.tech/webhook/c5b19b00-5069-4884-894a-9807e387555c",
+      "https://n8n.omrajpal.tech/webhook-test/c5b19b00-5069-4884-894a-9807e387555c",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -106,8 +144,10 @@ export async function sendWebsiteToWebhook(website: string, company: string): Pr
 
     const data = await res.json();
 
+    console.log("Webhook response data:", data);
+
     // Extract markdown and json_val from response
-    const markdown = data?.markdown || data?.payload?.markdown || data?.payload?.data || "";
+    const markdown = data?.markdown || data?.payload?.markdown || data?.payload?.data || data?.data || "";
     const json_val = data?.json_val || data?.payload?.json_val || null;
 
     return {

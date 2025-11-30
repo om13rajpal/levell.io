@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Card,
   CardHeader,
@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Grid2X2, List, Plus, MoreHorizontal, Search } from "lucide-react";
+import { Grid2X2, List, Plus, MoreHorizontal, Search, Sparkles } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -95,8 +95,11 @@ export default function CompaniesPage() {
   const [newCompanyUrl, setNewCompanyUrl] = useState("");
   const [addingSaving, setAddingSaving] = useState(false);
 
+  // Predict Companies
+  const [predicting, setPredicting] = useState(false);
+
   // --------------------------------------------------
-  // Load Data
+  // Load Data - OPTIMIZED: Parallel API calls
   // --------------------------------------------------
   useEffect(() => {
     async function load() {
@@ -105,26 +108,25 @@ export default function CompaniesPage() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
-      // 1 — Your own company
-      const { data: myComp } = await supabase
-        .from("company")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
+      // Parallel API calls using Promise.all for better performance
+      const [myCompResult, detectedResult, callsResult] = await Promise.all([
+        supabase
+          .from("company")
+          .select("*")
+          .eq("user_id", user.id)
+          .single(),
+        supabase.from("companies").select("*"),
+        supabase.from("company_calls").select("company_id, created_at"),
+      ]);
 
-      // 2 — Detected companies
-      const { data: detected } = await supabase.from("companies").select("*");
-
-      // 3 — Call counts
-      const { data: companyCalls } = await supabase
-        .from("company_calls")
-        .select("company_id, created_at");
-
-      setMyCompany(myComp || null);
-      setDetectedCompanies(detected || []);
-      setCalls(companyCalls || []);
+      setMyCompany(myCompResult.data || null);
+      setDetectedCompanies(detectedResult.data || []);
+      setCalls(callsResult.data || []);
       setLoading(false);
     }
 
@@ -132,7 +134,7 @@ export default function CompaniesPage() {
   }, []);
 
   // --------------------------------------------------
-  // Enhancing detected company objects
+  // Enhancing detected company objects - OPTIMIZED: Deterministic scoring
   // --------------------------------------------------
   const combinedData = useMemo(() => {
     return detectedCompanies.map((c) => {
@@ -149,7 +151,8 @@ export default function CompaniesPage() {
         calls: companyCalls.length,
         lastCall,
         industry: industryFromDomain(c.domain),
-        score: Math.floor(Math.random() * 40) + 60, // Placeholder — replace with actual score later
+        // Deterministic pseudo-random based on company ID to prevent re-render changes
+        score: c.ai_overall_score ?? ((c.id * 17) % 40 + 60),
         risk: companyCalls.length === 0 ? "Critical" : "Low",
       };
     });
@@ -184,6 +187,14 @@ export default function CompaniesPage() {
   }, [maxPage, page]);
 
   // --------------------------------------------------
+  // Memoized Filter Handlers - OPTIMIZED: useCallback
+  // --------------------------------------------------
+  const handleSearch = useCallback((value: string) => setQ(value), []);
+  const handleIndustryChange = useCallback((value: string) => setIndustry(value), []);
+  const handleRiskChange = useCallback((value: string) => setRisk(value), []);
+  const handleSortChange = useCallback((value: string) => setSortBy(value), []);
+
+  // --------------------------------------------------
   // Save Goal
   // --------------------------------------------------
   async function saveGoal() {
@@ -209,6 +220,42 @@ export default function CompaniesPage() {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // --------------------------------------------------
+  // Predict Companies (trigger n8n workflow)
+  // --------------------------------------------------
+  async function predictCompanies() {
+    try {
+      setPredicting(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("User not authenticated");
+        return;
+      }
+
+      const res = await fetch(
+        "https://n8n.omrajpal.tech/webhook/c4b17fa2-8f72-46be-b1b3-d2b30f89976c",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userid: user.id }),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to trigger prediction workflow");
+      }
+
+      toast.success("Prediction workflow triggered successfully!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to predict companies");
+    } finally {
+      setPredicting(false);
     }
   }
 
@@ -338,25 +385,35 @@ export default function CompaniesPage() {
                 </Button>
               </div>
 
+              <Button
+                variant="secondary"
+                className="gap-2"
+                onClick={predictCompanies}
+                disabled={predicting}
+              >
+                <Sparkles className="h-4 w-4" />
+                {predicting ? "Predicting…" : "Predict Companies"}
+              </Button>
+
               <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
                 <Plus className="h-4 w-4" /> Add Company
               </Button>
             </div>
           </div>
 
-          {/* FILTER BAR */}
+          {/* FILTER BAR - OPTIMIZED: useCallback handlers */}
           <div className="flex flex-wrap gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search companies…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => handleSearch(e.target.value)}
                 className="pl-8 bg-card/60 border-border/60"
               />
             </div>
 
-            <Select value={industry} onValueChange={setIndustry}>
+            <Select value={industry} onValueChange={handleIndustryChange}>
               <SelectTrigger className="w-[150px] bg-card/60 border-border/60">
                 <SelectValue placeholder="Industry" />
               </SelectTrigger>
@@ -370,7 +427,7 @@ export default function CompaniesPage() {
               </SelectContent>
             </Select>
 
-            <Select value={risk} onValueChange={setRisk}>
+            <Select value={risk} onValueChange={handleRiskChange}>
               <SelectTrigger className="w-[140px] bg-card/60 border-border/60">
                 <SelectValue placeholder="Risk" />
               </SelectTrigger>
@@ -382,7 +439,7 @@ export default function CompaniesPage() {
               </SelectContent>
             </Select>
 
-            <Select value={sortBy} onValueChange={setSortBy}>
+            <Select value={sortBy} onValueChange={handleSortChange}>
               <SelectTrigger className="w-[160px] bg-card/60 border-border/60">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -45,6 +46,8 @@ import {
   UserPlus,
   Shield,
   Trash2,
+  BarChart3,
+  Eye,
 } from "lucide-react";
 
 type Team = {
@@ -78,6 +81,7 @@ type MemberTag = {
 };
 
 export default function TeamPage() {
+  const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);
   const [user, setUser] = useState<UserRow | null>(null);
@@ -119,7 +123,7 @@ export default function TeamPage() {
     } catch {}
   }, []);
 
-  const getRoleForUser = (
+  const getRoleForUser = useCallback((
     uid: string | null | undefined
   ): "admin" | "member" | null => {
     if (!uid || !team) return null;
@@ -144,7 +148,7 @@ export default function TeamPage() {
       return "member";
 
     return null;
-  };
+  }, [team, tags, memberTags]);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
@@ -181,39 +185,22 @@ export default function TeamPage() {
       setTeam(teamRow as Team);
       setSettingsTeamName(teamRow.team_name);
 
-      if ((teamRow.members || []).length > 0) {
-        const { data: m } = await supabase
-          .from("users")
-          .select("id, name, email")
-          .in("id", teamRow.members as string[]);
-        setMembers(m || []);
-      } else {
-        setMembers([]);
-      }
+      // Parallel fetch of members, owner, tags, and member tags
+      const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
+        teamRow.members?.length > 0
+          ? supabase.from("users").select("id, name, email").in("id", teamRow.members)
+          : Promise.resolve({ data: [] }),
+        teamRow.owner
+          ? supabase.from("users").select("id, name, email").eq("id", teamRow.owner).single()
+          : Promise.resolve({ data: null }),
+        supabase.from("team_tags").select("*").eq("team_id", teamRow.id),
+        supabase.from("team_member_tags").select("*").eq("team_id", teamRow.id)
+      ]);
 
-      if (teamRow.owner) {
-        const { data: owner } = await supabase
-          .from("users")
-          .select("id, name, email")
-          .eq("id", teamRow.owner)
-          .single();
-        setOwnerUser(owner);
-      }
-
-      const { data: tagRows } = await supabase
-        .from("team_tags")
-        .select("*")
-        .eq("team_id", teamRow.id);
-
-      setTags(tagRows || []);
-
-      const { data: mt } = await supabase
-        .from("team_member_tags")
-        .select("*")
-        .eq("team_id", teamRow.id);
-
-      setMemberTags(mt || []);
-
+      setMembers(membersResult.data || []);
+      setOwnerUser(ownerResult.data);
+      setTags(tagsResult.data || []);
+      setMemberTags(memberTagsResult.data || []);
       setLoading(false);
     };
 
@@ -241,13 +228,15 @@ export default function TeamPage() {
 
     const members = [userId];
 
-    const { error } = await supabase
+    const { data: newTeam, error } = await supabase
       .from("teams")
       .insert({
         team_name: createTeamName.trim(),
         owner: userId,
         members,
-      });
+      })
+      .select("*")
+      .single();
 
     if (error) {
       alert(error.message);
@@ -255,7 +244,14 @@ export default function TeamPage() {
     }
 
     setOpenCreateTeam(false);
-    window.location.reload();
+
+    // Update state instead of reloading
+    setTeam(newTeam as Team);
+    setSettingsTeamName(newTeam.team_name);
+    setMembers([user!]);
+    setOwnerUser(user);
+    setTags([]);
+    setMemberTags([]);
   };
 
   const handleJoinTeam = async () => {
@@ -266,7 +262,7 @@ export default function TeamPage() {
 
     const { data: teamRow, error } = await supabase
       .from("teams")
-      .select("id, members")
+      .select("*")
       .eq("id", teamIdNum)
       .single();
 
@@ -275,13 +271,37 @@ export default function TeamPage() {
     const newMembers = [...teamRow.members];
     if (!newMembers.includes(userId)) newMembers.push(userId);
 
-    await supabase
+    const { data: updatedTeam } = await supabase
       .from("teams")
       .update({ members: newMembers })
-      .eq("id", teamIdNum);
+      .eq("id", teamIdNum)
+      .select("*")
+      .single();
 
     setOpenJoinTeam(false);
-    window.location.reload();
+
+    // Reload team data instead of full page reload
+    if (updatedTeam) {
+      setTeam(updatedTeam as Team);
+      setSettingsTeamName(updatedTeam.team_name);
+
+      // Fetch all related data in parallel
+      const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
+        updatedTeam.members?.length > 0
+          ? supabase.from("users").select("id, name, email").in("id", updatedTeam.members)
+          : Promise.resolve({ data: [] }),
+        updatedTeam.owner
+          ? supabase.from("users").select("id, name, email").eq("id", updatedTeam.owner).single()
+          : Promise.resolve({ data: null }),
+        supabase.from("team_tags").select("*").eq("team_id", updatedTeam.id),
+        supabase.from("team_member_tags").select("*").eq("team_id", updatedTeam.id)
+      ]);
+
+      setMembers(membersResult.data || []);
+      setOwnerUser(ownerResult.data);
+      setTags(tagsResult.data || []);
+      setMemberTags(memberTagsResult.data || []);
+    }
   };
 
   const leaveTeam = async () => {
@@ -299,7 +319,12 @@ export default function TeamPage() {
       .eq("team_id", team.id)
       .eq("user_id", userId);
 
-    window.location.reload();
+    // Clear team state instead of reloading
+    setTeam(null);
+    setMembers([]);
+    setTags([]);
+    setMemberTags([]);
+    setOwnerUser(null);
   };
 
   const removeMember = async (memberId: string) => {
@@ -627,6 +652,16 @@ export default function TeamPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 rounded-xl shadow-sm hover:shadow"
+                        onClick={() => router.push("/team/analytics")}
+                      >
+                        <BarChart3 className="h-4 w-4" />
+                        Team Analytics
+                      </Button>
+
                       {isAdmin && (
                         <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
                           <DialogTrigger asChild>
@@ -761,6 +796,15 @@ export default function TeamPage() {
                               {isAdmin && (
                                 <TableCell className="text-right">
                                   <div className="flex items-center justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-xs h-8 px-3 hover:bg-primary/10"
+                                      onClick={() => router.push(`/team/member/${m.id}`)}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1" />
+                                      View Profile
+                                    </Button>
                                     {m.id !== userId && !isMemberOwner && (
                                       <>
                                         <Button
