@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,397 +12,762 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { X, Plus, ChevronRight, RefreshCw } from "lucide-react";
+import { X, Plus, RefreshCw, Save, Loader2 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
+
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+import { SiteHeader } from "@/components/site-header";
+
+/* ---------------- TYPES ---------------- */
+type CompanyInfo = {
+  website: string;
+  company_name: string;
+  value_proposition: string;
+};
+
+type BuyerPersona = {
+  name: string;
+  goals: string[];
+  job_title: string;
+  pain_points: string[];
+  responsibilities: string[];
+  decision_influence: string;
+  information_sources: string[];
+};
+
+type ProductService = {
+  name: string;
+  description: string;
+};
+
+type IdealCustomerProfile = {
+  region: string;
+  industry: string;
+  tech_stack: string;
+  company_size: string;
+  sales_motion: string;
+};
+
+type ObjectionPair = {
+  objection: string;
+  response: string;
+};
+
+type ProfileJson = {
+  talk_tracks: string[] | { text: string }[];
+  company_info: CompanyInfo;
+  buyer_personas: BuyerPersona[];
+  objection_handling: ObjectionPair[];
+  products_and_services: ProductService[];
+  ideal_customer_profile: IdealCustomerProfile;
+};
+
+/* ---------------- DEFAULT JSON ---------------- */
+const EMPTY_PROFILE: ProfileJson = {
+  talk_tracks: [],
+  company_info: {
+    website: "",
+    company_name: "",
+    value_proposition: "",
+  },
+  buyer_personas: [],
+  objection_handling: [],
+  products_and_services: [],
+  ideal_customer_profile: {
+    region: "",
+    industry: "",
+    tech_stack: "",
+    company_size: "",
+    sales_motion: "",
+  },
+};
+
+/* ---------------- HELPERS ---------------- */
+const STORAGE_KEY = "company_json_data";
+
+function ensureProfile(data: any): ProfileJson {
+  // Handle products_and_services - convert strings to objects if needed
+  let products: ProductService[] = [];
+  if (Array.isArray(data?.products_and_services)) {
+    products = data.products_and_services.map((p: any) => {
+      if (typeof p === "string") {
+        return { name: p, description: "" };
+      }
+      return { name: p.name || "", description: p.description || "" };
+    });
+  }
+
+  // Handle talk_tracks - convert objects to strings if needed
+  let talkTracks: string[] = [];
+  if (Array.isArray(data?.talk_tracks)) {
+    talkTracks = data.talk_tracks.map((t: any) => {
+      if (typeof t === "string") return t;
+      return t.text || "";
+    });
+  }
+
+  return {
+    ...EMPTY_PROFILE,
+    ...data,
+    company_info: { ...EMPTY_PROFILE.company_info, ...data?.company_info },
+    ideal_customer_profile: {
+      ...EMPTY_PROFILE.ideal_customer_profile,
+      ...data?.ideal_customer_profile,
+    },
+    products_and_services: products,
+    buyer_personas: data?.buyer_personas || [],
+    talk_tracks: talkTracks,
+    objection_handling: data?.objection_handling || [],
+  };
+}
 
 export default function EditBusinessProfilePage() {
-  // === Overview ===
-  const [companyName, setCompanyName] = useState("Acme Corp");
-  const [website, setWebsite] = useState("https://acme.com");
-  const [industry, setIndustry] = useState("SaaS");
-  const [salesMotion, setSalesMotion] = useState("PLG – Enterprise");
-  const [elevatorPitch, setElevatorPitch] = useState(
-    "Modern platform for call analytics and revenue insights."
-  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [profile, setProfile] = useState<ProfileJson>(EMPTY_PROFILE);
+
+  // === Form States (derived from profile) ===
+  const [companyName, setCompanyName] = useState("");
+  const [website, setWebsite] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [salesMotion, setSalesMotion] = useState("");
+  const [elevatorPitch, setElevatorPitch] = useState("");
 
   // === Products ===
-  const [products, setProducts] = useState<string[]>([
-    "Call Analytics",
-    "AI Summarizer",
-  ]);
-  const [productNotes, setProductNotes] = useState<string[]>([
-    "Primary SKU",
-    "Add-on",
-  ]);
+  const [products, setProducts] = useState<{ name: string; description: string }[]>([]);
 
   // === ICP ===
-  const [companySize, setCompanySize] = useState<string[]>(["51–500"]);
-  const [regions, setRegions] = useState<string[]>(["NA", "EU"]);
-  const [industries, setIndustries] = useState<string[]>(["SaaS", "Fintech"]);
-  const [techStack, setTechStack] = useState<string[]>([
-    "Salesforce",
-    "HubSpot",
-    "Slack",
-  ]);
-  const [initiatives, setInitiatives] = useState<string[]>([
-    "RevOps",
-    "Sales",
-    "Fintech",
-  ]);
-  const [painPoints, setPainPoints] = useState<string[]>([
-    "Unstructured calls",
-    "Lost insights",
-    "Manual follow-ups",
-  ]);
+  const [companySize, setCompanySize] = useState<string[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
+  const [industries, setIndustries] = useState<string[]>([]);
+  const [techStack, setTechStack] = useState<string[]>([]);
 
   // === Personas ===
   type Persona = { role: string; notes?: string };
-  const [personas, setPersonas] = useState<Persona[]>([
-    { role: "VP Sales", notes: "Economic Buyer" },
-    { role: "RevOps Manager", notes: "Champion" },
-    { role: "Executive Buyer", notes: "KPIs: Win rate, cycle time" },
-  ]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
 
   // === Talk Tracks & Objections ===
-  const [discoveryQs, setDiscoveryQs] = useState(
-    "1) How do you capture call insights today? 2) What does success look like?"
-  );
-  const [valueProps, setValueProps] = useState(
-    "Automated summaries, risk detection, CRM updates"
-  );
-  const [proofPoints, setProofPoints] = useState(
-    "Saved 6+ hrs/wk per rep at Series B fintech"
-  );
+  const [talkTracks, setTalkTracks] = useState<string[]>([]);
   type Objection = { title: string; rebuttal: string };
-  const [objections, setObjections] = useState<Objection[]>([
-    {
-      title: "Security concerns",
-      rebuttal: "We are SOC2 Type I and never train on your data.",
-    },
-    {
-      title: "Too expensive",
-      rebuttal: "ROI proven via time saved and improved conversions.",
-    },
-  ]);
+  const [objections, setObjections] = useState<Objection[]>([]);
+
+  /* ---------------- HELPER: Populate form from profile ---------------- */
+  const populateFormFromProfile = (ensured: ProfileJson) => {
+    setProfile(ensured);
+
+    // Populate form states
+    setCompanyName(ensured.company_info.company_name || "");
+    setWebsite(ensured.company_info.website || "");
+    setElevatorPitch(ensured.company_info.value_proposition || "");
+
+    // ICP
+    const icp = ensured.ideal_customer_profile;
+    setIndustry(icp.industry || "");
+    setSalesMotion(icp.sales_motion || "");
+    setCompanySize(icp.company_size ? [icp.company_size] : []);
+    setRegions(icp.region ? icp.region.split(",").map((s) => s.trim()).filter(Boolean) : []);
+    setIndustries(icp.industry ? icp.industry.split(",").map((s) => s.trim()).filter(Boolean) : []);
+    setTechStack(icp.tech_stack ? icp.tech_stack.split(",").map((s) => s.trim()).filter(Boolean) : []);
+
+    // Products
+    setProducts(
+      ensured.products_and_services.map((p) => ({
+        name: p.name,
+        description: p.description,
+      }))
+    );
+
+    // Personas
+    setPersonas(
+      ensured.buyer_personas.map((p) => ({
+        role: p.name || p.job_title,
+        notes: p.job_title || p.decision_influence,
+      }))
+    );
+
+    // Talk tracks
+    const tracks = ensured.talk_tracks.map((t: any) =>
+      typeof t === "string" ? t : t.text || ""
+    );
+    setTalkTracks(tracks);
+
+    // Objections
+    setObjections(
+      ensured.objection_handling.map((o) => ({
+        title: o.objection,
+        rebuttal: o.response,
+      }))
+    );
+  };
+
+  /* ---------------- LOAD FROM SUPABASE (PRIMARY) OR LOCALSTORAGE (FALLBACK) ---------------- */
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // First, try to fetch from Supabase
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user) {
+          // Fetch business_profile from users table
+          const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("business_profile")
+            .eq("id", user.id)
+            .single();
+
+          if (!userError && userData?.business_profile) {
+            console.log("📦 Loaded business profile from Supabase");
+            const ensured = ensureProfile(userData.business_profile);
+            populateFormFromProfile(ensured);
+
+            // Also sync to localStorage for offline access
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(ensured));
+            setLoading(false);
+            return;
+          }
+
+          // If no business_profile in users table, try company table for basic info
+          const { data: companyData, error: companyError } = await supabase
+            .from("company")
+            .select("company_name, company_url")
+            .eq("user_id", user.id)
+            .single();
+
+          if (!companyError && companyData) {
+            console.log("📦 Loaded company data from Supabase");
+            // We have basic company info, check localStorage for rest
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+              let parsed: any = stored;
+              let parseAttempts = 0;
+              while (typeof parsed === "string" && parseAttempts < 5) {
+                parsed = JSON.parse(parsed);
+                parseAttempts++;
+              }
+
+              if (parsed && typeof parsed === "object") {
+                // Merge Supabase company data with localStorage profile
+                parsed.company_info = {
+                  ...parsed.company_info,
+                  company_name: companyData.company_name || parsed.company_info?.company_name || "",
+                  website: companyData.company_url || parsed.company_info?.website || "",
+                };
+                const ensured = ensureProfile(parsed);
+                populateFormFromProfile(ensured);
+                setLoading(false);
+                return;
+              }
+            }
+
+            // Only company data available, create minimal profile
+            const minimalProfile = ensureProfile({
+              company_info: {
+                company_name: companyData.company_name || "",
+                website: companyData.company_url || "",
+                value_proposition: "",
+              },
+            });
+            populateFormFromProfile(minimalProfile);
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Fallback: Load from localStorage if Supabase data not available
+        console.log("📦 Falling back to localStorage");
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          let parsed: any = stored;
+          let parseAttempts = 0;
+          while (typeof parsed === "string" && parseAttempts < 5) {
+            parsed = JSON.parse(parsed);
+            parseAttempts++;
+          }
+
+          if (parsed && typeof parsed === "object") {
+            const ensured = ensureProfile(parsed);
+            populateFormFromProfile(ensured);
+          }
+        }
+      } catch (err) {
+        console.error("Load error:", err);
+
+        // On error, try localStorage as final fallback
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            let parsed: any = stored;
+            let parseAttempts = 0;
+            while (typeof parsed === "string" && parseAttempts < 5) {
+              parsed = JSON.parse(parsed);
+              parseAttempts++;
+            }
+            if (parsed && typeof parsed === "object") {
+              const ensured = ensureProfile(parsed);
+              populateFormFromProfile(ensured);
+            }
+          }
+        } catch (localErr) {
+          console.error("localStorage fallback error:", localErr);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  /* ---------------- SAVE TO SUPABASE & LOCAL STORAGE ---------------- */
+  const onSave = async () => {
+    setSaving(true);
+
+    try {
+      // Build the profile JSON
+      const updatedProfile: ProfileJson = {
+        company_info: {
+          company_name: companyName,
+          website: website,
+          value_proposition: elevatorPitch,
+        },
+        ideal_customer_profile: {
+          industry: industries.join(", "),
+          company_size: companySize.join(", "),
+          region: regions.join(", "),
+          tech_stack: techStack.join(", "),
+          sales_motion: salesMotion,
+        },
+        products_and_services: products,
+        buyer_personas: personas.map((p) => ({
+          name: p.role,
+          job_title: p.notes || "",
+          goals: [],
+          pain_points: [],
+          responsibilities: [],
+          decision_influence: "",
+          information_sources: [],
+        })),
+        talk_tracks: talkTracks,
+        objection_handling: objections.map((o) => ({
+          objection: o.title,
+          response: o.rebuttal,
+        })),
+      };
+
+      // Save to localStorage
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
+
+      // Save to Supabase
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        // Update company table
+        const { error: companyError } = await supabase
+          .from("company")
+          .upsert(
+            {
+              user_id: user.id,
+              company_name: companyName,
+              company_url: website,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" }
+          );
+
+        if (companyError) {
+          console.error("Company save error:", companyError);
+        }
+
+        // Update users table with business profile JSON
+        const { error: userError } = await supabase
+          .from("users")
+          .update({
+            business_profile: updatedProfile,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", user.id);
+
+        if (userError) {
+          console.error("User save error:", userError);
+        }
+      }
+
+      toast.success("Business profile saved successfully!");
+    } catch (err) {
+      console.error("Save error:", err);
+      toast.error("Failed to save business profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const addPersona = () => setPersonas((p) => [...p, { role: "", notes: "" }]);
   const addObjection = () =>
     setObjections((o) => [...o, { title: "", rebuttal: "" }]);
-  const onSave = () => console.log("Payload saved");
+  const addProduct = () => {
+    if (products.length >= 10) return;
+    setProducts((arr) => [...arr, { name: "", description: "" }]);
+  };
+  const addTalkTrack = () => setTalkTracks((t) => [...t, ""]);
+
+  if (loading) {
+    return (
+      <SidebarProvider
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 72)",
+            "--header-height": "calc(var(--spacing) * 12)",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar variant="inset" />
+        <SidebarInset>
+          <SiteHeader heading="Business Profile" />
+          <div className="flex items-center justify-center min-h-[400px]">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    );
+  }
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-6 sm:p-8 space-y-8">
-      {/* Header */}
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Edit Business Profile
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Update your company information, ICP, and key sales details.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" className="gap-2">
-            <RefreshCw className="h-4 w-4" /> Re-run All Analysis
-          </Button>
-          <Button onClick={onSave}>Save Changes</Button>
-        </div>
-      </header>
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": "calc(var(--spacing) * 72)",
+          "--header-height": "calc(var(--spacing) * 12)",
+        } as React.CSSProperties
+      }
+    >
+      <AppSidebar variant="inset" />
+      <SidebarInset>
+        <SiteHeader heading="Business Profile" />
 
-      <div className="text-xs text-muted-foreground">
-        Last analyzed: 2025-01-04 02:17:08
-      </div>
+        <div className="mx-auto w-full max-w-6xl p-6 sm:p-8 space-y-8">
+          {/* Header */}
+          <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                Edit Business Profile
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Update your company information, ICP, and key sales details.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button onClick={onSave} disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          </header>
 
-      {/* PROFILE OVERVIEW */}
-      <SectionCard
-        title="Profile Overview"
-        desc="Updates affect new calls only. You can re-analyze past calls after saving."
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Company Name">
-            <Input
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-            />
-          </Field>
-          <Field label="Website">
-            <Input
-              value={website}
-              onChange={(e) => setWebsite(e.target.value)}
-            />
-          </Field>
-          <Field label="Industry">
-            <Input
-              value={industry}
-              onChange={(e) => setIndustry(e.target.value)}
-            />
-          </Field>
-          <Field label="Sales Motion">
-            <Input
-              value={salesMotion}
-              onChange={(e) => setSalesMotion(e.target.value)}
-            />
-          </Field>
-        </div>
-        <Field label="Elevator Pitch">
-          <Textarea
-            rows={3}
-            value={elevatorPitch}
-            onChange={(e) => setElevatorPitch(e.target.value)}
-          />
-        </Field>
-      </SectionCard>
-
-      {/* PRODUCTS */}
-      <SectionCard title="Products" desc="Add up to 5 key offerings.">
-        {products.map((prod, i) => (
-          <div
-            key={i}
-            className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1.5fr_1fr_auto]"
+          {/* PROFILE OVERVIEW */}
+          <SectionCard
+            title="Profile Overview"
+            desc="Updates affect new calls only. You can re-analyze past calls after saving."
           >
-            <Field label="Name">
-              <Input
-                value={prod}
-                onChange={(e) =>
-                  setProducts((arr) =>
-                    arr.map((v, idx) => (idx === i ? e.target.value : v))
-                  )
-                }
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Company Name">
+                <Input
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                />
+              </Field>
+              <Field label="Website">
+                <Input
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                />
+              </Field>
+              <Field label="Industry">
+                <Input
+                  value={industry}
+                  onChange={(e) => setIndustry(e.target.value)}
+                />
+              </Field>
+              <Field label="Sales Motion">
+                <Input
+                  value={salesMotion}
+                  onChange={(e) => setSalesMotion(e.target.value)}
+                />
+              </Field>
+            </div>
+            <Field label="Elevator Pitch / Value Proposition">
+              <Textarea
+                rows={3}
+                value={elevatorPitch}
+                onChange={(e) => setElevatorPitch(e.target.value)}
               />
             </Field>
-            <Field label="Note">
-              <Input
-                placeholder="Primary SKU, Add-on, etc."
-                value={productNotes[i] || ""}
-                onChange={(e) =>
-                  setProductNotes((arr) => {
-                    const next = [...arr];
-                    next[i] = e.target.value;
-                    return next;
-                  })
-                }
-              />
-            </Field>
+          </SectionCard>
+
+          {/* PRODUCTS */}
+          <SectionCard title="Products & Services" desc="Add up to 10 key offerings.">
+            {products.map((prod, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1.5fr_1fr_auto]"
+              >
+                <Field label="Name">
+                  <Input
+                    value={prod.name}
+                    onChange={(e) =>
+                      setProducts((arr) =>
+                        arr.map((v, idx) =>
+                          idx === i ? { ...v, name: e.target.value } : v
+                        )
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Description">
+                  <Input
+                    placeholder="Brief description"
+                    value={prod.description}
+                    onChange={(e) =>
+                      setProducts((arr) =>
+                        arr.map((v, idx) =>
+                          idx === i ? { ...v, description: e.target.value } : v
+                        )
+                      )
+                    }
+                  />
+                </Field>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => {
+                    setProducts((arr) => arr.filter((_, idx) => idx !== i));
+                  }}
+                  aria-label="Remove product"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
             <Button
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                setProducts((arr) => arr.filter((_, idx) => idx !== i));
-                setProductNotes((arr) => arr.filter((_, idx) => idx !== i));
-              }}
-              aria-label="Remove product"
+              type="button"
+              variant="ghost"
+              className="gap-2"
+              onClick={addProduct}
             >
-              <X className="h-4 w-4" />
+              <Plus className="h-4 w-4" /> Add Product
             </Button>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="ghost"
-          className="gap-2"
-          onClick={() => {
-            if (products.length >= 5) return;
-            setProducts((arr) => [...arr, ""]);
-            setProductNotes((arr) => [...arr, ""]);
-          }}
-        >
-          <Plus className="h-4 w-4" /> Add Product
-        </Button>
-      </SectionCard>
+          </SectionCard>
 
-      {/* ICP */}
-      <SectionCard
-        title="Ideal Customer Profile (ICP)"
-        desc="Define who you sell to and key traits."
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Company Size">
-            <ChipInput
-              values={companySize}
-              setValues={setCompanySize}
-              placeholder="e.g., 11–50"
-            />
-          </Field>
-          <Field label="Regions">
-            <ChipInput
-              values={regions}
-              setValues={setRegions}
-              placeholder="e.g., NA"
-            />
-          </Field>
-          <Field label="Industries">
-            <ChipInput
-              values={industries}
-              setValues={setIndustries}
-              placeholder="e.g., SaaS"
-            />
-          </Field>
-          <Field label="Initiatives">
-            <ChipInput
-              values={initiatives}
-              setValues={setInitiatives}
-              placeholder="e.g., Fintech"
-            />
-          </Field>
-          <Field label="Tech Stack">
-            <ChipInput
-              values={techStack}
-              setValues={setTechStack}
-              placeholder="e.g., Salesforce"
-            />
-          </Field>
-          <Field label="Pain Points">
-            <ChipInput
-              values={painPoints}
-              setValues={setPainPoints}
-              placeholder="e.g., Manual follow-ups"
-            />
-          </Field>
-        </div>
-      </SectionCard>
-
-      {/* PERSONAS */}
-      <SectionCard title="Personas" desc="Stakeholders you sell to.">
-        {personas.map((p, i) => (
-          <div
-            key={i}
-            className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_2fr_auto]"
+          {/* ICP */}
+          <SectionCard
+            title="Ideal Customer Profile (ICP)"
+            desc="Define who you sell to and key traits."
           >
-            <Field label="Role">
-              <Input
-                value={p.role}
-                onChange={(e) =>
-                  setPersonas((arr) =>
-                    arr.map((it, idx) =>
-                      idx === i ? { ...it, role: e.target.value } : it
-                    )
-                  )
-                }
-              />
-            </Field>
-            <Field label="Notes">
-              <Input
-                placeholder="Economic buyer, Champion, KPIs…"
-                value={p.notes || ""}
-                onChange={(e) =>
-                  setPersonas((arr) =>
-                    arr.map((it, idx) =>
-                      idx === i ? { ...it, notes: e.target.value } : it
-                    )
-                  )
-                }
-              />
-            </Field>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() =>
-                setPersonas((arr) => arr.filter((_, idx) => idx !== i))
-              }
-            >
-              <X className="h-4 w-4" />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Company Size">
+                <ChipInput
+                  values={companySize}
+                  setValues={setCompanySize}
+                  placeholder="e.g., 11–50"
+                />
+              </Field>
+              <Field label="Regions">
+                <ChipInput
+                  values={regions}
+                  setValues={setRegions}
+                  placeholder="e.g., NA"
+                />
+              </Field>
+              <Field label="Industries">
+                <ChipInput
+                  values={industries}
+                  setValues={setIndustries}
+                  placeholder="e.g., SaaS"
+                />
+              </Field>
+              <Field label="Tech Stack">
+                <ChipInput
+                  values={techStack}
+                  setValues={setTechStack}
+                  placeholder="e.g., Salesforce"
+                />
+              </Field>
+            </div>
+          </SectionCard>
+
+          {/* PERSONAS */}
+          <SectionCard title="Buyer Personas" desc="Stakeholders you sell to.">
+            {personas.map((p, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_2fr_auto]"
+              >
+                <Field label="Role / Name">
+                  <Input
+                    value={p.role}
+                    onChange={(e) =>
+                      setPersonas((arr) =>
+                        arr.map((it, idx) =>
+                          idx === i ? { ...it, role: e.target.value } : it
+                        )
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Notes">
+                  <Input
+                    placeholder="Economic buyer, Champion, KPIs…"
+                    value={p.notes || ""}
+                    onChange={(e) =>
+                      setPersonas((arr) =>
+                        arr.map((it, idx) =>
+                          idx === i ? { ...it, notes: e.target.value } : it
+                        )
+                      )
+                    }
+                  />
+                </Field>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() =>
+                    setPersonas((arr) => arr.filter((_, idx) => idx !== i))
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="ghost" className="gap-2" onClick={addPersona}>
+              <Plus className="h-4 w-4" /> Add Persona
             </Button>
-          </div>
-        ))}
-        <Button variant="ghost" className="gap-2" onClick={addPersona}>
-          <Plus className="h-4 w-4" /> Add Persona
-        </Button>
-      </SectionCard>
+          </SectionCard>
 
-      {/* TALK TRACKS */}
-      <SectionCard
-        title="Talk Tracks"
-        desc="Prepare your sellers for better conversations."
-      >
-        <Field label="Discovery Questions">
-          <Textarea
-            rows={3}
-            value={discoveryQs}
-            onChange={(e) => setDiscoveryQs(e.target.value)}
-          />
-        </Field>
-        <Field label="Value Props">
-          <Textarea
-            rows={3}
-            value={valueProps}
-            onChange={(e) => setValueProps(e.target.value)}
-          />
-        </Field>
-        <Field label="Proof Points">
-          <Textarea
-            rows={2}
-            value={proofPoints}
-            onChange={(e) => setProofPoints(e.target.value)}
-          />
-        </Field>
-      </SectionCard>
-
-      {/* OBJECTIONS */}
-      <SectionCard
-        title="Objections"
-        desc="Common concerns and your rebuttals."
-      >
-        {objections.map((o, i) => (
-          <div
-            key={i}
-            className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_2fr_auto]"
+          {/* TALK TRACKS */}
+          <SectionCard
+            title="Talk Tracks"
+            desc="Key talking points for your sales conversations."
           >
-            <Field label="Objection">
-              <Input
-                value={o.title}
-                onChange={(e) =>
-                  setObjections((arr) =>
-                    arr.map((it, idx) =>
-                      idx === i ? { ...it, title: e.target.value } : it
-                    )
-                  )
-                }
-              />
-            </Field>
-            <Field label="Rebuttal">
-              <Input
-                value={o.rebuttal}
-                onChange={(e) =>
-                  setObjections((arr) =>
-                    arr.map((it, idx) =>
-                      idx === i ? { ...it, rebuttal: e.target.value } : it
-                    )
-                  )
-                }
-              />
-            </Field>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() =>
-                setObjections((arr) => arr.filter((_, idx) => idx !== i))
-              }
-            >
-              <X className="h-4 w-4" />
+            {talkTracks.map((track, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <div className="flex-1">
+                  <Field label={`Track ${i + 1}`}>
+                    <Textarea
+                      rows={2}
+                      value={track}
+                      onChange={(e) =>
+                        setTalkTracks((arr) =>
+                          arr.map((t, idx) => (idx === i ? e.target.value : t))
+                        )
+                      }
+                    />
+                  </Field>
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="mt-6"
+                  onClick={() =>
+                    setTalkTracks((arr) => arr.filter((_, idx) => idx !== i))
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="ghost" className="gap-2" onClick={addTalkTrack}>
+              <Plus className="h-4 w-4" /> Add Talk Track
             </Button>
-          </div>
-        ))}
-        <Button variant="ghost" className="gap-2" onClick={addObjection}>
-          <Plus className="h-4 w-4" /> Add Objection
-        </Button>
-      </SectionCard>
+          </SectionCard>
 
-      {/* Footer */}
-      <footer className="sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t border-border/60 bg-card/60 p-3 backdrop-blur-sm">
-        <p className="text-xs text-muted-foreground">
-          Keep responses concise and relevant.
-        </p>
-        <div className="flex items-center gap-2">
-          <Button variant="outline">Cancel</Button>
-          <Button variant="secondary" className="gap-2">
-            <RefreshCw className="h-4 w-4" /> Re-run All Analysis
-          </Button>
-          <Button onClick={onSave}>Save Changes</Button>
+          {/* OBJECTIONS */}
+          <SectionCard
+            title="Objection Handling"
+            desc="Common concerns and your rebuttals."
+          >
+            {objections.map((o, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_2fr_auto]"
+              >
+                <Field label="Objection">
+                  <Input
+                    value={o.title}
+                    onChange={(e) =>
+                      setObjections((arr) =>
+                        arr.map((it, idx) =>
+                          idx === i ? { ...it, title: e.target.value } : it
+                        )
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Rebuttal">
+                  <Input
+                    value={o.rebuttal}
+                    onChange={(e) =>
+                      setObjections((arr) =>
+                        arr.map((it, idx) =>
+                          idx === i ? { ...it, rebuttal: e.target.value } : it
+                        )
+                      )
+                    }
+                  />
+                </Field>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() =>
+                    setObjections((arr) => arr.filter((_, idx) => idx !== i))
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="ghost" className="gap-2" onClick={addObjection}>
+              <Plus className="h-4 w-4" /> Add Objection
+            </Button>
+          </SectionCard>
+
+          {/* Footer */}
+          <footer className="sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t border-border/60 bg-background/95 p-3 backdrop-blur-sm rounded-t-lg">
+            <p className="text-xs text-muted-foreground">
+              Changes are saved to your account and used for AI-powered call analysis.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button onClick={onSave} disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          </footer>
         </div>
-      </footer>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 

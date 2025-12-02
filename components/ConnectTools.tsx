@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { ArrowUp, Plug } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
+import axiosClient from "@/lib/axiosClient";
 
 interface ConnectToolsProps {
   onFirefliesStatusChange?: (connected: boolean) => void;
@@ -109,25 +110,14 @@ export default function ConnectTools({
       // If saving Fireflies key, make POST request to webhook
       if (type === "fireflies") {
         try {
-          const webhookResponse = await fetch(
+          await axiosClient.post(
             "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89",
             {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                token: key,
-                userid: user.id,
-                skip: 0,
-              }),
+              token: key,
+              userid: user.id,
+              skip: 0,
             }
           );
-
-          if (!webhookResponse.ok) {
-            toast.error("Failed to sync with webhook. Please try again.");
-            setIsSaving(false);
-            onSavingChange?.(false);
-            return;
-          }
         } catch (webhookError) {
           console.error("Webhook error:", webhookError);
           toast.error("Failed to sync with webhook. Please try again.");

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   Card,
   CardHeader,
@@ -87,6 +88,50 @@ function industryFromDomain(domain: string) {
   return "General";
 }
 
+function getDomainFromUrl(url: string): string {
+  if (!url) return "";
+  try {
+    let domain = url.toLowerCase().trim();
+    domain = domain.replace(/^https?:\/\//, "");
+    domain = domain.replace(/^www\./, "");
+    domain = domain.split("/")[0];
+    return domain;
+  } catch {
+    return "";
+  }
+}
+
+function CompanyLogo({ domain, companyName, size = "lg" }: { domain: string; companyName: string; size?: "sm" | "lg" }) {
+  const [imageError, setImageError] = useState(false);
+
+  const cleanDomain = getDomainFromUrl(domain);
+  const logoUrl = cleanDomain ? `https://logo.clearbit.com/${cleanDomain}` : null;
+
+  const sizeClasses = size === "lg" ? "h-16 w-16" : "h-8 w-8";
+
+  if (!logoUrl || imageError) {
+    return (
+      <div className={`${sizeClasses} rounded-xl bg-muted flex items-center justify-center shrink-0`}>
+        <Building2 className={size === "lg" ? "h-8 w-8 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${sizeClasses} rounded-xl shrink-0 overflow-hidden`}>
+      <Image
+        src={logoUrl}
+        alt={`${companyName} logo`}
+        width={size === "lg" ? 64 : 32}
+        height={size === "lg" ? 64 : 32}
+        className={`${sizeClasses} object-cover`}
+        onError={() => setImageError(true)}
+        unoptimized
+      />
+    </div>
+  );
+}
+
 function formatDate(dt?: string | null) {
   if (!dt) return "—";
   try {
@@ -142,8 +187,9 @@ export default function CompanyDetailsPage() {
       setLoading(true);
 
       // Parallel API calls - fetch company and calls simultaneously
+      // Include company_contacts and ai_recommendations from schema
       const [companyResult, callDataResult] = await Promise.all([
-        supabase.from("companies").select("*").eq("id", id).single(),
+        supabase.from("companies").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations").eq("id", id).single(),
         supabase.from("company_calls")
           .select("id, created_at, transcript_id")
           .eq("company_id", id)
@@ -154,6 +200,7 @@ export default function CompanyDetailsPage() {
       const callData = callDataResult.data || [];
 
       // Fetch transcripts if we have call data
+      // transcript_id in company_calls is FK to transcripts.id (not fireflies_id)
       let transcriptData: any[] = [];
       if (callData.length > 0) {
         const transcriptIds = callData.map((c) => c.transcript_id).filter(Boolean);
@@ -161,22 +208,29 @@ export default function CompanyDetailsPage() {
           const { data } = await supabase
             .from("transcripts")
             .select("*")
-            .in("fireflies_id", transcriptIds);
+            .in("id", transcriptIds);
           transcriptData = data || [];
         }
       }
 
-      // Extract contacts from transcripts
-      const allAttendees: any[] = [];
-      transcriptData.forEach((t) => {
-        if (t.meeting_attendees) {
-          t.meeting_attendees.forEach((a: any) => {
-            if (!allAttendees.find((x) => x.email === a.email)) {
-              allAttendees.push(a);
-            }
-          });
-        }
-      });
+      // Extract contacts - prefer company_contacts from DB if available
+      let allAttendees: any[] = [];
+
+      // First check if company has stored contacts
+      if (comp?.company_contacts && Array.isArray(comp.company_contacts)) {
+        allAttendees = comp.company_contacts;
+      } else {
+        // Fall back to extracting from transcripts
+        transcriptData.forEach((t) => {
+          if (t.meeting_attendees) {
+            t.meeting_attendees.forEach((a: any) => {
+              if (!allAttendees.find((x) => x.email === a.email)) {
+                allAttendees.push(a);
+              }
+            });
+          }
+        });
+      }
 
       setCompany(comp);
       setCalls(callData);
@@ -362,6 +416,7 @@ export default function CompanyDetailsPage() {
                   >
                     <ArrowLeft className="h-4 w-4 mr-2" /> Back
                   </Button>
+                  <CompanyLogo domain={company.domain} companyName={company.company_name} size="lg" />
                   <div>
                     <h1 className="text-2xl font-bold">{company.company_name}</h1>
                     <p className="text-sm text-muted-foreground">
@@ -551,10 +606,8 @@ export default function CompanyDetailsPage() {
                                 <circle
                                   cx={cx}
                                   cy={cy}
-                                  r={6}
+                                  r={3}
                                   fill={color}
-                                  stroke="white"
-                                  strokeWidth={2}
                                 />
                               );
                             }}
@@ -581,23 +634,16 @@ export default function CompanyDetailsPage() {
                         No contacts detected yet.
                       </p>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         {contacts.map((contact, i) => (
                           <div
                             key={i}
-                            className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20"
+                            className="flex items-center gap-2 p-2 rounded-lg border bg-muted/20"
                           >
-                            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                              <UserCircle className="h-5 w-5 text-primary" />
-                            </div>
-                            <div>
-                              <p className="font-medium">
-                                {contact.name || "Unknown"}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {contact.email || "No email"}
-                              </p>
-                            </div>
+                            <Mail className="h-4 w-4 text-muted-foreground" />
+                            <p className="text-sm">
+                              {contact.email || "No email"}
+                            </p>
                           </div>
                         ))}
                       </div>
@@ -733,6 +779,35 @@ export default function CompanyDetailsPage() {
                 </Card>
               </div>
 
+              {/* AI Recommendations from Database */}
+              {company.ai_recommendations && company.ai_recommendations.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-purple-500" />
+                      AI Recommendations
+                    </CardTitle>
+                    <CardDescription>
+                      Strategic recommendations for this account
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {company.ai_recommendations.map((rec: string, i: number) => (
+                        <Alert
+                          key={i}
+                          className="bg-purple-500/5 border border-purple-200/40 dark:border-purple-500/20"
+                        >
+                          <AlertDescription className="text-sm">
+                            {rec}
+                          </AlertDescription>
+                        </Alert>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* AI Relationship Insights */}
               <Card>
                 <CardHeader>
@@ -818,7 +893,7 @@ export default function CompanyDetailsPage() {
                             key={t.id}
                             className="hover:bg-muted/50 cursor-pointer transition-colors"
                             onClick={() =>
-                              router.push(`/calls/${t.fireflies_id}`)
+                              router.push(`/calls/${t.id}`)
                             }
                           >
                             <TableCell className="font-medium">{t.title}</TableCell>

@@ -123,7 +123,10 @@ export function ChartAreaInteractive() {
           <ToggleGroup
             type="single"
             value={timeRange}
-            onValueChange={setTimeRange}
+            onValueChange={(value) => {
+              // Only update if a valid value is provided (prevents deselection issues)
+              if (value) setTimeRange(value)
+            }}
             variant="outline"
             className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
           >
@@ -132,7 +135,9 @@ export function ChartAreaInteractive() {
             <ToggleGroupItem value="7d">Last 7 days</ToggleGroupItem>
           </ToggleGroup>
 
-          <Select value={timeRange} onValueChange={setTimeRange}>
+          <Select value={timeRange} onValueChange={(value) => {
+            if (value) setTimeRange(value)
+          }}>
             <SelectTrigger
               className="flex w-40 **:data-[slot=select-value]:block **:data-[slot=select-value]:truncate @[767px]/card:hidden"
               size="sm"

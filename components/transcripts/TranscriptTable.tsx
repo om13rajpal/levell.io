@@ -77,6 +77,7 @@ import {
 
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
+import axiosClient from "@/lib/axiosClient";
 
 // ========== TYPES ========== //
 
@@ -302,19 +303,13 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
       // Get current transcript count for skip parameter
       const skip = data.length;
 
-      // Make request to n8n webhook
+      // Make request to n8n webhook using axios with extended timeout
       const webhookUrl = "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89";
 
-      fetch(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userid: userId,
-          skip: skip,
-          token: "936d3a85-de3a-42be-a462-9609d2080048",
-        }),
+      axiosClient.post(webhookUrl, {
+        userid: userId,
+        skip: skip,
+        token: "936d3a85-de3a-42be-a462-9609d2080048",
       }).catch((err) => {
         console.error("Webhook request failed:", err);
       });

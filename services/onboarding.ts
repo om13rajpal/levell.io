@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
+import axiosClient from "@/lib/axiosClient";
 
 // Simple in-memory cache for frequently accessed data
 const cache = new Map<string, { data: any; timestamp: number }>();
@@ -28,26 +29,79 @@ export function clearCache(key?: string): void {
   }
 }
 
+// Synchronous version - reads from localStorage (fallback)
 export function getStoredAuth() {
-  // Check cache first
-  const cached = getCachedData<{ name: string; email: string }>("storedAuth");
-  if (cached) return cached;
-
   try {
-    const token = localStorage.getItem("sb-rpowalzrbddorfnnmccp-auth-token");
+    // Find the Supabase auth token in localStorage
+    let token: string | null = null;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+        token = localStorage.getItem(key);
+        break;
+      }
+    }
+
     if (!token) return { name: "", email: "" };
 
     const parsed = JSON.parse(token);
-    const result = {
-      name:
-        parsed?.user?.user_metadata?.full_name ||
-        parsed?.user?.user_metadata?.name ||
-        "",
-      email: parsed?.user?.email || "",
-    };
+    const user = parsed?.user;
+    const metadata = user?.user_metadata || {};
+    const identityData = user?.identities?.[0]?.identity_data || {};
 
-    setCachedData("storedAuth", result);
-    return result;
+    // Try multiple fields for name (Google OAuth uses different fields)
+    let name = "";
+    if (metadata?.full_name) {
+      name = metadata.full_name;
+    } else if (metadata?.name) {
+      name = metadata.name;
+    } else if (metadata?.given_name) {
+      name = metadata?.family_name
+        ? `${metadata.given_name} ${metadata.family_name}`.trim()
+        : metadata.given_name;
+    } else if (identityData?.full_name) {
+      name = identityData.full_name;
+    } else if (identityData?.name) {
+      name = identityData.name;
+    }
+
+    const email = user?.email || metadata?.email || "";
+
+    return { name, email };
+  } catch {
+    return { name: "", email: "" };
+  }
+}
+
+// Async version - uses Supabase directly (more reliable)
+export async function getAuthUserData(): Promise<{ name: string; email: string }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return { name: "", email: "" };
+
+    const metadata = user.user_metadata || {};
+    const identityData = user.identities?.[0]?.identity_data || {};
+
+    // Try multiple fields for name (Google OAuth uses different fields)
+    let name = "";
+    if (metadata?.full_name) {
+      name = metadata.full_name;
+    } else if (metadata?.name) {
+      name = metadata.name;
+    } else if (metadata?.given_name) {
+      name = metadata?.family_name
+        ? `${metadata.given_name} ${metadata.family_name}`.trim()
+        : metadata.given_name;
+    } else if (identityData?.full_name) {
+      name = identityData.full_name;
+    } else if (identityData?.name) {
+      name = identityData.name;
+    }
+
+    const email = user.email || metadata?.email || "";
+
+    return { name, email };
   } catch {
     return { name: "", email: "" };
   }
@@ -112,37 +166,66 @@ export interface WebhookResponse {
   json_val?: any;
 }
 
-export async function sendWebsiteToWebhook(website: string, company: string): Promise<WebhookResponse> {
+export async function sendWebsiteToWebhook(website: string, companyName: string): Promise<WebhookResponse> {
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return { success: false };
 
-    const { data: companyData } = await supabase
+    // Check if company record exists, if not create one
+    let companyId: number | null = null;
+
+    const { data: existingCompany } = await supabase
       .from("company")
       .select("id")
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
-    if (!companyData?.id) return { success: false };
+    if (existingCompany?.id) {
+      companyId = existingCompany.id;
+      // Update company name and website if it exists
+      await supabase
+        .from("company")
+        .update({ company_name: companyName, company_url: website })
+        .eq("id", companyId);
+    } else {
+      // Create new company record
+      const { data: newCompany, error: insertError } = await supabase
+        .from("company")
+        .insert({
+          user_id: user.id,
+          company_name: companyName,
+          company_url: website,
+        })
+        .select("id")
+        .single();
 
-    const res = await fetch(
-      "https://n8n.omrajpal.tech/webhook-test/c5b19b00-5069-4884-894a-9807e387555c",
+      if (insertError) {
+        console.error("Error creating company:", insertError);
+        // Continue without company_id if insert fails
+      } else {
+        companyId = newCompany?.id || null;
+      }
+    }
+
+    const response = await axiosClient.post(
+      "https://n8n.omrajpal.tech/webhook/c5b19b00-5069-4884-894a-9807e387555c",
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          website,
-          company_id: companyData.id,
-          company_name: company,
-        }),
+        website,
+        company_id: companyId,
+        company_name: companyName,
+        user_id: user.id,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "*/*",
+        },
       }
     );
 
-    if (!res.ok) return { success: false };
-
-    const data = await res.json();
+    const data = response.data;
 
     console.log("Webhook response data:", data);
 
@@ -155,7 +238,8 @@ export async function sendWebsiteToWebhook(website: string, company: string): Pr
       markdown,
       json_val,
     };
-  } catch {
+  } catch (error) {
+    console.error("Webhook request failed:", error);
     return { success: false };
   }
 }

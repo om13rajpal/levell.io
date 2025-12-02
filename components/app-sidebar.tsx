@@ -10,8 +10,9 @@ import {
   IconChartBar,
   IconUsers,
   IconHelp,
-  IconInnerShadowTop,
+  IconBuilding,
 } from "@tabler/icons-react";
+import Image from "next/image";
 
 import { cn } from "@/lib/utils";
 import {
@@ -35,22 +36,29 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const [loading, setLoading] = React.useState(true);
 
   // ---------------------------------------------
-  // Load user & company (LOCAL STORAGE FIRST)
+  // Load user & company (with smart caching)
   // ---------------------------------------------
   React.useEffect(() => {
     async function load() {
-      // 1. Try reading from localStorage
+      // 1. Try reading from localStorage first for instant UI
       const cachedUser = localStorage.getItem("cachedUser");
       const cachedCompany = localStorage.getItem("cachedCompany");
 
-      if (cachedUser && cachedCompany) {
-        setUser(JSON.parse(cachedUser));
-        setCompany(JSON.parse(cachedCompany));
+      let parsedUser = cachedUser ? JSON.parse(cachedUser) : null;
+      let parsedCompany = cachedCompany ? JSON.parse(cachedCompany) : null;
+
+      // Check if cached company has required fields (company_name and company_url)
+      const hasValidCompanyCache = parsedCompany?.company_name && parsedCompany?.company_url;
+
+      // If we have valid cached data, use it immediately
+      if (parsedUser && hasValidCompanyCache) {
+        setUser(parsedUser);
+        setCompany(parsedCompany);
         setLoading(false);
-        return; // stop → do not fetch again
+        return;
       }
 
-      // 2. If nothing in localStorage → fetch from Supabase ONCE
+      // 2. Fetch fresh data from Supabase if cache is missing or incomplete
       const {
         data: { user: authUser },
       } = await supabase.auth.getUser();
@@ -75,9 +83,13 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
       setUser(userRow);
       setCompany(companyRow);
 
-      // 3. Store result in localStorage (so sidebar NEVER reloads again)
-      localStorage.setItem("cachedUser", JSON.stringify(userRow));
-      localStorage.setItem("cachedCompany", JSON.stringify(companyRow));
+      // 3. Store result in localStorage for future use
+      if (userRow) {
+        localStorage.setItem("cachedUser", JSON.stringify(userRow));
+      }
+      if (companyRow) {
+        localStorage.setItem("cachedCompany", JSON.stringify(companyRow));
+      }
 
       setLoading(false);
     }
@@ -112,7 +124,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
               <Link href="/dashboard" className="flex items-center gap-2">
-                <IconInnerShadowTop className="size-5" />
+                <CompanyLogo url={company?.company_url} name={company?.company_name} />
                 <span className="font-semibold">
                   {company?.company_name || "Your Company"}
                 </span>
@@ -169,5 +181,49 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         />
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+// Helper to extract domain from URL
+function getDomainFromUrl(url: string): string | null {
+  if (!url) return null;
+  try {
+    // Add protocol if missing
+    const urlWithProtocol = url.startsWith("http") ? url : `https://${url}`;
+    const parsed = new URL(urlWithProtocol);
+    return parsed.hostname.replace("www.", "");
+  } catch {
+    // If URL parsing fails, try to extract domain directly
+    return url.replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0];
+  }
+}
+
+function CompanyLogo({ url, name }: { url?: string; name?: string }) {
+  const [imgError, setImgError] = React.useState(false);
+  const domain = getDomainFromUrl(url || "");
+
+  // Use Clearbit Logo API for high-quality logos
+  const logoUrl = domain ? `https://logo.clearbit.com/${domain}` : null;
+
+  if (!logoUrl || imgError) {
+    return (
+      <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/10">
+        <IconBuilding className="h-4 w-4 text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-6 w-6 overflow-hidden rounded">
+      <Image
+        src={logoUrl}
+        alt={name || "Company logo"}
+        width={24}
+        height={24}
+        className="object-contain"
+        onError={() => setImgError(true)}
+        unoptimized
+      />
+    </div>
   );
 }

@@ -399,7 +399,7 @@ export default function CallsDashboard() {
                           key={t.id}
                           className="hover:bg-muted/50 cursor-pointer transition-colors"
                           onClick={() =>
-                            (window.location.href = `/calls/${t.fireflies_id}`)
+                            (window.location.href = `/calls/${t.id}`)
                           }
                         >
                           <TableCell className="font-medium">{t.title}</TableCell>

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { validateInvitation, acceptInvitation, canUserJoinTeam } from "@/services/team";
+import { toast } from "sonner";
 
 import {
   Card,
@@ -12,170 +14,154 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
-
 import { Button } from "@/components/ui/button";
+import { Loader2, Users, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 
 export default function TeamInvitePage() {
   const router = useRouter();
   const params = useParams();
-
-  const teamId = params?.id as string;
-  console.log("TEAM ID:", teamId);
+  const token = params?.id as string;
 
   const [loading, setLoading] = useState(true);
-  const [team, setTeam] = useState<any>(null);
-  const [owner, setOwner] = useState<any>(null);
+  const [accepting, setAccepting] = useState(false);
+  const [team, setTeam] = useState<{ id: number; team_name: string; owner: string } | null>(null);
+  const [ownerName, setOwnerName] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [alreadyMember, setAlreadyMember] = useState(false);
   const [error, setError] = useState("");
+  const [alreadyInTeam, setAlreadyInTeam] = useState(false);
+  const [existingTeamName, setExistingTeamName] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  // ---------------------------------------------------------
-  // Fetch current logged-in user
-  // ---------------------------------------------------------
-  const fetchCurrentUser = async () => {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    if (!user || error) {
-      setError("You must be logged in to accept this invite.");
-      return;
-    }
-
-    setUser(user);
-  };
-
-  // ---------------------------------------------------------
-  // Fetch Team + Owner details
-  // ---------------------------------------------------------
-  const fetchTeam = async () => {
-    const { data, error } = await supabase
-      .from("teams")
-      .select("*")
-      .eq("id", teamId)
-      .single();
-
-    if (error || !data) {
-      setError("Invalid or expired invite.");
-      return;
-    }
-
-    setTeam(data);
-
-    if (data.owner) {
-      const { data: ownerRow } = await supabase
-        .from("users")
-        .select("id, name, email")
-        .eq("id", data.owner)
-        .maybeSingle();
-
-      if (ownerRow) setOwner(ownerRow);
-    }
-  };
-
-  // ---------------------------------------------------------
-  // On mount → fetch user & admin
-  // ---------------------------------------------------------
   useEffect(() => {
-    if (!teamId) return;
+    if (!token) return;
 
-    (async () => {
-      await fetchCurrentUser();
-      await fetchTeam();
+    const load = async () => {
+      setLoading(true);
+
+      // Check if user is logged in
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+
+      if (!authUser) {
+        // Redirect to login with return URL
+        const returnUrl = encodeURIComponent(`/team/invite/${token}`);
+        router.replace(`/login?redirect=${returnUrl}`);
+        return;
+      }
+
+      setUser(authUser);
+
+      // Validate the invitation token
+      const { valid, team: inviteTeam, error: validationError } = await validateInvitation(token);
+
+      if (!valid || !inviteTeam) {
+        setError(validationError || "Invalid invitation link.");
+        setLoading(false);
+        return;
+      }
+
+      setTeam(inviteTeam);
+
+      // Get owner name
+      if (inviteTeam.owner) {
+        const { data: ownerData } = await supabase
+          .from("users")
+          .select("name, email")
+          .eq("id", inviteTeam.owner)
+          .single();
+
+        if (ownerData) {
+          setOwnerName(ownerData.name || ownerData.email);
+        }
+      }
+
+      // Check if user is already in a team
+      const { canJoin, existingTeam } = await canUserJoinTeam(authUser.id);
+      if (!canJoin) {
+        setAlreadyInTeam(true);
+        setExistingTeamName(existingTeam);
+      }
+
+      // Check if user is already a member of this specific team
+      const { data: teamData } = await supabase
+        .from("teams")
+        .select("members")
+        .eq("id", inviteTeam.id)
+        .single();
+
+      if (teamData?.members?.includes(authUser.id)) {
+        setSuccess(true);
+      }
+
       setLoading(false);
-    })();
-  }, [teamId]);
+    };
 
-  // ---------------------------------------------------------
-  // Check if the logged-in user is ALREADY a team member
-  // ---------------------------------------------------------
-  useEffect(() => {
-    if (!team || !user) return;
+    load();
+  }, [token, router]);
 
-    const members = team.members || [];
-
-    if (members.includes(user.id)) {
-      console.log("User is already a member");
-      setAlreadyMember(true);
-    }
-  }, [team, user]);
-
-  // ---------------------------------------------------------
-  // Accept Invite
-  // ---------------------------------------------------------
   const handleAcceptInvite = async () => {
     if (!team || !user) return;
 
-    const members = team.members || [];
+    setAccepting(true);
 
-    // user already exists in the team
-    if (members.includes(user.id)) {
-      router.replace("/dashboard");
-      return;
+    try {
+      const { success: acceptSuccess, error: acceptError } = await acceptInvitation(token, user.id);
+
+      if (!acceptSuccess) {
+        console.error("Accept invitation failed:", acceptError);
+        toast.error(acceptError || "Failed to accept invitation");
+        setAccepting(false);
+        return;
+      }
+
+      toast.success(`Welcome to ${team.team_name}!`);
+      setSuccess(true);
+      setAccepting(false);
+
+      // Redirect to team page after a short delay
+      setTimeout(() => {
+        router.replace("/team");
+      }, 1500);
+    } catch (err) {
+      console.error("Accept invitation error:", err);
+      toast.error("An unexpected error occurred");
+      setAccepting(false);
     }
+  };
 
-    const updated = Array.from(new Set([...members, user.id]));
+  const handleGoToTeam = () => {
+    router.replace("/team");
+  };
 
-    const { error } = await supabase
-      .from("teams")
-      .update({ members: updated })
-      .eq("id", team.id);
-
-    if (error) {
-      setError("Could not accept invite: " + error.message);
-      return;
-    }
-
+  const handleGoToDashboard = () => {
     router.replace("/dashboard");
   };
 
-  // 🟡 UI: Loading
-  if (loading || !teamId) {
+  // Loading state
+  if (loading || !token) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-muted-foreground animate-pulse">Loading invite…</p>
+      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-background to-muted/30">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-muted-foreground animate-pulse">Validating invitation...</p>
+        </div>
       </div>
     );
   }
 
-  // 🔴 UI: Error
+  // Error state
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center px-4">
-        <Card className="max-w-md w-full border-destructive/40 bg-destructive/10 text-destructive">
-          <CardHeader>
-            <CardTitle>Error</CardTitle>
-            <CardDescription>{error}</CardDescription>
+      <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+        <Card className="max-w-md w-full shadow-xl rounded-2xl border-destructive/30">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center">
+              <XCircle className="h-8 w-8 text-destructive" />
+            </div>
+            <CardTitle className="text-2xl">Invalid Invitation</CardTitle>
+            <CardDescription className="text-base">{error}</CardDescription>
           </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  // 🟢 UI: Already a Member
-  if (alreadyMember) {
-    return (
-      <div className="flex h-screen items-center justify-center px-4">
-        <Card className="max-w-md w-full shadow-xl border border-border/50 rounded-2xl p-6 space-y-4 text-center">
-          <CardHeader>
-            <CardTitle className="text-2xl font-semibold">
-              You're already a team member
-            </CardTitle>
-            <CardDescription>
-              You already have access to{" "}
-              <span className="font-semibold text-primary">
-                {team?.team_name || owner?.name}
-              </span>
-              's team.
-            </CardDescription>
-          </CardHeader>
-
           <CardFooter className="flex justify-center">
-            <Button
-              onClick={() => router.replace("/dashboard")}
-              className="w-full max-w-xs py-6 text-lg rounded-xl"
-            >
+            <Button onClick={handleGoToDashboard} className="w-full max-w-xs">
               Go to Dashboard
             </Button>
           </CardFooter>
@@ -184,36 +170,116 @@ export default function TeamInvitePage() {
     );
   }
 
-  // 🟢 MAIN INVITE UI
+  // Success state - already a member or just accepted
+  if (success) {
+    return (
+      <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+        <Card className="max-w-md w-full shadow-xl rounded-2xl border-green-500/30">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center">
+              <CheckCircle className="h-8 w-8 text-green-500" />
+            </div>
+            <CardTitle className="text-2xl">You&apos;re In!</CardTitle>
+            <CardDescription className="text-base">
+              You are now a member of <span className="font-semibold text-primary">{team?.team_name}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="flex justify-center">
+            <Button onClick={handleGoToTeam} className="w-full max-w-xs">
+              Go to Team
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // Already in another team state
+  if (alreadyInTeam) {
+    return (
+      <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+        <Card className="max-w-md w-full shadow-xl rounded-2xl border-amber-500/30">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto h-16 w-16 rounded-full bg-amber-500/10 flex items-center justify-center">
+              <AlertTriangle className="h-8 w-8 text-amber-500" />
+            </div>
+            <CardTitle className="text-2xl">Already in a Team</CardTitle>
+            <CardDescription className="text-base">
+              You are already a member of <span className="font-semibold text-primary">{existingTeamName}</span>.
+              You can only be in one team at a time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center">
+            <p className="text-sm text-muted-foreground">
+              To join <span className="font-medium">{team?.team_name}</span>, you&apos;ll need to leave your current team first.
+            </p>
+          </CardContent>
+          <CardFooter className="flex justify-center gap-3">
+            <Button variant="outline" onClick={handleGoToDashboard}>
+              Cancel
+            </Button>
+            <Button onClick={handleGoToTeam}>
+              Go to My Team
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // Main invitation UI
   return (
-    <div className="flex h-screen items-center justify-center px-4">
-      <Card className="max-w-md w-full animate-in fade-in slide-in-from-bottom-4 duration-300 shadow-xl border border-border/50 rounded-2xl">
-
-        <CardHeader className="space-y-2">
-          <CardTitle className="text-2xl font-bold text-center">
-            Team Invitation
-          </CardTitle>
-
-          <CardDescription className="text-center text-base">
-            Join <span className="font-semibold text-primary">{team?.team_name || owner?.name}</span>'s team
+    <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+      <Card className="max-w-md w-full animate-in fade-in slide-in-from-bottom-4 duration-300 shadow-xl rounded-2xl">
+        <CardHeader className="text-center space-y-4">
+          <div className="mx-auto h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+            <Users className="h-8 w-8 text-primary" />
+          </div>
+          <CardTitle className="text-2xl font-bold">Team Invitation</CardTitle>
+          <CardDescription className="text-base">
+            {ownerName ? (
+              <>
+                <span className="font-medium text-foreground">{ownerName}</span> has invited you to join
+              </>
+            ) : (
+              "You've been invited to join"
+            )}
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-4 text-center">
+        <CardContent className="text-center space-y-4">
+          <div className="p-4 rounded-xl bg-muted/50 border">
+            <h3 className="text-xl font-semibold text-primary">{team?.team_name}</h3>
+          </div>
           <p className="text-sm text-muted-foreground">
-            Accept this invite to collaborate with the team.
+            Accept this invitation to collaborate with the team on sales calls, transcripts, and AI analysis.
           </p>
         </CardContent>
 
-        <CardFooter className="flex justify-center">
+        <CardFooter className="flex flex-col gap-3">
           <Button
             onClick={handleAcceptInvite}
-            className="w-full max-w-xs text-lg py-6 rounded-xl"
+            className="w-full py-6 text-lg rounded-xl"
+            disabled={accepting}
           >
-            Accept Invite
+            {accepting ? (
+              <>
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                Joining...
+              </>
+            ) : (
+              "Accept Invitation"
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={handleGoToDashboard}
+            className="w-full"
+            disabled={accepting}
+          >
+            Decline
           </Button>
         </CardFooter>
-
       </Card>
     </div>
   );

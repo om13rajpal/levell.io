@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { Loader2 } from "lucide-react";
 
-export default function OnboardingPage() {
+export function useOnboardingGuard() {
   const router = useRouter();
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const checkAndRedirect = async () => {
+    const checkOnboarding = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
 
         if (!user) {
+          // Not logged in, go to login
           router.replace("/login");
           return;
         }
@@ -25,22 +26,21 @@ export default function OnboardingPage() {
           .single();
 
         if (userData?.is_onboarding_done) {
+          // Onboarding already complete, redirect to dashboard
           router.replace("/dashboard");
-        } else {
-          router.replace("/onboarding/step1");
+          return;
         }
+
+        // Onboarding not complete, allow access
+        setChecking(false);
       } catch (err) {
-        console.error("Onboarding redirect error:", err);
-        router.replace("/onboarding/step1");
+        console.error("Onboarding guard error:", err);
+        setChecking(false);
       }
     };
 
-    checkAndRedirect();
+    checkOnboarding();
   }, [router]);
 
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-    </div>
-  );
+  return { checking };
 }

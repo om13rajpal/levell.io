@@ -4,21 +4,34 @@ import { useState, useEffect } from "react";
 import { SignupForm } from "@/components/signup-form";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { getStoredAuth, updateUserInSupabase } from "@/services/onboarding";
+import { getAuthUserData, updateUserInSupabase } from "@/services/onboarding";
+import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
+import { Loader2 } from "lucide-react";
 
 export default function Step1() {
   const router = useRouter();
+  const { checking } = useOnboardingGuard();
 
   const [form, setForm] = useState({ fullname: "", email: "" });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = getStoredAuth();
-    const saved = localStorage.getItem("onboarding_signup");
+    if (checking) return;
 
-    if (saved) setForm(JSON.parse(saved));
-    else setForm({ fullname: stored.name, email: stored.email });
-  }, []);
+    const loadUserData = async () => {
+      const saved = localStorage.getItem("onboarding_signup");
+
+      if (saved) {
+        setForm(JSON.parse(saved));
+      } else {
+        // Use async Supabase call to get fresh user data
+        const userData = await getAuthUserData();
+        setForm({ fullname: userData.name, email: userData.email });
+      }
+    };
+
+    loadUserData();
+  }, [checking]);
 
   const handleNext = async () => {
     if (!form.fullname || !form.email) {
@@ -32,6 +45,14 @@ export default function Step1() {
     localStorage.setItem("onboarding_current_step", "2");
     router.push("/onboarding/step2");
   };
+
+  if (checking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center w-full py-12 animate-in fade-in slide-in-from-bottom-2 duration-300">

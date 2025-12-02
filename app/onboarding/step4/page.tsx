@@ -4,19 +4,31 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import Tiptap from "@/components/AiAnalysis";
 import { useRouter } from "next/navigation";
+import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
+import { Loader2 } from "lucide-react";
 
 export default function Step4() {
   const router = useRouter();
+  const { checking } = useOnboardingGuard();
 
   const [hasData, setHasData] = useState(false);
 
   // Check localStorage on mount for webhook data
   useEffect(() => {
+    if (checking) return;
     const markdown = localStorage.getItem("webhook_markdown");
     if (markdown) {
       setHasData(true);
     }
-  }, []);
+  }, [checking]);
+
+  if (checking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">

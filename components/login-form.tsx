@@ -22,15 +22,30 @@ import { supabase } from "@/lib/supabaseClient";
 import { useState } from "react";
 import { toast } from "sonner";
 
+interface LoginFormProps extends React.ComponentProps<"div"> {
+  redirectUrl?: string | null;
+}
+
 export function LoginForm({
   className,
+  redirectUrl,
   ...props
-}: React.ComponentProps<"div">) {
+}: LoginFormProps) {
+  // Build the callback URL with optional redirect
+  const getCallbackUrl = () => {
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://levell-io.vercel.app";
+    const callbackPath = "/auth/callback";
+    if (redirectUrl) {
+      return `${baseUrl}${callbackPath}?redirect=${encodeURIComponent(redirectUrl)}`;
+    }
+    return `${baseUrl}${callbackPath}`;
+  };
+
   const handleGoogleLogin = async () => {
     const res = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+        redirectTo: getCallbackUrl(),
       },
     });
 
@@ -47,9 +62,7 @@ export function LoginForm({
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo:
-          process.env.NEXT_PUBLIC_SITE_URL + "/auth/callback" ||
-          "https://levell-io.vercel.app/auth/callback",
+        emailRedirectTo: getCallbackUrl(),
       },
     });
 

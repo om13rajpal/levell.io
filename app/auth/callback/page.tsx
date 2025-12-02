@@ -6,11 +6,13 @@ import {
   TypingAnimation,
 } from "@/components/ui/terminal";
 import { supabase } from "@/lib/supabaseClient";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, Suspense } from "react";
 
-export default function CallbackPage() {
+function CallbackContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get("redirect");
 
   useEffect(() => {
     const handleAuth = async () => {
@@ -30,10 +32,26 @@ export default function CallbackPage() {
         return;
       }
 
-      const { id, email, user_metadata } = user;
-      const name = user_metadata?.full_name || user_metadata?.name || "";
+      const { id, email, user_metadata, identities } = user;
+
+      // Try multiple fields for name (Google OAuth uses different fields)
+      const name =
+        user_metadata?.full_name ||
+        user_metadata?.name ||
+        (user_metadata?.given_name && user_metadata?.family_name
+          ? `${user_metadata.given_name} ${user_metadata.family_name}`.trim()
+          : user_metadata?.given_name) ||
+        identities?.[0]?.identity_data?.full_name ||
+        identities?.[0]?.identity_data?.name ||
+        "";
+
       const last_login_time = new Date().toISOString();
-      const avatar_url = user_metadata?.avatar_url || "";
+      const avatar_url =
+        user_metadata?.avatar_url ||
+        user_metadata?.picture ||
+        identities?.[0]?.identity_data?.avatar_url ||
+        identities?.[0]?.identity_data?.picture ||
+        "";
 
       const { data: existingUser, error: fetchError } = await supabase
         .from("users")
@@ -80,9 +98,20 @@ export default function CallbackPage() {
         return;
       }
 
+      // Update user with latest info from OAuth provider
+      const updateData: Record<string, any> = {
+        last_login_time,
+        is_logged_in: true,
+      };
+
+      // Also update name, email, and avatar if they come from OAuth
+      if (name) updateData.name = name;
+      if (email) updateData.email = email;
+      if (avatar_url) updateData.avatar_url = avatar_url;
+
       const { error: updateError } = await supabase
         .from("users")
-        .update({ last_login_time, is_logged_in: true })
+        .update(updateData)
         .eq("id", id);
 
       if (updateError) {
@@ -90,15 +119,17 @@ export default function CallbackPage() {
         return;
       }
 
-      console.log("✅ Returning user, redirecting to dashboard...");
+      // Determine redirect destination
+      const destination = redirectUrl ? decodeURIComponent(redirectUrl) : "/dashboard";
+      console.log(`✅ Returning user, redirecting to ${destination}...`);
 
       setTimeout(() => {
-        router.replace("/dashboard");
+        router.replace(destination);
       }, 5500);
     };
 
     handleAuth();
-  }, [router]);
+  }, [router, redirectUrl]);
 
   return (
     <div className="w-screen h-screen flex justify-center items-center">
@@ -121,5 +152,19 @@ export default function CallbackPage() {
         </TypingAnimation>
       </Terminal>
     </div>
+  );
+}
+
+export default function CallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="w-screen h-screen flex justify-center items-center">
+        <Terminal>
+          <TypingAnimation>&gt; Authenticating user...</TypingAnimation>
+        </Terminal>
+      </div>
+    }>
+      <CallbackContent />
+    </Suspense>
   );
 }

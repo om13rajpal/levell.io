@@ -564,7 +564,7 @@ export default function TeamMemberProfilePage() {
                           <TableRow
                             key={t.id}
                             className="hover:bg-muted/50 cursor-pointer transition-colors"
-                            onClick={() => router.push(`/calls/${t.fireflies_id}`)}
+                            onClick={() => router.push(`/calls/${t.id}`)}
                           >
                             <TableCell className="font-medium">{t.title}</TableCell>
                             <TableCell>

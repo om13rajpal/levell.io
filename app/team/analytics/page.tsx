@@ -87,6 +87,7 @@ import {
   ChartContainer,
 } from "@/components/ui/chart";
 import { toast } from "sonner";
+import { exportToPDF, exportToExcel, exportWithCharts } from "@/services/exportAnalytics";
 
 const COLORS = {
   excellent: "#22c55e",
@@ -461,8 +462,64 @@ export default function TeamAnalyticsPage() {
     repComparisonPage * pageSize
   );
 
-  // Export functions
-  const exportToCSV = () => {
+  // Export functions - prepare export data
+  const getExportData = () => ({
+    teamName: team?.team_name || "Team",
+    teamStats,
+    repPerformance,
+    categoryPerformance,
+    scoreDistribution,
+    scoreTrendsData,
+    topPerformers,
+    topCompaniesByVolume,
+    criticalRiskCompanies,
+  });
+
+  const handleExportPDF = async () => {
+    try {
+      toast.loading("Generating PDF report...");
+      await exportToPDF(getExportData());
+      toast.dismiss();
+      toast.success("PDF report exported successfully");
+    } catch (error) {
+      toast.dismiss();
+      console.error("PDF export error:", error);
+      toast.error("Failed to export PDF");
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+      toast.loading("Generating Excel report...");
+      exportToExcel(getExportData());
+      toast.dismiss();
+      toast.success("Excel report exported successfully");
+    } catch (error) {
+      toast.dismiss();
+      console.error("Excel export error:", error);
+      toast.error("Failed to export Excel");
+    }
+  };
+
+  const handleExportWithCharts = async () => {
+    try {
+      toast.loading("Capturing charts and generating PDF...");
+      await exportWithCharts(getExportData(), [
+        "chart-score-trends",
+        "chart-top-performers",
+        "chart-category-performance",
+        "chart-score-distribution",
+      ]);
+      toast.dismiss();
+      toast.success("Full report with charts exported successfully");
+    } catch (error) {
+      toast.dismiss();
+      console.error("Chart export error:", error);
+      toast.error("Failed to export report with charts");
+    }
+  };
+
+  const handleExportCSV = () => {
     const headers = ["Name", "Email", "Total Calls", "Average Score", "Best Category", "Needs Improvement"];
     const rows = repPerformance.map((rep) => [
       rep.name || "No Name",
@@ -474,7 +531,7 @@ export default function TeamAnalyticsPage() {
     ]);
 
     const csvContent = [headers, ...rows]
-      .map((row) => row.join(","))
+      .map((row) => row.map(cell => `"${cell}"`).join(","))
       .join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv" });
@@ -485,109 +542,6 @@ export default function TeamAnalyticsPage() {
     a.click();
     window.URL.revokeObjectURL(url);
     toast.success("CSV exported successfully");
-  };
-
-  const exportToExcel = () => {
-    // For Excel, we'll create a TSV (tab-separated values) which Excel can open
-    const headers = ["Name", "Email", "Total Calls", "Average Score", "Best Category", "Needs Improvement"];
-    const rows = repPerformance.map((rep) => [
-      rep.name || "No Name",
-      rep.email,
-      rep.totalCalls,
-      rep.avgScore,
-      rep.bestCategory,
-      rep.needsImprovement,
-    ]);
-
-    const tsvContent = [headers, ...rows]
-      .map((row) => row.join("\t"))
-      .join("\n");
-
-    const blob = new Blob([tsvContent], { type: "application/vnd.ms-excel" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `team-analytics-${new Date().toISOString().split("T")[0]}.xls`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("Excel file exported successfully");
-  };
-
-  const exportToPDF = () => {
-    // Create a printable HTML document
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      toast.error("Please allow pop-ups to export PDF");
-      return;
-    }
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Team Analytics Report</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          h1 { color: #333; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f4f4f4; }
-          .stats { display: flex; gap: 20px; margin-bottom: 20px; }
-          .stat-card { padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
-        </style>
-      </head>
-      <body>
-        <h1>Team Analytics Report</h1>
-        <p>Generated: ${new Date().toLocaleString()}</p>
-
-        <div class="stats">
-          <div class="stat-card">
-            <h3>Total Calls</h3>
-            <p>${teamStats.totalCalls}</p>
-          </div>
-          <div class="stat-card">
-            <h3>Team Average Score</h3>
-            <p>${teamStats.avgScore}</p>
-          </div>
-          <div class="stat-card">
-            <h3>Score Trend</h3>
-            <p>${teamStats.trend > 0 ? "+" : ""}${teamStats.trend}%</p>
-          </div>
-        </div>
-
-        <h2>Rep Performance</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Total Calls</th>
-              <th>Avg Score</th>
-              <th>Best Category</th>
-              <th>Needs Improvement</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${repPerformance.map((rep) => `
-              <tr>
-                <td>${rep.name || "No Name"}</td>
-                <td>${rep.email}</td>
-                <td>${rep.totalCalls}</td>
-                <td>${rep.avgScore}</td>
-                <td>${rep.bestCategory}</td>
-                <td>${rep.needsImprovement}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </body>
-      </html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    printWindow.print();
-    toast.success("PDF print dialog opened");
   };
 
   if (loading) {
@@ -655,18 +609,22 @@ export default function TeamAnalyticsPage() {
                       Export Analytics
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportToPDF}>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onClick={handleExportPDF}>
                       <FileText className="h-4 w-4 mr-2" />
                       Export as PDF
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportToCSV}>
-                      <File className="h-4 w-4 mr-2" />
-                      Export as CSV
+                    <DropdownMenuItem onClick={handleExportWithCharts}>
+                      <BarChart3 className="h-4 w-4 mr-2" />
+                      PDF with Charts
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportToExcel}>
+                    <DropdownMenuItem onClick={handleExportExcel}>
                       <FileSpreadsheet className="h-4 w-4 mr-2" />
                       Export as Excel
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportCSV}>
+                      <File className="h-4 w-4 mr-2" />
+                      Export as CSV
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -746,7 +704,7 @@ export default function TeamAnalyticsPage() {
               </div>
 
               {/* Score Trends Over Time */}
-              <Card className="@container/card">
+              <Card className="@container/card" id="chart-score-trends">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <TrendingUp className="h-5 w-5 text-primary" />
@@ -782,7 +740,7 @@ export default function TeamAnalyticsPage() {
               </Card>
 
               {/* Top 5 Performers */}
-              <Card>
+              <Card id="chart-top-performers">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Trophy className="h-5 w-5 text-yellow-500" />
@@ -930,7 +888,7 @@ export default function TeamAnalyticsPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Category Performance */}
-                <Card>
+                <Card id="chart-category-performance">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="h-5 w-5 text-primary" />
@@ -958,7 +916,7 @@ export default function TeamAnalyticsPage() {
                 </Card>
 
                 {/* Score Distribution Pie */}
-                <Card>
+                <Card id="chart-score-distribution">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <Target className="h-5 w-5 text-primary" />
