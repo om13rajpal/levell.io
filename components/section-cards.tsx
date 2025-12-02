@@ -18,6 +18,8 @@ export function SectionCards() {
   const transcripts = useTranscriptStore((s) => s.transcripts)
   const [totalCalls, setTotalCalls] = useState(0)
   const [avgScore, setAvgScore] = useState(0)
+  const [scoredCount, setScoredCount] = useState(0)
+  const [isScoring, setIsScoring] = useState(false)
 
   useEffect(() => {
     if (transcripts && transcripts.length > 0) {
@@ -29,6 +31,12 @@ export function SectionCards() {
         (t) => t.ai_overall_score != null && !isNaN(t.ai_overall_score)
       )
 
+      setScoredCount(scoredTranscripts.length)
+
+      // Check if there are unscored calls (scoring in progress)
+      const unscoredCount = transcripts.length - scoredTranscripts.length
+      setIsScoring(unscoredCount > 0 && transcripts.length > 0)
+
       if (scoredTranscripts.length > 0) {
         const sum = scoredTranscripts.reduce(
           (acc, t) => acc + Number(t.ai_overall_score),
@@ -39,6 +47,11 @@ export function SectionCards() {
       } else {
         setAvgScore(0)
       }
+    } else {
+      setTotalCalls(0)
+      setScoredCount(0)
+      setAvgScore(0)
+      setIsScoring(false)
     }
   }, [transcripts])
 
@@ -74,22 +87,67 @@ export function SectionCards() {
         <CardHeader>
           <CardDescription>Avg Score</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {avgScore > 0 ? avgScore : "—"}
+            {avgScore > 0 ? (
+              avgScore
+            ) : isScoring ? (
+              <div className="flex items-center gap-2">
+                <div className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                </div>
+                <span className="text-lg text-muted-foreground">Scoring...</span>
+              </div>
+            ) : (
+              "—"
+            )}
           </CardTitle>
           <CardAction>
-            <Badge variant="outline">
-              <IconTrendingUp />
-              Live Data
-            </Badge>
+            {isScoring ? (
+              <Badge variant="outline" className="border-primary/30 text-primary">
+                <div className="h-2 w-2 rounded-full bg-primary animate-pulse mr-1" />
+                Processing
+              </Badge>
+            ) : (
+              <Badge variant="outline">
+                <IconTrendingUp />
+                Live Data
+              </Badge>
+            )}
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
-          <div className="line-clamp-1 flex gap-2 font-medium">
-            Average call quality <IconTrendingUp className="size-4" />
-          </div>
-          <div className="text-muted-foreground">
-            Based on AI analysis scores
-          </div>
+          {isScoring && scoredCount === 0 ? (
+            <>
+              <div className="line-clamp-1 flex gap-2 font-medium text-primary">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Analyzing your calls
+              </div>
+              <div className="text-muted-foreground">
+                AI scoring in progress...
+              </div>
+            </>
+          ) : isScoring ? (
+            <>
+              <div className="line-clamp-1 flex gap-2 font-medium">
+                {scoredCount} of {totalCalls} calls scored
+              </div>
+              <div className="text-muted-foreground">
+                More scores coming soon...
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="line-clamp-1 flex gap-2 font-medium">
+                Average call quality <IconTrendingUp className="size-4" />
+              </div>
+              <div className="text-muted-foreground">
+                Based on AI analysis scores
+              </div>
+            </>
+          )}
         </CardFooter>
       </Card>
 

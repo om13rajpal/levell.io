@@ -422,6 +422,80 @@ export async function leaveTeam(
 }
 
 /**
+ * Ensure Admin and Member tags exist for a team
+ * Call this to fix teams that were created without default tags
+ */
+export async function ensureTeamTags(teamId: number, ownerId?: string): Promise<void> {
+  try {
+    // Check if Admin tag exists
+    const { data: existingAdminTag } = await supabase
+      .from("team_tags")
+      .select("id")
+      .eq("team_id", teamId)
+      .ilike("tag_name", "admin")
+      .maybeSingle();
+
+    // Check if Member tag exists
+    const { data: existingMemberTag } = await supabase
+      .from("team_tags")
+      .select("id")
+      .eq("team_id", teamId)
+      .ilike("tag_name", "member")
+      .maybeSingle();
+
+    // Create Admin tag if missing
+    let adminTagId = existingAdminTag?.id;
+    if (!existingAdminTag) {
+      const { data: newAdminTag } = await supabase
+        .from("team_tags")
+        .insert({
+          team_id: teamId,
+          tag_name: "Admin",
+          tag_color: "#ef4444",
+        })
+        .select("id")
+        .single();
+      adminTagId = newAdminTag?.id;
+    }
+
+    // Create Member tag if missing
+    if (!existingMemberTag) {
+      await supabase
+        .from("team_tags")
+        .insert({
+          team_id: teamId,
+          tag_name: "Member",
+          tag_color: "#6366f1",
+        });
+    }
+
+    // If owner is provided and Admin tag was just created, assign it to owner
+    if (ownerId && adminTagId && !existingAdminTag) {
+      // Check if owner already has the admin tag
+      const { data: existingOwnerTag } = await supabase
+        .from("team_member_tags")
+        .select("id")
+        .eq("team_id", teamId)
+        .eq("user_id", ownerId)
+        .eq("tag_id", adminTagId)
+        .maybeSingle();
+
+      if (!existingOwnerTag) {
+        await supabase
+          .from("team_member_tags")
+          .insert({
+            team_id: teamId,
+            user_id: ownerId,
+            tag_id: adminTagId,
+          });
+      }
+    }
+  } catch (err) {
+    console.error("Error ensuring team tags:", err);
+  }
+}
+
+/**
  * Create a new team (with single team check)
  */
 export async function createTeam(
@@ -449,6 +523,36 @@ export async function createTeam(
     if (error) {
       console.error("Create team error:", error);
       return { success: false, error: "Failed to create team." };
+    }
+
+    // Create default Admin and Member tags for the team
+    const { data: adminTag } = await supabase
+      .from("team_tags")
+      .insert({
+        team_id: newTeam.id,
+        tag_name: "Admin",
+        tag_color: "#ef4444", // Red for admin
+      })
+      .select("id")
+      .single();
+
+    await supabase
+      .from("team_tags")
+      .insert({
+        team_id: newTeam.id,
+        tag_name: "Member",
+        tag_color: "#6366f1", // Indigo for member
+      });
+
+    // Assign Admin tag to team owner
+    if (adminTag) {
+      await supabase
+        .from("team_member_tags")
+        .insert({
+          team_id: newTeam.id,
+          user_id: userId,
+          tag_id: adminTag.id,
+        });
     }
 
     // Update user's team_id

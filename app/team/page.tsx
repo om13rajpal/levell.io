@@ -14,6 +14,7 @@ import {
   getTeamPendingInvitations,
   revokeInvitation,
   leaveTeam,
+  ensureTeamTags,
   TeamInvitation,
 } from "@/services/team";
 
@@ -249,6 +250,9 @@ export default function TeamPage() {
                 setTeam(fixedTeam as Team);
                 setSettingsTeamName(fixedTeam.team_name);
 
+                // Ensure Admin and Member tags exist for the team (fixes legacy teams)
+                await ensureTeamTags(fixedTeam.id, fixedTeam.owner);
+
                 const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
                   fixedTeam.members?.length > 0
                     ? supabase.from("users").select("id, name, email").in("id", fixedTeam.members)
@@ -285,6 +289,9 @@ export default function TeamPage() {
 
       setTeam(teamRow as Team);
       setSettingsTeamName(teamRow.team_name);
+
+      // Ensure Admin and Member tags exist for the team (fixes legacy teams)
+      await ensureTeamTags(teamRow.id, teamRow.owner);
 
       const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
         teamRow.members?.length > 0
@@ -468,6 +475,9 @@ export default function TeamPage() {
 
     setTeam(updatedTeam as Team);
     setSettingsTeamName(updatedTeam.team_name);
+
+    // Ensure Admin and Member tags exist for the team (fixes legacy teams)
+    await ensureTeamTags(updatedTeam.id, updatedTeam.owner);
 
     const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
       updatedTeam.members?.length > 0
@@ -738,29 +748,34 @@ export default function TeamPage() {
   const renderRoleBadge = (role: "admin" | "member" | null, isOwnerMember: boolean) => {
     if (isOwnerMember) {
       return (
-        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/40 gap-1">
-          <Crown className="h-3 w-3" />
+        <Badge className="bg-gradient-to-r from-amber-500/15 to-orange-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 gap-1.5 px-2.5 py-1 font-medium shadow-sm">
+          <Crown className="h-3.5 w-3.5" />
           Owner
         </Badge>
       );
     }
     if (role === "admin") {
       return (
-        <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/40 gap-1">
-          <Shield className="h-3 w-3" />
+        <Badge className="bg-gradient-to-r from-indigo-500/15 to-purple-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30 gap-1.5 px-2.5 py-1 font-medium shadow-sm">
+          <Shield className="h-3.5 w-3.5" />
           Admin
         </Badge>
       );
     }
     if (role === "member") {
       return (
-        <Badge variant="outline" className="border-muted-foreground/30 text-muted-foreground gap-1">
-          <UserCircle className="h-3 w-3" />
+        <Badge variant="outline" className="bg-slate-500/5 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 gap-1.5 px-2.5 py-1 font-medium">
+          <UserCircle className="h-3.5 w-3.5" />
           Member
         </Badge>
       );
     }
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return (
+      <Badge variant="outline" className="bg-muted/50 border-dashed border-muted-foreground/20 text-muted-foreground gap-1.5 px-2.5 py-1">
+        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+        No Role
+      </Badge>
+    );
   };
 
   const formatDate = (dateString: string) => {
@@ -1287,87 +1302,132 @@ export default function TeamPage() {
                       <p className="text-sm text-muted-foreground">Invite your first team member to get started</p>
                     </div>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-muted/20 hover:bg-muted/20">
-                          <TableHead className="font-semibold">Member</TableHead>
-                          <TableHead className="font-semibold">Email</TableHead>
-                          <TableHead className="font-semibold">Role</TableHead>
-                          {isAdmin && <TableHead className="text-right font-semibold">Actions</TableHead>}
-                        </TableRow>
-                      </TableHeader>
+                    <div className="overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gradient-to-r from-muted/40 via-muted/30 to-muted/40 hover:bg-muted/40 border-b border-border/50">
+                            <TableHead className="font-semibold text-foreground/80 py-4 pl-6">Member</TableHead>
+                            <TableHead className="font-semibold text-foreground/80 py-4 hidden sm:table-cell">Email</TableHead>
+                            <TableHead className="font-semibold text-foreground/80 py-4">Role</TableHead>
+                            {isAdmin && <TableHead className="text-right font-semibold text-foreground/80 py-4 pr-6">Actions</TableHead>}
+                          </TableRow>
+                        </TableHeader>
 
-                      <TableBody>
-                        {members.map((m) => {
-                          const role = getRoleForUser(m.id);
-                          const isMemberOwner = team.owner === m.id;
+                        <TableBody>
+                          {members.map((m, index) => {
+                            const role = getRoleForUser(m.id);
+                            const isMemberOwner = team.owner === m.id;
+                            const isCurrentUser = m.id === userId;
 
-                          return (
-                            <TableRow key={m.id} className="hover:bg-muted/30">
-                              <TableCell className="py-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-sm font-semibold text-primary shrink-0">
-                                    {m.name ? m.name[0].toUpperCase() : m.email[0].toUpperCase()}
-                                  </div>
-                                  <div>
-                                    <p className="font-medium">{m.name || "—"}</p>
-                                    {m.id === userId && (
-                                      <p className="text-xs text-muted-foreground">You</p>
-                                    )}
-                                  </div>
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="text-muted-foreground">
-                                {m.email}
-                              </TableCell>
-
-                              <TableCell>
-                                {renderRoleBadge(role, isMemberOwner)}
-                              </TableCell>
-
-                              {isAdmin && (
-                                <TableCell className="text-right">
-                                  <div className="flex items-center justify-end gap-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-8 px-3 text-xs hover:bg-primary/10"
-                                      onClick={() => router.push(`/team/member/${m.id}`)}
-                                    >
-                                      <Eye className="h-3.5 w-3.5 mr-1" />
-                                      View
-                                    </Button>
-
-                                    {m.id !== userId && !isMemberOwner && (
-                                      <>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-8 px-3 text-xs hover:bg-primary/10"
-                                          onClick={() => openRoleDialog(m)}
-                                        >
-                                          Role
-                                        </Button>
-
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                                          onClick={() => removeMember(m.id)}
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </>
-                                    )}
+                            return (
+                              <TableRow
+                                key={m.id}
+                                className={`
+                                  group transition-all duration-200
+                                  hover:bg-gradient-to-r hover:from-primary/5 hover:via-primary/3 hover:to-transparent
+                                  ${index !== members.length - 1 ? 'border-b border-border/30' : ''}
+                                  ${isCurrentUser ? 'bg-primary/[0.02]' : ''}
+                                `}
+                              >
+                                <TableCell className="py-5 pl-6">
+                                  <div className="flex items-center gap-4">
+                                    <div className="relative">
+                                      <div className={`
+                                        h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0
+                                        shadow-sm transition-transform duration-200 group-hover:scale-105
+                                        ${isMemberOwner
+                                          ? 'bg-gradient-to-br from-amber-500/20 to-orange-500/20 text-amber-700 ring-2 ring-amber-500/20'
+                                          : role === 'admin'
+                                            ? 'bg-gradient-to-br from-indigo-500/20 to-purple-500/20 text-indigo-700 ring-2 ring-indigo-500/20'
+                                            : 'bg-gradient-to-br from-slate-200 to-slate-100 text-slate-600 dark:from-slate-700 dark:to-slate-800 dark:text-slate-300'
+                                        }
+                                      `}>
+                                        {m.name ? m.name[0].toUpperCase() : m.email[0].toUpperCase()}
+                                      </div>
+                                      {isMemberOwner && (
+                                        <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-amber-500 flex items-center justify-center shadow-lg ring-2 ring-white dark:ring-card">
+                                          <Crown className="h-3 w-3 text-white" />
+                                        </div>
+                                      )}
+                                      {isCurrentUser && !isMemberOwner && (
+                                        <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-card" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-semibold text-foreground truncate">
+                                          {m.name || "Unnamed User"}
+                                        </p>
+                                        {isCurrentUser && (
+                                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
+                                            You
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-muted-foreground truncate sm:hidden mt-0.5">
+                                        {m.email}
+                                      </p>
+                                    </div>
                                   </div>
                                 </TableCell>
-                              )}
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+
+                                <TableCell className="py-5 hidden sm:table-cell">
+                                  <div className="flex items-center gap-2">
+                                    <Mail className="h-3.5 w-3.5 text-muted-foreground/50" />
+                                    <span className="text-sm text-muted-foreground truncate max-w-[200px]">
+                                      {m.email}
+                                    </span>
+                                  </div>
+                                </TableCell>
+
+                                <TableCell className="py-5">
+                                  {renderRoleBadge(role, isMemberOwner)}
+                                </TableCell>
+
+                                {isAdmin && (
+                                  <TableCell className="py-5 pr-6">
+                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 px-3 text-xs font-medium hover:bg-primary/10 rounded-lg"
+                                        onClick={() => router.push(`/team/member/${m.id}`)}
+                                      >
+                                        <Eye className="h-3.5 w-3.5 mr-1.5" />
+                                        View
+                                      </Button>
+
+                                      {m.id !== userId && !isMemberOwner && (
+                                        <>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 px-3 text-xs font-medium hover:bg-indigo-500/10 hover:text-indigo-700 rounded-lg"
+                                            onClick={() => openRoleDialog(m)}
+                                          >
+                                            <Shield className="h-3.5 w-3.5 mr-1.5" />
+                                            Role
+                                          </Button>
+
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
+                                            onClick={() => removeMember(m.id)}
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                )}
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
                   )}
                 </CardContent>
               </Card>

@@ -25,6 +25,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { supabase } from "@/lib/supabaseClient";
+import { clearAppStorage } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -58,7 +59,8 @@ export function NavUser({
 
       setTimeout(async () => {
         await supabase.auth.signOut();
-        localStorage.removeItem("sb-rpowalzrbddorfnnmccp-auth-token");
+        // Clear all app-related localStorage items
+        clearAppStorage();
         toast.success("Logged out successfully!");
         router.replace("/login");
       }, 1200);

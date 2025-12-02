@@ -464,17 +464,34 @@ export default function CompanyDetailsPage() {
                   <CardHeader>
                     <CardDescription>Average Call Score</CardDescription>
                     <CardTitle className="text-2xl font-semibold tabular-nums">
-                      {stats.avgScore > 0 ? stats.avgScore : "—"}
+                      {stats.avgScore > 0 ? (
+                        stats.avgScore
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                          </div>
+                          <span className="text-base text-muted-foreground">Scoring...</span>
+                        </div>
+                      )}
                     </CardTitle>
                     <CardAction>
-                      <Badge variant="outline">
-                        {stats.avgScore >= 70 ? (
-                          <TrendingUp className="h-3 w-3 mr-1" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3 mr-1" />
-                        )}
-                        {stats.avgScore >= 70 ? "Good" : "Needs Work"}
-                      </Badge>
+                      {stats.avgScore > 0 ? (
+                        <Badge variant="outline">
+                          {stats.avgScore >= 70 ? (
+                            <TrendingUp className="h-3 w-3 mr-1" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3 mr-1" />
+                          )}
+                          {stats.avgScore >= 70 ? "Good" : "Needs Work"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-primary/30 text-primary/70">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse mr-1" />
+                          Processing
+                        </Badge>
+                      )}
                     </CardAction>
                   </CardHeader>
                   <CardFooter className="flex-col items-start gap-1.5 text-sm">
@@ -538,8 +555,23 @@ export default function CompanyDetailsPage() {
                 </CardHeader>
                 <CardContent>
                   {relationshipHealthData.length === 0 ? (
-                    <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                      <p>No scored calls available</p>
+                    <div className="flex flex-col items-center justify-center h-[250px] text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="absolute inset-2 rounded-full bg-primary/10 animate-ping" style={{ animationDuration: "2s", animationDelay: "0.5s" }} />
+                        <div className="relative h-14 w-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                          <svg className="h-7 w-7 text-primary animate-pulse" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Scoring your calls</p>
+                      <p className="text-xs text-muted-foreground">AI analysis in progress...</p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
                     </div>
                   ) : (
                     <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
@@ -821,9 +853,23 @@ export default function CompanyDetailsPage() {
                 </CardHeader>
                 <CardContent>
                   {aiInsights.length === 0 ? (
-                    <p className="text-muted-foreground">
-                      No AI insights available yet. More calls needed for analysis.
-                    </p>
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-indigo-500/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 flex items-center justify-center">
+                          <Sparkles className="h-6 w-6 text-indigo-500 animate-pulse" />
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Generating Insights</p>
+                      <p className="text-xs text-muted-foreground max-w-xs">
+                        AI is analyzing your calls to provide relationship insights...
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {aiInsights.map((insight, i) => (
@@ -916,9 +962,13 @@ export default function CompanyDetailsPage() {
                                   {Math.round(t.ai_overall_score)}
                                 </Badge>
                               ) : (
-                                <span className="text-muted-foreground text-sm">
-                                  —
-                                </span>
+                                <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20">
+                                  <div className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                                  </div>
+                                  <span className="text-[10px] font-medium text-primary/80">Scoring</span>
+                                </div>
                               )}
                             </TableCell>
                             <TableCell>

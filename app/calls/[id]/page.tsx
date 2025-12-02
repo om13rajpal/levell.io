@@ -267,7 +267,7 @@ export default function CallDetailPage() {
               )}
             </div>
 
-            {aiOverallScore !== null && (
+            {aiOverallScore !== null ? (
               <div className="flex flex-col items-center">
                 <div className="relative h-24 w-24">
                   <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100">
@@ -298,13 +298,13 @@ export default function CallDetailPage() {
                 </div>
                 <span className="text-xs text-muted-foreground mt-1">Overall Score</span>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* ============================================================
-              AI SUMMARY
+              AI SUMMARY or SCORING IN PROGRESS
           ============================================================ */}
-          {aiSummary && (
+          {aiSummary ? (
             <Card className="border-indigo-200/50 dark:border-indigo-500/20 bg-gradient-to-br from-indigo-50/50 to-transparent dark:from-indigo-950/20">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-lg">
@@ -316,6 +316,53 @@ export default function CallDetailPage() {
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   {aiSummary}
                 </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-transparent to-primary/5">
+              <CardContent className="py-12">
+                <div className="flex flex-col items-center justify-center text-center">
+                  {/* Animated rings */}
+                  <div className="relative mb-6">
+                    <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                    <div className="absolute inset-3 rounded-full bg-primary/10 animate-ping" style={{ animationDuration: "2s", animationDelay: "0.5s" }} />
+                    <div className="relative h-20 w-20 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                      <IconSparkles className="h-10 w-10 text-primary animate-pulse" />
+                    </div>
+                  </div>
+
+                  <h3 className="text-xl font-semibold text-foreground mb-2">
+                    Analyzing Your Call
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-md mb-6">
+                    Our AI is processing this call to generate insights, scores, and recommendations. This typically takes a few minutes.
+                  </p>
+
+                  {/* What will be analyzed */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-2xl">
+                    {[
+                      { icon: IconTrendingUp, label: "Performance Score" },
+                      { icon: IconTarget, label: "Key Insights" },
+                      { icon: IconBulb, label: "Improvements" },
+                      { icon: IconShieldCheck, label: "Next Steps" },
+                    ].map((item, i) => (
+                      <div
+                        key={i}
+                        className="flex flex-col items-center gap-2 p-3 rounded-lg bg-muted/30 border border-dashed border-muted-foreground/20"
+                      >
+                        <item.icon className="h-5 w-5 text-muted-foreground/60" />
+                        <span className="text-xs text-muted-foreground">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Progress dots */}
+                  <div className="flex items-center gap-1.5 mt-6">
+                    <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}

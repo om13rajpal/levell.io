@@ -651,21 +651,38 @@ export default function TeamAnalyticsPage() {
                   <CardHeader>
                     <CardDescription>Team Average Score</CardDescription>
                     <CardTitle className="text-2xl font-semibold tabular-nums">
-                      {teamStats.avgScore > 0 ? teamStats.avgScore : "—"}
+                      {teamStats.avgScore > 0 ? (
+                        teamStats.avgScore
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                          </div>
+                          <span className="text-base text-muted-foreground">Scoring...</span>
+                        </div>
+                      )}
                     </CardTitle>
                     <CardAction>
-                      <Badge
-                        variant="outline"
-                        className={
-                          teamStats.avgScore >= 80
-                            ? "border-green-500/50 text-green-700"
-                            : teamStats.avgScore >= 60
-                            ? "border-yellow-500/50 text-yellow-700"
-                            : "border-red-500/50 text-red-700"
-                        }
-                      >
-                        {teamStats.avgScore >= 80 ? "Excellent" : teamStats.avgScore >= 60 ? "Good" : "Needs Work"}
-                      </Badge>
+                      {teamStats.avgScore > 0 ? (
+                        <Badge
+                          variant="outline"
+                          className={
+                            teamStats.avgScore >= 80
+                              ? "border-green-500/50 text-green-700"
+                              : teamStats.avgScore >= 60
+                              ? "border-yellow-500/50 text-yellow-700"
+                              : "border-red-500/50 text-red-700"
+                          }
+                        >
+                          {teamStats.avgScore >= 80 ? "Excellent" : teamStats.avgScore >= 60 ? "Good" : "Needs Work"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-primary/30 text-primary/70">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse mr-1" />
+                          Processing
+                        </Badge>
+                      )}
                     </CardAction>
                   </CardHeader>
                 </Card>
@@ -714,8 +731,21 @@ export default function TeamAnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   {scoreTrendsData.length === 0 ? (
-                    <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                      No data available
+                    <div className="flex flex-col items-center justify-center h-[250px] text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="absolute inset-2 rounded-full bg-primary/10 animate-ping" style={{ animationDuration: "2s", animationDelay: "0.5s" }} />
+                        <div className="relative h-14 w-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                          <TrendingUp className="h-7 w-7 text-primary animate-pulse" />
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Scoring your calls</p>
+                      <p className="text-xs text-muted-foreground">AI analysis in progress...</p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
                     </div>
                   ) : (
                     <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
@@ -750,7 +780,21 @@ export default function TeamAnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   {topPerformers.length === 0 ? (
-                    <p className="text-muted-foreground">No data available</p>
+                    <div className="flex flex-col items-center justify-center h-[200px] text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-yellow-500/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-yellow-500/20 to-yellow-500/5 flex items-center justify-center">
+                          <Trophy className="h-6 w-6 text-yellow-500 animate-pulse" />
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Analyzing performance</p>
+                      <p className="text-xs text-muted-foreground">Scores being calculated...</p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
+                    </div>
                   ) : (
                     <ChartContainer config={chartConfig} className="aspect-auto h-[200px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
@@ -898,7 +942,21 @@ export default function TeamAnalyticsPage() {
                   </CardHeader>
                   <CardContent>
                     {categoryPerformance.length === 0 ? (
-                      <p className="text-muted-foreground">No data available</p>
+                      <div className="flex flex-col items-center justify-center h-[250px] text-center">
+                        <div className="relative mb-4">
+                          <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                          <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                            <BarChart3 className="h-6 w-6 text-primary animate-pulse" />
+                          </div>
+                        </div>
+                        <p className="text-sm font-medium text-foreground mb-1">Analyzing categories</p>
+                        <p className="text-xs text-muted-foreground">Processing call data...</p>
+                        <div className="flex items-center gap-1.5 mt-3">
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </div>
+                      </div>
                     ) : (
                       <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
                         <ResponsiveContainer width="100%" height="100%">
@@ -926,7 +984,21 @@ export default function TeamAnalyticsPage() {
                   </CardHeader>
                   <CardContent>
                     {scoreDistribution.every((d) => d.value === 0) ? (
-                      <p className="text-muted-foreground">No data available</p>
+                      <div className="flex flex-col items-center justify-center h-[250px] text-center">
+                        <div className="relative mb-4">
+                          <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                          <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                            <Target className="h-6 w-6 text-primary animate-pulse" />
+                          </div>
+                        </div>
+                        <p className="text-sm font-medium text-foreground mb-1">Calculating distribution</p>
+                        <p className="text-xs text-muted-foreground">Scoring calls...</p>
+                        <div className="flex items-center gap-1.5 mt-3">
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </div>
+                      </div>
                     ) : (
                       <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
                         <ResponsiveContainer width="100%" height="100%">

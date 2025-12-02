@@ -950,11 +950,17 @@ function StatusBadge({ level }: { level: string }) {
 }
 
 function ScoreIndicator({ score }: { score: number | null }) {
-  // Handle null or invalid scores
+  // Handle null or invalid scores - show scoring animation
   if (score == null) {
     return (
       <div className="flex items-center justify-center">
-        <span className="text-xs text-muted-foreground">—</span>
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20">
+          <div className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+          </div>
+          <span className="text-[10px] font-medium text-primary/80">Scoring</span>
+        </div>
       </div>
     );
   }

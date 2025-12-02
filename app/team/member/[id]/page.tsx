@@ -434,21 +434,38 @@ export default function TeamMemberProfilePage() {
                   <CardHeader>
                     <CardDescription>Average Score</CardDescription>
                     <CardTitle className="text-2xl font-semibold tabular-nums">
-                      {stats.avgScore > 0 ? stats.avgScore : "—"}
+                      {stats.avgScore > 0 ? (
+                        stats.avgScore
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                          </div>
+                          <span className="text-base text-muted-foreground">Scoring...</span>
+                        </div>
+                      )}
                     </CardTitle>
                     <CardAction>
-                      <Badge
-                        variant="outline"
-                        className={
-                          stats.avgScore >= 80
-                            ? "border-green-500/50 text-green-700"
-                            : stats.avgScore >= 60
-                            ? "border-yellow-500/50 text-yellow-700"
-                            : "border-red-500/50 text-red-700"
-                        }
-                      >
-                        {stats.avgScore >= 80 ? "Excellent" : stats.avgScore >= 60 ? "Good" : "Needs Work"}
-                      </Badge>
+                      {stats.avgScore > 0 ? (
+                        <Badge
+                          variant="outline"
+                          className={
+                            stats.avgScore >= 80
+                              ? "border-green-500/50 text-green-700"
+                              : stats.avgScore >= 60
+                              ? "border-yellow-500/50 text-yellow-700"
+                              : "border-red-500/50 text-red-700"
+                          }
+                        >
+                          {stats.avgScore >= 80 ? "Excellent" : stats.avgScore >= 60 ? "Good" : "Needs Work"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-primary/30 text-primary/70">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse mr-1" />
+                          Processing
+                        </Badge>
+                      )}
                     </CardAction>
                   </CardHeader>
                 </Card>
@@ -509,8 +526,21 @@ export default function TeamMemberProfilePage() {
                 </CardHeader>
                 <CardContent>
                   {scoreBreakdown.length === 0 ? (
-                    <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                      <p>No category data available</p>
+                    <div className="flex flex-col items-center justify-center h-[300px] text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="absolute inset-2 rounded-full bg-primary/10 animate-ping" style={{ animationDuration: "2s", animationDelay: "0.5s" }} />
+                        <div className="relative h-14 w-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                          <Target className="h-7 w-7 text-primary animate-pulse" />
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Scoring calls</p>
+                      <p className="text-xs text-muted-foreground">AI analyzing performance categories...</p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
                     </div>
                   ) : (
                     <ChartContainer config={chartConfig} className="aspect-auto h-[300px] w-full">
@@ -585,7 +615,13 @@ export default function TeamMemberProfilePage() {
                                   {Math.round(t.ai_overall_score)}
                                 </Badge>
                               ) : (
-                                "—"
+                                <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20">
+                                  <div className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                                  </div>
+                                  <span className="text-[10px] font-medium text-primary/80">Scoring</span>
+                                </div>
                               )}
                             </TableCell>
                             <TableCell>
@@ -684,7 +720,21 @@ export default function TeamMemberProfilePage() {
                   </CardHeader>
                   <CardContent>
                     {keyStrengths.length === 0 ? (
-                      <p className="text-muted-foreground text-sm">No data available</p>
+                      <div className="flex flex-col items-center justify-center py-6 text-center">
+                        <div className="relative mb-3">
+                          <div className="absolute inset-0 rounded-full bg-yellow-500/20 animate-ping" style={{ animationDuration: "2s" }} />
+                          <div className="relative h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500/20 to-yellow-500/5 flex items-center justify-center">
+                            <Star className="h-5 w-5 text-yellow-500 animate-pulse" />
+                          </div>
+                        </div>
+                        <p className="text-sm font-medium text-foreground mb-1">Identifying strengths</p>
+                        <p className="text-xs text-muted-foreground">Analyzing call patterns...</p>
+                        <div className="flex items-center gap-1 mt-2">
+                          <div className="h-1 w-1 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <div className="h-1 w-1 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <div className="h-1 w-1 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </div>
+                      </div>
                     ) : (
                       <div className="space-y-3">
                         {keyStrengths.map((strength, i) => (
@@ -712,7 +762,21 @@ export default function TeamMemberProfilePage() {
                   </CardHeader>
                   <CardContent>
                     {focusAreas.length === 0 ? (
-                      <p className="text-muted-foreground text-sm">No areas identified</p>
+                      <div className="flex flex-col items-center justify-center py-6 text-center">
+                        <div className="relative mb-3">
+                          <div className="absolute inset-0 rounded-full bg-amber-500/20 animate-ping" style={{ animationDuration: "2s" }} />
+                          <div className="relative h-10 w-10 rounded-full bg-gradient-to-br from-amber-500/20 to-amber-500/5 flex items-center justify-center">
+                            <Target className="h-5 w-5 text-amber-500 animate-pulse" />
+                          </div>
+                        </div>
+                        <p className="text-sm font-medium text-foreground mb-1">Finding focus areas</p>
+                        <p className="text-xs text-muted-foreground">Analyzing improvement opportunities...</p>
+                        <div className="flex items-center gap-1 mt-2">
+                          <div className="h-1 w-1 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <div className="h-1 w-1 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <div className="h-1 w-1 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </div>
+                      </div>
                     ) : (
                       <div className="space-y-3">
                         {focusAreas.map((area, i) => (
@@ -741,7 +805,21 @@ export default function TeamMemberProfilePage() {
                 </CardHeader>
                 <CardContent>
                   {aiRecommendations.length === 0 ? (
-                    <p className="text-muted-foreground">No recommendations available yet.</p>
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-indigo-500/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 flex items-center justify-center">
+                          <Brain className="h-6 w-6 text-indigo-500 animate-pulse" />
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Generating recommendations</p>
+                      <p className="text-xs text-muted-foreground max-w-xs">AI is analyzing calls to provide coaching insights...</p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       {aiRecommendations.map((rec, i) => (
@@ -772,8 +850,20 @@ export default function TeamMemberProfilePage() {
                 </CardHeader>
                 <CardContent>
                   {scoreHistory.length === 0 ? (
-                    <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-                      No score history available
+                    <div className="flex flex-col items-center justify-center h-[200px] text-center">
+                      <div className="relative mb-4">
+                        <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+                        <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                          <History className="h-6 w-6 text-primary animate-pulse" />
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground mb-1">Building score history</p>
+                      <p className="text-xs text-muted-foreground">Scoring calls to track progress...</p>
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
                     </div>
                   ) : (
                     <ChartContainer config={chartConfig} className="aspect-auto h-[200px] w-full">
