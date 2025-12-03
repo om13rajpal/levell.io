@@ -1,10 +1,10 @@
-/**  LINEAR-STYLE CALL DETAIL PAGE  **/
+/**  LINEAR-STYLE CALL DETAIL PAGE - OPTIMIZED  **/
 
 "use client";
 
 import type React from "react";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, memo, lazy, Suspense } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 import {
   IconUsers,
@@ -42,10 +48,56 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { supabase } from "@/lib/supabaseClient";
+import { useTranscriptStore, useTranscriptActions } from "@/store/useTranscriptStore";
 
 /* ------------------------------------------------------------- */
 /* Helpers */
 /* ------------------------------------------------------------- */
+
+// Cache configuration
+const CACHE_KEY_PREFIX = "transcript_cache_";
+const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+interface CachedTranscript {
+  data: any;
+  timestamp: number;
+}
+
+// Cache helpers
+function getCachedTranscript(id: string): any | null {
+  try {
+    const cacheKey = `${CACHE_KEY_PREFIX}${id}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (!cached) return null;
+
+    const parsed: CachedTranscript = JSON.parse(cached);
+    const now = Date.now();
+
+    // Check if cache is still valid
+    if (now - parsed.timestamp > CACHE_TTL) {
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+
+    return parsed.data;
+  } catch (error) {
+    console.error("Error reading cache:", error);
+    return null;
+  }
+}
+
+function setCachedTranscript(id: string, data: any): void {
+  try {
+    const cacheKey = `${CACHE_KEY_PREFIX}${id}`;
+    const cached: CachedTranscript = {
+      data,
+      timestamp: Date.now(),
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(cached));
+  } catch (error) {
+    console.error("Error setting cache:", error);
+  }
+}
 
 function formatTimestamp(sec: number) {
   const m = Math.floor(sec / 60)
@@ -68,11 +120,14 @@ function formatDate(dt?: string | null) {
 
 function formatDurationSeconds(seconds?: number | string | null): string {
   if (!seconds) return "—";
-  const s = Math.floor(Number(seconds));
-  if (s <= 0) return "—";
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}m ${sec}s`;
+  const totalMinutes = Math.floor(Number(seconds));
+  if (totalMinutes <= 0) return "—";
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h > 0) {
+    return `${h}h ${m}m`;
+  }
+  return `${m}m`;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -111,6 +166,204 @@ function getScoreRingColor(score: number) {
 }
 
 /* ------------------------------------------------------------- */
+/* Memoized Components for Performance */
+/* ------------------------------------------------------------- */
+
+// Memoized header with score
+const CallHeader = memo(({
+  title,
+  createdAt,
+  duration,
+  firefliesId,
+  aiOverallScore
+}: {
+  title: string;
+  createdAt: string;
+  duration: string;
+  firefliesId?: string;
+  aiOverallScore: number | null;
+}) => (
+  <div className="flex items-start justify-between flex-wrap gap-6">
+    <div className="space-y-2">
+      <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>{createdAt}</span>
+        <span>·</span>
+        <span>{duration}</span>
+      </div>
+      {firefliesId && (
+        <p className="text-xs text-muted-foreground/60">
+          ID: {firefliesId}
+        </p>
+      )}
+    </div>
+
+    {aiOverallScore !== null ? (
+      <div className="flex flex-col items-center">
+        <div className="relative h-24 w-24">
+          <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100">
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              className="stroke-muted"
+              strokeWidth="8"
+            />
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              className={getScoreRingColor(aiOverallScore)}
+              strokeWidth="8"
+              strokeDasharray={`${(aiOverallScore / 100) * 251.2} 251.2`}
+              strokeLinecap="round"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className={`text-3xl font-bold ${getScoreColor(aiOverallScore)}`}>
+              {aiOverallScore}
+            </span>
+          </div>
+        </div>
+        <span className="text-xs text-muted-foreground mt-1">Overall Score</span>
+      </div>
+    ) : null}
+  </div>
+));
+CallHeader.displayName = "CallHeader";
+
+// Memoized category breakdown with accordion
+const CategoryBreakdown = memo(({ categoryEntries }: { categoryEntries: [string, any][] }) => {
+  if (categoryEntries.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold flex items-center gap-2">
+        <IconTrendingUp className="h-5 w-5 text-indigo-500" />
+        Performance Breakdown
+      </h2>
+
+      <Accordion type="multiple" className="space-y-3">
+        {categoryEntries.map(([key, value]: any, index: number) => {
+          const score = value.score ?? 0;
+          const reason = value.reason ?? "";
+
+          return (
+            <AccordionItem
+              key={index}
+              value={`category-${index}`}
+              className="border border-border/60 rounded-lg px-4 bg-card/50 hover:bg-card/80 transition-colors"
+            >
+              <AccordionTrigger className="hover:no-underline py-4">
+                <div className="flex items-center justify-between w-full pr-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold ${
+                      score >= 80
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400"
+                        : score >= 60
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400"
+                          : "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400"
+                    }`}>
+                      {score}
+                    </div>
+                    <span className="font-medium text-sm">
+                      {formatCategoryLabel(key)}
+                    </span>
+                  </div>
+                  <Progress
+                    value={score}
+                    className={`h-2 w-32 hidden sm:block ${score >= 80 ? "[&>div]:bg-emerald-500" : score >= 60 ? "[&>div]:bg-amber-500" : "[&>div]:bg-rose-500"}`}
+                  />
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="pb-4">
+                {reason ? (
+                  <div className="pt-2 pl-13">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      {reason}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground italic pt-2">
+                    No detailed feedback available for this category.
+                  </p>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          );
+        })}
+      </Accordion>
+    </div>
+  );
+});
+CategoryBreakdown.displayName = "CategoryBreakdown";
+
+// Memoized transcript display
+const TranscriptDisplay = memo(({
+  sentences,
+  expanded,
+  onToggle
+}: {
+  sentences: any[];
+  expanded: boolean;
+  onToggle: () => void;
+}) => {
+  if (sentences.length === 0) return null;
+
+  const displaySentences = expanded ? sentences : sentences.slice(0, 15);
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">Full Transcript</h2>
+
+      <div className="space-y-2">
+        {displaySentences.map((s: any, i: number) => (
+          <div
+            key={i}
+            className="flex gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <span className="text-[10px] px-2 py-1 rounded bg-muted text-muted-foreground shrink-0 h-fit">
+              {formatTimestamp(s.start_time)}
+            </span>
+            <div className="min-w-0">
+              <span className="font-medium text-sm text-primary">
+                {s.speaker_name}
+              </span>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {s.text}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {sentences.length > 15 && (
+        <div className="flex justify-center pt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onToggle}
+          >
+            {expanded ? (
+              <>
+                Show Less <IconChevronUp className="ml-1 h-4 w-4" />
+              </>
+            ) : (
+              <>
+                Show All {sentences.length} Messages <IconChevronDown className="ml-1 h-4 w-4" />
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+});
+TranscriptDisplay.displayName = "TranscriptDisplay";
+
+/* ------------------------------------------------------------- */
 
 export default function CallDetailPage() {
   const params = useParams();
@@ -121,63 +374,103 @@ export default function CallDetailPage() {
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Get Zustand store and actions
+  const transcripts = useTranscriptStore((state) => state.transcripts);
+  const { addTranscript } = useTranscriptActions();
+
   /* ------------------------------------------------------------- */
-  /* Load data */
+  /* Memoized computed values for performance */
+  /* IMPORTANT: All hooks must be called before any early returns */
+  /* ------------------------------------------------------------- */
+
+  const duration = useMemo(() => row ? formatDurationSeconds(row.duration) : "—", [row?.duration]);
+  const createdAt = useMemo(() => row ? formatDate(row.created_at) : "—", [row?.created_at]);
+  const attendees = useMemo(() => (row?.meeting_attendees as any[]) ?? [], [row?.meeting_attendees]);
+  const timeline = useMemo(() => (row?.meeting_attendance as any[]) ?? [], [row?.meeting_attendance]);
+  const sentences = useMemo(() => (row?.sentences as any[]) ?? [], [row?.sentences]);
+
+  const aiOverallScore = useMemo(() => row?.ai_overall_score ?? null, [row?.ai_overall_score]);
+  const aiSummary = useMemo(() => row?.ai_summary ?? null, [row?.ai_summary]);
+  const aiCategoryBreakdown = useMemo(() => row?.ai_category_breakdown ?? {}, [row?.ai_category_breakdown]);
+  const aiWhatWorked = useMemo(() => row?.ai_what_worked ?? [], [row?.ai_what_worked]);
+  const aiImprovement = useMemo(() => row?.ai_improvement_areas ?? [], [row?.ai_improvement_areas]);
+  const aiMissed = useMemo(() => row?.ai_missed_opportunities ?? [], [row?.ai_missed_opportunities]);
+  const aiQuestions = useMemo(() => row?.ai_questions ?? [], [row?.ai_questions]);
+  const aiQualGaps = useMemo(() => row?.ai_qualification_gaps ?? [], [row?.ai_qualification_gaps]);
+  const aiNextPlan = useMemo(() => row?.ai_next_call_game_plan ?? [], [row?.ai_next_call_game_plan]);
+  const aiRisks = useMemo(() => row?.ai_deal_risk_alerts ?? [], [row?.ai_deal_risk_alerts]);
+
+  const categoryEntries = useMemo(() => Object.entries(aiCategoryBreakdown), [aiCategoryBreakdown]);
+
+  /* ------------------------------------------------------------- */
+  /* Optimized data loading with multi-layer caching */
   /* ------------------------------------------------------------- */
   useEffect(() => {
     async function load() {
       setLoading(true);
-
-      // Try to find by numeric ID first, then fallback to fireflies_id
-      let data = null;
-      let fetchError = null;
+      setError(null);
 
       const numId = parseInt(callId, 10);
 
-      if (!isNaN(numId)) {
-        // Primary: Fetch by Supabase numeric ID
-        const response = await supabase
-          .from("transcripts")
-          .select("*")
-          .eq("id", numId)
-          .single();
+      try {
+        // 1️⃣ Check Zustand store first (fastest)
+        const cachedTranscript = transcripts.find((t) => {
+          if (!isNaN(numId) && t.id === numId) return true;
+          if (t.fireflies_id === callId) return true;
+          return false;
+        });
 
-        if (response.data) {
-          data = response.data;
-        } else {
-          fetchError = response.error;
+        if (cachedTranscript) {
+          setRow(cachedTranscript);
+          setLoading(false);
+          return;
         }
-      }
 
-      // Fallback: If numeric ID failed or wasn't numeric, try fireflies_id
-      if (!data) {
-        const { data: ffData, error: ffError } = await supabase
-          .from("transcripts")
-          .select("*")
-          .eq("fireflies_id", callId)
-          .single();
-
-        if (ffData) {
-          data = ffData;
-        } else {
-          fetchError = ffError;
+        // 2️⃣ Check localStorage cache (fast)
+        const localCached = getCachedTranscript(callId);
+        if (localCached) {
+          setRow(localCached);
+          // Also add to Zustand store for future visits
+          addTranscript(localCached);
+          setLoading(false);
+          return;
         }
-      }
 
-      if (fetchError || !data) {
-        console.error("Error loading transcript:", fetchError);
-        setError("Could not load transcript.");
+        // 3️⃣ Fetch from Supabase with single optimized query (slow)
+        let query = supabase.from("transcripts").select("*");
+
+        // Single query that handles both ID types
+        if (!isNaN(numId)) {
+          query = query.or(`id.eq.${numId},fireflies_id.eq.${callId}`);
+        } else {
+          query = query.eq("fireflies_id", callId);
+        }
+
+        const { data, error: fetchError } = await query.limit(1).single();
+
+        if (fetchError || !data) {
+          console.error("Error loading transcript:", fetchError);
+          setError("Could not load transcript.");
+          setRow(null);
+        } else {
+          // Cache at all levels
+          setRow(data);
+          addTranscript(data);
+          setCachedTranscript(callId, data);
+        }
+      } catch (err) {
+        console.error("Unexpected error:", err);
+        setError("An unexpected error occurred.");
         setRow(null);
-      } else {
-        setRow(data);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     load();
-  }, [callId]);
+  }, [callId, transcripts, addTranscript]);
 
   /* ------------------------------------------------------------- */
-  /* Loading + Error states */
+  /* Loading skeleton matching UI design */
   /* ------------------------------------------------------------- */
   if (loading) {
     return (
@@ -185,11 +478,37 @@ export default function CallDetailPage() {
         <AppSidebar variant="inset" />
         <SidebarInset>
           <SiteHeader />
-          <div className="flex items-center justify-center min-h-[400px]">
-            <div className="flex flex-col items-center gap-3">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-              <p className="text-sm text-muted-foreground">Loading call details…</p>
+          <div className="mx-auto max-w-6xl p-6 space-y-10">
+            {/* Header skeleton */}
+            <div className="flex items-start justify-between flex-wrap gap-6">
+              <div className="space-y-3 flex-1">
+                <div className="h-9 w-3/4 bg-muted animate-pulse rounded" />
+                <div className="h-4 w-48 bg-muted animate-pulse rounded" />
+                <div className="h-3 w-32 bg-muted animate-pulse rounded" />
+              </div>
+              <div className="h-24 w-24 bg-muted animate-pulse rounded-full" />
             </div>
+
+            {/* Summary card skeleton */}
+            <div className="h-32 bg-muted animate-pulse rounded-lg" />
+
+            {/* Category breakdown skeleton */}
+            <div className="space-y-4">
+              <div className="h-6 w-64 bg-muted animate-pulse rounded" />
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="h-32 bg-muted animate-pulse rounded-lg" />
+                ))}
+              </div>
+            </div>
+
+            {/* Additional sections skeleton */}
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="space-y-4">
+                <div className="h-6 w-48 bg-muted animate-pulse rounded" />
+                <div className="h-24 bg-muted animate-pulse rounded-lg" />
+              </div>
+            ))}
           </div>
         </SidebarInset>
       </SidebarProvider>
@@ -216,29 +535,6 @@ export default function CallDetailPage() {
   }
 
   /* ------------------------------------------------------------- */
-  /* Extract row fields */
-  /* ------------------------------------------------------------- */
-
-  const duration = formatDurationSeconds(row.duration);
-  const createdAt = formatDate(row.created_at);
-  const attendees = (row.meeting_attendees as any[]) ?? [];
-  const timeline = (row.meeting_attendance as any[]) ?? [];
-  const sentences = (row.sentences as any[]) ?? [];
-
-  const aiOverallScore = row.ai_overall_score ?? null;
-  const aiSummary = row.ai_summary ?? null;
-  const aiCategoryBreakdown = row.ai_category_breakdown ?? {};
-  const aiWhatWorked = row.ai_what_worked ?? [];
-  const aiImprovement = row.ai_improvement_areas ?? [];
-  const aiMissed = row.ai_missed_opportunities ?? [];
-  const aiQuestions = row.ai_questions ?? [];
-  const aiQualGaps = row.ai_qualification_gaps ?? [];
-  const aiNextPlan = row.ai_next_call_game_plan ?? [];
-  const aiRisks = row.ai_deal_risk_alerts ?? [];
-
-  const categoryEntries = Object.entries(aiCategoryBreakdown);
-
-  /* ------------------------------------------------------------- */
   /* UI: LINEAR STYLE */
   /* ------------------------------------------------------------- */
 
@@ -250,56 +546,15 @@ export default function CallDetailPage() {
 
         <div className="mx-auto max-w-6xl p-6 space-y-10">
           {/* ============================================================
-              HEADER WITH SCORE
+              HEADER WITH SCORE (Memoized)
           ============================================================ */}
-          <div className="flex items-start justify-between flex-wrap gap-6">
-            <div className="space-y-2">
-              <h1 className="text-3xl font-bold tracking-tight">{row.title}</h1>
-              <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <span>{createdAt}</span>
-                <span>·</span>
-                <span>{duration}</span>
-              </div>
-              {row.fireflies_id && (
-                <p className="text-xs text-muted-foreground/60">
-                  ID: {row.fireflies_id}
-                </p>
-              )}
-            </div>
-
-            {aiOverallScore !== null ? (
-              <div className="flex flex-col items-center">
-                <div className="relative h-24 w-24">
-                  <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100">
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      className="stroke-muted"
-                      strokeWidth="8"
-                    />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      className={getScoreRingColor(aiOverallScore)}
-                      strokeWidth="8"
-                      strokeDasharray={`${(aiOverallScore / 100) * 251.2} 251.2`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className={`text-3xl font-bold ${getScoreColor(aiOverallScore)}`}>
-                      {aiOverallScore}
-                    </span>
-                  </div>
-                </div>
-                <span className="text-xs text-muted-foreground mt-1">Overall Score</span>
-              </div>
-            ) : null}
-          </div>
+          <CallHeader
+            title={row.title}
+            createdAt={createdAt}
+            duration={duration}
+            firefliesId={row.fireflies_id}
+            aiOverallScore={aiOverallScore}
+          />
 
           {/* ============================================================
               AI SUMMARY or SCORING IN PROGRESS
@@ -368,52 +623,9 @@ export default function CallDetailPage() {
           )}
 
           {/* ============================================================
-              CATEGORY BREAKDOWN
+              CATEGORY BREAKDOWN (Memoized)
           ============================================================ */}
-          {categoryEntries.length > 0 && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconTrendingUp className="h-5 w-5 text-indigo-500" />
-                Performance Breakdown
-              </h2>
-
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categoryEntries.map(([key, value]: any, index: number) => {
-                  const score = value.score ?? 0;
-                  const reason = value.reason ?? "";
-
-                  return (
-                    <Card
-                      key={index}
-                      className="border-border/60 hover:border-border transition-colors"
-                    >
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                          <CardTitle className="text-sm font-medium">
-                            {formatCategoryLabel(key)}
-                          </CardTitle>
-                          <span className={`text-2xl font-bold ${getScoreColor(score)}`}>
-                            {score}
-                          </span>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <Progress
-                          value={score}
-                          className={`h-2 ${score >= 80 ? "[&>div]:bg-emerald-500" : score >= 60 ? "[&>div]:bg-amber-500" : "[&>div]:bg-rose-500"}`}
-                        />
-                        {reason && (
-                          <p className="text-xs text-muted-foreground line-clamp-3">
-                            {reason}
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <CategoryBreakdown categoryEntries={categoryEntries} />
 
           {/* ============================================================
               WHAT WORKED
@@ -863,56 +1075,13 @@ export default function CallDetailPage() {
           <Separator />
 
           {/* ============================================================
-              TRANSCRIPT
+              TRANSCRIPT (Memoized & Lazy Loaded)
           ============================================================ */}
-          {sentences.length > 0 && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Full Transcript</h2>
-
-              <div className="space-y-2">
-                {(expanded ? sentences : sentences.slice(0, 15)).map(
-                  (s: any, i: number) => (
-                    <div
-                      key={i}
-                      className="flex gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-                    >
-                      <span className="text-[10px] px-2 py-1 rounded bg-muted text-muted-foreground shrink-0 h-fit">
-                        {formatTimestamp(s.start_time)}
-                      </span>
-                      <div className="min-w-0">
-                        <span className="font-medium text-sm text-primary">
-                          {s.speaker_name}
-                        </span>
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                          {s.text}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-
-              {sentences.length > 15 && (
-                <div className="flex justify-center pt-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setExpanded(!expanded)}
-                  >
-                    {expanded ? (
-                      <>
-                        Show Less <IconChevronUp className="ml-1 h-4 w-4" />
-                      </>
-                    ) : (
-                      <>
-                        Show All {sentences.length} Messages <IconChevronDown className="ml-1 h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
+          <TranscriptDisplay
+            sentences={sentences}
+            expanded={expanded}
+            onToggle={() => setExpanded(!expanded)}
+          />
         </div>
       </SidebarInset>
     </SidebarProvider>

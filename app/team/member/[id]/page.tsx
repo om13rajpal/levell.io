@@ -86,6 +86,19 @@ import {
 } from "@/components/ui/chart";
 import { toast } from "sonner";
 
+// Format duration (stored in minutes) to human readable format
+function formatDuration(minutes?: number | null): string {
+  if (!minutes) return "—";
+  const m = Math.floor(minutes);
+  if (m <= 0) return "—";
+  const h = Math.floor(m / 60);
+  const mins = m % 60;
+  if (h > 0) {
+    return `${h}h ${mins}m`;
+  }
+  return `${mins}m`;
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   call_setup_control: "Call Setup",
   discovery_qualification: "Discovery",
@@ -598,7 +611,7 @@ export default function TeamMemberProfilePage() {
                           >
                             <TableCell className="font-medium">{t.title}</TableCell>
                             <TableCell>
-                              {t.duration ? `${Math.round(t.duration)} sec` : "—"}
+                              {t.duration ? formatDuration(t.duration) : "—"}
                             </TableCell>
                             <TableCell>
                               {t.ai_overall_score != null ? (

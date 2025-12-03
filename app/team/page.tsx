@@ -539,11 +539,18 @@ export default function TeamPage() {
       return;
     }
 
+    // Remove member tags
     await supabase
       .from("team_member_tags")
       .delete()
       .eq("team_id", team.id)
       .eq("user_id", memberId);
+
+    // Clear the user's team_id so they're fully removed from the team
+    await supabase
+      .from("users")
+      .update({ team_id: null })
+      .eq("id", memberId);
 
     toast.success("Member removed successfully");
     setMembers((prev) => prev.filter((m) => m.id !== memberId));
@@ -748,31 +755,30 @@ export default function TeamPage() {
   const renderRoleBadge = (role: "admin" | "member" | null, isOwnerMember: boolean) => {
     if (isOwnerMember) {
       return (
-        <Badge className="bg-gradient-to-r from-amber-500/15 to-orange-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 gap-1.5 px-2.5 py-1 font-medium shadow-sm">
-          <Crown className="h-3.5 w-3.5" />
+        <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 gap-1 text-xs">
+          <Crown className="h-3 w-3" />
           Owner
         </Badge>
       );
     }
     if (role === "admin") {
       return (
-        <Badge className="bg-gradient-to-r from-indigo-500/15 to-purple-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30 gap-1.5 px-2.5 py-1 font-medium shadow-sm">
-          <Shield className="h-3.5 w-3.5" />
+        <Badge variant="outline" className="bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30 gap-1 text-xs">
+          <Shield className="h-3 w-3" />
           Admin
         </Badge>
       );
     }
     if (role === "member") {
       return (
-        <Badge variant="outline" className="bg-slate-500/5 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 gap-1.5 px-2.5 py-1 font-medium">
-          <UserCircle className="h-3.5 w-3.5" />
+        <Badge variant="outline" className="text-muted-foreground gap-1 text-xs">
+          <UserCircle className="h-3 w-3" />
           Member
         </Badge>
       );
     }
     return (
-      <Badge variant="outline" className="bg-muted/50 border-dashed border-muted-foreground/20 text-muted-foreground gap-1.5 px-2.5 py-1">
-        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+      <Badge variant="outline" className="text-muted-foreground/60 border-dashed gap-1 text-xs">
         No Role
       </Badge>
     );
@@ -799,100 +805,68 @@ export default function TeamPage() {
       <SidebarInset>
         <SiteHeader heading="Team" />
 
-        <div className="flex flex-col px-4 py-6 lg:px-8 lg:py-8 max-w-6xl mx-auto gap-6 w-full">
+        <div className="flex flex-1 flex-col">
+          <div className="@container/main flex flex-1 flex-col gap-2">
+            <div className="flex flex-col gap-6 py-6 px-4 lg:px-6 max-w-7xl mx-auto w-full">
 
           {/* ---------------- LOADING STATE ---------------- */}
           {loading && (
-            <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-primary/30 to-primary/10 rounded-full blur-xl animate-pulse" />
-                <div className="relative h-16 w-16 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              </div>
-              <div className="text-center space-y-1">
-                <p className="font-medium text-foreground">Loading your team</p>
-                <p className="text-sm text-muted-foreground">Please wait a moment...</p>
-              </div>
+            <div className="flex flex-col items-center justify-center min-h-[300px] gap-3">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+              <p className="text-sm text-muted-foreground">Loading your team...</p>
             </div>
           )}
 
           {/* ---------------- NO TEAM STATE ---------------- */}
           {!loading && !isInTeam && (
-            <div className="flex flex-col items-center justify-center min-h-[500px]">
-              <Card className="w-full max-w-2xl border-0 shadow-2xl rounded-3xl overflow-hidden bg-gradient-to-b from-card to-card/80">
-                {/* Hero Section */}
-                <div className="relative px-8 pt-12 pb-8 text-center bg-gradient-to-br from-primary/5 via-primary/10 to-transparent">
-                  <div className="absolute top-6 left-1/2 -translate-x-1/2">
-                    <Sparkles className="h-6 w-6 text-primary/40 animate-pulse" />
+            <div className="flex flex-col items-center justify-center min-h-[400px] py-8">
+              <Card className="w-full max-w-lg @container/card shadow-xs bg-gradient-to-t from-primary/5 to-card">
+                <CardHeader className="text-center pb-2">
+                  <div className="mx-auto h-14 w-14 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-4">
+                    <Users className="h-7 w-7 text-primary" />
                   </div>
+                  <CardTitle className="text-xl">Welcome to Teams</CardTitle>
+                  <CardDescription className="max-w-sm mx-auto">
+                    Create a collaborative workspace to share sales calls and AI-powered insights with your team.
+                  </CardDescription>
+                </CardHeader>
 
-                  <div className="mx-auto h-20 w-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-6 shadow-lg">
-                    <Users className="h-10 w-10 text-primary" />
-                  </div>
-
-                  <h1 className="text-3xl font-bold tracking-tight mb-3">
-                    Welcome to Teams
-                  </h1>
-                  <p className="text-muted-foreground max-w-md mx-auto leading-relaxed">
-                    Create a collaborative workspace to share sales calls, transcripts,
-                    and AI-powered insights with your team.
-                  </p>
-                </div>
-
-                {/* Features Grid */}
-                <div className="px-8 py-6 border-t border-border/50">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/30">
-                      <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">Shared Transcripts</p>
-                        <p className="text-xs text-muted-foreground">Access all team calls</p>
-                      </div>
+                <CardContent className="pt-4 pb-6">
+                  {/* Features Grid */}
+                  <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="flex flex-col items-center gap-1.5 p-2.5 rounded-lg bg-muted/30 text-center">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <span className="text-[10px] text-muted-foreground">Shared Calls</span>
                     </div>
-                    <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/30">
-                      <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-                        <BarChart3 className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">Team Analytics</p>
-                        <p className="text-xs text-muted-foreground">Track performance</p>
-                      </div>
+                    <div className="flex flex-col items-center gap-1.5 p-2.5 rounded-lg bg-muted/30 text-center">
+                      <BarChart3 className="h-4 w-4 text-blue-600" />
+                      <span className="text-[10px] text-muted-foreground">Analytics</span>
                     </div>
-                    <div className="flex items-start gap-3 p-3 rounded-xl bg-muted/30">
-                      <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center shrink-0">
-                        <Sparkles className="h-4 w-4 text-purple-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">AI Insights</p>
-                        <p className="text-xs text-muted-foreground">Smart recommendations</p>
-                      </div>
+                    <div className="flex flex-col items-center gap-1.5 p-2.5 rounded-lg bg-muted/30 text-center">
+                      <Sparkles className="h-4 w-4 text-purple-600" />
+                      <span className="text-[10px] text-muted-foreground">AI Insights</span>
                     </div>
                   </div>
-                </div>
 
-                {/* Action Buttons */}
-                <CardContent className="px-8 pb-10 pt-2">
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  {/* Action Buttons */}
+                  <div className="flex flex-col sm:flex-row gap-2">
                     {/* CREATE TEAM */}
                     <Dialog open={openCreateTeam} onOpenChange={setOpenCreateTeam}>
                       <DialogTrigger asChild>
-                        <Button size="lg" className="gap-2 px-8 rounded-xl shadow-lg hover:shadow-xl transition-all">
-                          <Plus className="h-5 w-5" />
-                          Create New Team
+                        <Button className="flex-1 gap-1.5">
+                          <Plus className="h-4 w-4" />
+                          Create Team
                         </Button>
                       </DialogTrigger>
 
-                      <DialogContent className="max-w-md rounded-2xl">
+                      <DialogContent className="sm:max-w-md">
                         <DialogHeader>
                           <DialogTitle className="flex items-center gap-2">
                             <Plus className="h-5 w-5 text-primary" />
                             Create Your Team
                           </DialogTitle>
                           <DialogDescription>
-                            Give your team a name to get started. You can invite members after creation.
+                            Give your team a name to get started.
                           </DialogDescription>
                         </DialogHeader>
 
@@ -904,7 +878,7 @@ export default function TeamPage() {
                               placeholder="e.g., Sales Team, Growth Squad..."
                               value={createTeamName}
                               onChange={(e) => setCreateTeamName(e.target.value)}
-                              className="h-11"
+                              className="h-10"
                             />
                           </div>
                         </div>
@@ -923,7 +897,7 @@ export default function TeamPage() {
                             ) : (
                               <ArrowRight className="h-4 w-4" />
                             )}
-                            {createLoading ? "Creating..." : "Create Team"}
+                            {createLoading ? "Creating..." : "Create"}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
@@ -932,20 +906,20 @@ export default function TeamPage() {
                     {/* JOIN TEAM */}
                     <Dialog open={openJoinTeam} onOpenChange={setOpenJoinTeam}>
                       <DialogTrigger asChild>
-                        <Button variant="outline" size="lg" className="gap-2 px-8 rounded-xl border-dashed">
-                          <Link2 className="h-5 w-5" />
-                          Join Existing Team
+                        <Button variant="outline" className="flex-1 gap-1.5">
+                          <Link2 className="h-4 w-4" />
+                          Join Team
                         </Button>
                       </DialogTrigger>
 
-                      <DialogContent className="max-w-md rounded-2xl">
+                      <DialogContent className="sm:max-w-md">
                         <DialogHeader>
                           <DialogTitle className="flex items-center gap-2">
                             <Link2 className="h-5 w-5 text-primary" />
                             Join a Team
                           </DialogTitle>
                           <DialogDescription>
-                            Enter the Team ID shared by your team admin to join.
+                            Enter the Team ID shared by your team admin.
                           </DialogDescription>
                         </DialogHeader>
 
@@ -959,7 +933,7 @@ export default function TeamPage() {
                                 placeholder="Enter numeric Team ID"
                                 value={joinTeamId}
                                 onChange={(e) => setJoinTeamId(e.target.value)}
-                                className="h-11 pl-9"
+                                className="h-10 pl-9"
                               />
                             </div>
                           </div>
@@ -979,14 +953,14 @@ export default function TeamPage() {
                             ) : (
                               <ArrowRight className="h-4 w-4" />
                             )}
-                            {joinLoading ? "Joining..." : "Join Team"}
+                            {joinLoading ? "Joining..." : "Join"}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
                   </div>
 
-                  <p className="text-center text-xs text-muted-foreground mt-6">
+                  <p className="text-center text-[10px] text-muted-foreground mt-4">
                     You can only be a member of one team at a time.
                   </p>
                 </CardContent>
@@ -998,173 +972,168 @@ export default function TeamPage() {
           {!loading && isInTeam && team && (
             <>
               {/* Team Header Card */}
-              <Card className="border-0 shadow-xl rounded-2xl overflow-hidden bg-gradient-to-br from-card via-card to-card/90">
-                <div className="relative">
-                  {/* Background Pattern */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/5 pointer-events-none" />
-
-                  <CardHeader className="relative pb-6">
-                    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-                      {/* Left Side - Team Info */}
-                      <div className="flex items-start gap-4">
-                        <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center shadow-lg shrink-0">
-                          <Users className="h-8 w-8 text-primary" />
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <CardTitle className="text-2xl lg:text-3xl font-bold tracking-tight">
-                              {team.team_name}
-                            </CardTitle>
-                            <Badge variant="outline" className="gap-1 font-mono text-xs">
-                              <Hash className="h-3 w-3" />
-                              {team.id}
-                            </Badge>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-1.5">
-                              <Users className="h-4 w-4" />
-                              <span>{members.length} {members.length === 1 ? "member" : "members"}</span>
-                            </div>
-                            <span className="h-1 w-1 rounded-full bg-muted-foreground/40" />
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-4 w-4" />
-                              <span>Created {formatDate(team.created_at)}</span>
-                            </div>
-                          </div>
-
-                          {ownerUser && (
-                            <div className="flex items-center gap-2 pt-1">
-                              <div className="h-6 w-6 rounded-full bg-amber-500/10 flex items-center justify-center">
-                                <Crown className="h-3 w-3 text-amber-600" />
-                              </div>
-                              <span className="text-xs text-muted-foreground">
-                                Owned by <span className="font-semibold text-foreground">{ownerUser.name || ownerUser.email}</span>
-                              </span>
-                            </div>
-                          )}
-                        </div>
+              <Card className="@container/card border-0 shadow-xs overflow-hidden bg-gradient-to-t from-primary/5 to-card">
+                <CardHeader className="pb-4">
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                    {/* Left Side - Team Info */}
+                    <div className="flex items-start gap-4">
+                      <div className="h-14 w-14 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center shrink-0">
+                        <Users className="h-7 w-7 text-primary" />
                       </div>
 
-                      {/* Right Side - Actions */}
-                      <div className="flex flex-col gap-3 lg:items-end">
-                        {/* Status Badge */}
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-medium w-fit">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <CardTitle className="text-2xl font-bold tracking-tight">
+                            {team.team_name}
+                          </CardTitle>
+                          <Badge variant="outline" className="gap-1 font-mono text-[10px] px-2 py-0.5 bg-muted/50">
+                            <Hash className="h-2.5 w-2.5" />
+                            {team.id}
+                          </Badge>
+                        </div>
+
+                        <CardDescription className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="flex items-center gap-1.5">
+                            <Users className="h-3.5 w-3.5" />
+                            {members.length} {members.length === 1 ? "member" : "members"}
                           </span>
-                          Active Workspace
-                        </div>
+                          <span className="text-muted-foreground/40">·</span>
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5" />
+                            Created {formatDate(team.created_at)}
+                          </span>
+                        </CardDescription>
 
-                        {/* Action Buttons */}
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-2 rounded-xl"
-                            onClick={copyTeamId}
-                          >
-                            <Copy className="h-4 w-4" />
-                            Copy ID
-                          </Button>
-
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-2 rounded-xl"
-                            onClick={() => router.push("/team/analytics")}
-                          >
-                            <BarChart3 className="h-4 w-4" />
-                            Analytics
-                          </Button>
-
-                          {isAdmin && (
-                            <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-                              <DialogTrigger asChild>
-                                <Button variant="outline" size="sm" className="gap-2 rounded-xl">
-                                  <Settings className="h-4 w-4" />
-                                  Settings
-                                </Button>
-                              </DialogTrigger>
-
-                              <DialogContent className="max-w-md rounded-2xl">
-                                <DialogHeader>
-                                  <DialogTitle className="flex items-center gap-2">
-                                    <Settings className="h-5 w-5 text-primary" />
-                                    Team Settings
-                                  </DialogTitle>
-                                  <DialogDescription>
-                                    Manage your team configuration
-                                  </DialogDescription>
-                                </DialogHeader>
-
-                                <div className="space-y-4 py-4">
-                                  <div className="space-y-2">
-                                    <Label htmlFor="settings-name">Team Name</Label>
-                                    <Input
-                                      id="settings-name"
-                                      value={settingsTeamName}
-                                      onChange={(e) => setSettingsTeamName(e.target.value)}
-                                      className="h-11"
-                                    />
-                                  </div>
-                                </div>
-
-                                <DialogFooter>
-                                  <Button variant="outline" onClick={() => setSettingsOpen(false)}>
-                                    Cancel
-                                  </Button>
-                                  <Button
-                                    onClick={saveSettings}
-                                    disabled={settingsSaving || !settingsTeamName.trim()}
-                                    className="gap-2"
-                                  >
-                                    {settingsSaving ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <CheckCircle2 className="h-4 w-4" />
-                                    )}
-                                    {settingsSaving ? "Saving..." : "Save Changes"}
-                                  </Button>
-                                </DialogFooter>
-                              </DialogContent>
-                            </Dialog>
-                          )}
-
-                          {!isOwner && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="gap-2 rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              onClick={handleLeaveTeam}
-                            >
-                              <LogOut className="h-4 w-4" />
-                              Leave
-                            </Button>
-                          )}
-                        </div>
+                        {ownerUser && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <div className="h-5 w-5 rounded-full bg-amber-500/10 flex items-center justify-center">
+                              <Crown className="h-2.5 w-2.5 text-amber-600" />
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              Owned by <span className="font-medium text-foreground">{ownerUser.name || ownerUser.email}</span>
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </CardHeader>
-                </div>
+
+                    {/* Right Side - Actions */}
+                    <div className="flex flex-col gap-3 lg:items-end">
+                      {/* Status Badge */}
+                      <Badge variant="outline" className="gap-1.5 border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 w-fit">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                        </span>
+                        Active Workspace
+                      </Badge>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5 h-8 text-xs"
+                          onClick={copyTeamId}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          Copy ID
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5 h-8 text-xs"
+                          onClick={() => router.push("/team/analytics")}
+                        >
+                          <BarChart3 className="h-3.5 w-3.5" />
+                          Analytics
+                        </Button>
+
+                        {isAdmin && (
+                          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
+                                <Settings className="h-3.5 w-3.5" />
+                                Settings
+                              </Button>
+                            </DialogTrigger>
+
+                            <DialogContent className="sm:max-w-md">
+                              <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                  <Settings className="h-5 w-5 text-primary" />
+                                  Team Settings
+                                </DialogTitle>
+                                <DialogDescription>
+                                  Manage your team configuration
+                                </DialogDescription>
+                              </DialogHeader>
+
+                              <div className="space-y-4 py-4">
+                                <div className="space-y-2">
+                                  <Label htmlFor="settings-name">Team Name</Label>
+                                  <Input
+                                    id="settings-name"
+                                    value={settingsTeamName}
+                                    onChange={(e) => setSettingsTeamName(e.target.value)}
+                                    className="h-10"
+                                  />
+                                </div>
+                              </div>
+
+                              <DialogFooter>
+                                <Button variant="outline" onClick={() => setSettingsOpen(false)}>
+                                  Cancel
+                                </Button>
+                                <Button
+                                  onClick={saveSettings}
+                                  disabled={settingsSaving || !settingsTeamName.trim()}
+                                  className="gap-2"
+                                >
+                                  {settingsSaving ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="h-4 w-4" />
+                                  )}
+                                  {settingsSaving ? "Saving..." : "Save Changes"}
+                                </Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        )}
+
+                        {!isOwner && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5 h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={handleLeaveTeam}
+                          >
+                            <LogOut className="h-3.5 w-3.5" />
+                            Leave
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
               </Card>
 
               {/* Members Card */}
-              <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
-                <CardHeader className="pb-4 border-b bg-muted/30">
+              <Card className="@container/card shadow-xs">
+                <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
-                      <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                      <CardTitle className="flex items-center gap-2">
                         <Users className="h-5 w-5 text-primary" />
                         Team Members
                       </CardTitle>
                       <CardDescription>
                         {members.length} {members.length === 1 ? "person" : "people"} in your workspace
                         {pendingInvitations.length > 0 && (
-                          <span className="ml-2 text-amber-600">
-                            ({pendingInvitations.length} pending)
+                          <span className="ml-1.5">
+                            · <span className="text-amber-600 dark:text-amber-400">{pendingInvitations.length} pending</span>
                           </span>
                         )}
                       </CardDescription>
@@ -1182,13 +1151,13 @@ export default function TeamPage() {
                         }}
                       >
                         <DialogTrigger asChild>
-                          <Button className="gap-2 rounded-xl shadow-md">
-                            <UserPlus className="h-4 w-4" />
+                          <Button size="sm" className="gap-1.5 h-8">
+                            <UserPlus className="h-3.5 w-3.5" />
                             Invite Member
                           </Button>
                         </DialogTrigger>
 
-                        <DialogContent className="max-w-lg rounded-2xl">
+                        <DialogContent className="sm:max-w-lg">
                           <DialogHeader>
                             <DialogTitle className="flex items-center gap-2">
                               <UserPlus className="h-5 w-5 text-primary" />
@@ -1294,151 +1263,147 @@ export default function TeamPage() {
 
                 <CardContent className="p-0">
                   {members.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                      <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                        <Users className="h-6 w-6 text-muted-foreground" />
+                    <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+                      <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
+                        <Users className="h-6 w-6 text-muted-foreground/60" />
                       </div>
-                      <p className="font-medium">No members yet</p>
-                      <p className="text-sm text-muted-foreground">Invite your first team member to get started</p>
+                      <p className="font-medium text-sm">No members yet</p>
+                      <p className="text-xs text-muted-foreground mt-1">Invite your first team member to get started</p>
                     </div>
                   ) : (
-                    <div className="overflow-hidden">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-gradient-to-r from-muted/40 via-muted/30 to-muted/40 hover:bg-muted/40 border-b border-border/50">
-                            <TableHead className="font-semibold text-foreground/80 py-4 pl-6">Member</TableHead>
-                            <TableHead className="font-semibold text-foreground/80 py-4 hidden sm:table-cell">Email</TableHead>
-                            <TableHead className="font-semibold text-foreground/80 py-4">Role</TableHead>
-                            {isAdmin && <TableHead className="text-right font-semibold text-foreground/80 py-4 pr-6">Actions</TableHead>}
-                          </TableRow>
-                        </TableHeader>
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="pl-4">Member</TableHead>
+                          <TableHead className="hidden sm:table-cell">Email</TableHead>
+                          <TableHead>Role</TableHead>
+                          {isAdmin && <TableHead className="text-right pr-4">Actions</TableHead>}
+                        </TableRow>
+                      </TableHeader>
 
-                        <TableBody>
-                          {members.map((m, index) => {
-                            const role = getRoleForUser(m.id);
-                            const isMemberOwner = team.owner === m.id;
-                            const isCurrentUser = m.id === userId;
+                      <TableBody>
+                        {members.map((m) => {
+                          const role = getRoleForUser(m.id);
+                          const isMemberOwner = team.owner === m.id;
+                          const isCurrentUser = m.id === userId;
 
-                            return (
-                              <TableRow
-                                key={m.id}
-                                className={`
-                                  group transition-all duration-200
-                                  hover:bg-gradient-to-r hover:from-primary/5 hover:via-primary/3 hover:to-transparent
-                                  ${index !== members.length - 1 ? 'border-b border-border/30' : ''}
-                                  ${isCurrentUser ? 'bg-primary/[0.02]' : ''}
-                                `}
-                              >
-                                <TableCell className="py-5 pl-6">
-                                  <div className="flex items-center gap-4">
-                                    <div className="relative">
-                                      <div className={`
-                                        h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0
-                                        shadow-sm transition-transform duration-200 group-hover:scale-105
-                                        ${isMemberOwner
-                                          ? 'bg-gradient-to-br from-amber-500/20 to-orange-500/20 text-amber-700 ring-2 ring-amber-500/20'
-                                          : role === 'admin'
-                                            ? 'bg-gradient-to-br from-indigo-500/20 to-purple-500/20 text-indigo-700 ring-2 ring-indigo-500/20'
-                                            : 'bg-gradient-to-br from-slate-200 to-slate-100 text-slate-600 dark:from-slate-700 dark:to-slate-800 dark:text-slate-300'
-                                        }
-                                      `}>
-                                        {m.name ? m.name[0].toUpperCase() : m.email[0].toUpperCase()}
-                                      </div>
-                                      {isMemberOwner && (
-                                        <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-amber-500 flex items-center justify-center shadow-lg ring-2 ring-white dark:ring-card">
-                                          <Crown className="h-3 w-3 text-white" />
-                                        </div>
-                                      )}
-                                      {isCurrentUser && !isMemberOwner && (
-                                        <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-card" />
-                                      )}
+                          return (
+                            <TableRow
+                              key={m.id}
+                              className="group hover:bg-muted/50 cursor-pointer transition-colors"
+                              onClick={() => router.push(`/team/member/${m.id}`)}
+                            >
+                              <TableCell className="py-3 pl-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="relative">
+                                    <div className={`
+                                      h-9 w-9 rounded-lg flex items-center justify-center text-xs font-semibold shrink-0
+                                      ${isMemberOwner
+                                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                                        : role === 'admin'
+                                          ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400'
+                                          : 'bg-muted text-muted-foreground'
+                                      }
+                                    `}>
+                                      {m.name ? m.name[0].toUpperCase() : m.email[0].toUpperCase()}
                                     </div>
-                                    <div className="min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <p className="font-semibold text-foreground truncate">
-                                          {m.name || "Unnamed User"}
-                                        </p>
-                                        {isCurrentUser && (
-                                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
-                                            You
-                                          </Badge>
-                                        )}
+                                    {isMemberOwner && (
+                                      <div className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-amber-500 flex items-center justify-center ring-2 ring-background">
+                                        <Crown className="h-2 w-2 text-white" />
                                       </div>
-                                      <p className="text-xs text-muted-foreground truncate sm:hidden mt-0.5">
-                                        {m.email}
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="font-medium text-sm truncate">
+                                        {m.name || "Unnamed User"}
                                       </p>
-                                    </div>
-                                  </div>
-                                </TableCell>
-
-                                <TableCell className="py-5 hidden sm:table-cell">
-                                  <div className="flex items-center gap-2">
-                                    <Mail className="h-3.5 w-3.5 text-muted-foreground/50" />
-                                    <span className="text-sm text-muted-foreground truncate max-w-[200px]">
-                                      {m.email}
-                                    </span>
-                                  </div>
-                                </TableCell>
-
-                                <TableCell className="py-5">
-                                  {renderRoleBadge(role, isMemberOwner)}
-                                </TableCell>
-
-                                {isAdmin && (
-                                  <TableCell className="py-5 pr-6">
-                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 px-3 text-xs font-medium hover:bg-primary/10 rounded-lg"
-                                        onClick={() => router.push(`/team/member/${m.id}`)}
-                                      >
-                                        <Eye className="h-3.5 w-3.5 mr-1.5" />
-                                        View
-                                      </Button>
-
-                                      {m.id !== userId && !isMemberOwner && (
-                                        <>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-8 px-3 text-xs font-medium hover:bg-indigo-500/10 hover:text-indigo-700 rounded-lg"
-                                            onClick={() => openRoleDialog(m)}
-                                          >
-                                            <Shield className="h-3.5 w-3.5 mr-1.5" />
-                                            Role
-                                          </Button>
-
-                                          <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
-                                            onClick={() => removeMember(m.id)}
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </>
+                                      {isCurrentUser && (
+                                        <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+                                          You
+                                        </Badge>
                                       )}
                                     </div>
-                                  </TableCell>
-                                )}
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
+                                    <p className="text-xs text-muted-foreground truncate sm:hidden">
+                                      {m.email}
+                                    </p>
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="py-3 hidden sm:table-cell">
+                                <span className="text-sm text-muted-foreground truncate">
+                                  {m.email}
+                                </span>
+                              </TableCell>
+
+                              <TableCell className="py-3">
+                                {renderRoleBadge(role, isMemberOwner)}
+                              </TableCell>
+
+                              {isAdmin && (
+                                <TableCell className="py-3 pr-4" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        router.push(`/team/member/${m.id}`);
+                                      }}
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                    </Button>
+
+                                    {m.id !== userId && !isMemberOwner && (
+                                      <>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-indigo-600"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openRoleDialog(m);
+                                          }}
+                                        >
+                                          <Shield className="h-3.5 w-3.5" />
+                                        </Button>
+
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            removeMember(m.id);
+                                          }}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   )}
                 </CardContent>
               </Card>
             </>
           )}
         </div>
+          </div>
+        </div>
       </SidebarInset>
 
       {/* Role Change Dialog */}
       <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
@@ -1453,30 +1418,30 @@ export default function TeamPage() {
             <RadioGroup
               value={selectedRole}
               onValueChange={(val) => setSelectedRole(val as "admin" | "member")}
-              className="space-y-3"
+              className="space-y-2"
             >
-              <label className="flex items-start gap-3 p-4 rounded-xl border cursor-pointer hover:bg-muted/30 transition-colors">
+              <label className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5">
                 <RadioGroupItem value="admin" className="mt-0.5" />
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Shield className="h-4 w-4 text-indigo-600" />
-                    <span className="font-medium">Admin</span>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <Shield className="h-3.5 w-3.5 text-indigo-600" />
+                    <span className="font-medium text-sm">Admin</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Can invite/remove members, manage settings, and access all team features.
+                    Can invite/remove members and manage settings.
                   </p>
                 </div>
               </label>
 
-              <label className="flex items-start gap-3 p-4 rounded-xl border cursor-pointer hover:bg-muted/30 transition-colors">
+              <label className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors has-[:checked]:border-primary/50 has-[:checked]:bg-primary/5">
                 <RadioGroupItem value="member" className="mt-0.5" />
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <UserCircle className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Member</span>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <UserCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="font-medium text-sm">Member</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Can view workspace content but cannot manage team settings or members.
+                    Can view content but cannot manage team.
                   </p>
                 </div>
               </label>

@@ -31,6 +31,9 @@ export default function TeamInvitePage() {
   const [alreadyInTeam, setAlreadyInTeam] = useState(false);
   const [existingTeamName, setExistingTeamName] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [invitedEmail, setInvitedEmail] = useState<string | null>(null);
+  const [userExistsInDb, setUserExistsInDb] = useState(false);
+  const [emailMismatch, setEmailMismatch] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -38,19 +41,7 @@ export default function TeamInvitePage() {
     const load = async () => {
       setLoading(true);
 
-      // Check if user is logged in
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-
-      if (!authUser) {
-        // Redirect to login with return URL
-        const returnUrl = encodeURIComponent(`/team/invite/${token}`);
-        router.replace(`/login?redirect=${returnUrl}`);
-        return;
-      }
-
-      setUser(authUser);
-
-      // Validate the invitation token
+      // Validate the invitation token first to get invited email
       const { valid, team: inviteTeam, error: validationError } = await validateInvitation(token);
 
       if (!valid || !inviteTeam) {
@@ -60,6 +51,45 @@ export default function TeamInvitePage() {
       }
 
       setTeam(inviteTeam);
+
+      // Get invitation details including invited email
+      const { data: inviteData } = await supabase
+        .from("team_invitations")
+        .select("email")
+        .eq("token", token)
+        .single();
+
+      const invitedEmailAddress = inviteData?.email;
+      setInvitedEmail(invitedEmailAddress);
+
+      // Check if user with invited email exists in database
+      if (invitedEmailAddress) {
+        const { data: existingUser } = await supabase
+          .from("users")
+          .select("id, email")
+          .eq("email", invitedEmailAddress)
+          .single();
+
+        setUserExistsInDb(!!existingUser);
+      }
+
+      // Check if user is logged in
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+
+      if (!authUser) {
+        // User not logged in - handle based on whether user exists
+        setLoading(false);
+        return;
+      }
+
+      setUser(authUser);
+
+      // Check if logged in email matches invited email
+      if (authUser.email !== invitedEmailAddress) {
+        setEmailMismatch(true);
+        setLoading(false);
+        return;
+      }
 
       // Get owner name
       if (inviteTeam.owner) {
@@ -136,6 +166,30 @@ export default function TeamInvitePage() {
     router.replace("/dashboard");
   };
 
+  const handleLoginRedirect = () => {
+    // Store invite token in localStorage for after login
+    localStorage.setItem("pending_invite_token", token);
+    const returnUrl = encodeURIComponent(`/team/invite/${token}`);
+    router.replace(`/login?redirect=${returnUrl}`);
+  };
+
+  const handleSignupRedirect = () => {
+    // Store invite token in localStorage for after signup
+    localStorage.setItem("pending_invite_token", token);
+    localStorage.setItem("invite_onboarding", "true");
+    if (team) {
+      localStorage.setItem("invite_team_id", team.id.toString());
+    }
+    const returnUrl = encodeURIComponent(`/team/invite/${token}`);
+    const emailParam = invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : "";
+    router.replace(`/login?redirect=${returnUrl}&newUser=true${emailParam}`);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.replace(`/login?redirect=${encodeURIComponent(`/team/invite/${token}`)}`);
+  };
+
   // Loading state
   if (loading || !token) {
     return (
@@ -187,6 +241,122 @@ export default function TeamInvitePage() {
           <CardFooter className="flex justify-center">
             <Button onClick={handleGoToTeam} className="w-full max-w-xs">
               Go to Team
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // Email mismatch state - logged in with different email
+  if (emailMismatch && user) {
+    return (
+      <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+        <Card className="max-w-md w-full shadow-xl rounded-2xl border-amber-500/30">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto h-16 w-16 rounded-full bg-amber-500/10 flex items-center justify-center">
+              <AlertTriangle className="h-8 w-8 text-amber-500" />
+            </div>
+            <CardTitle className="text-2xl">Email Mismatch</CardTitle>
+            <CardDescription className="text-base">
+              This invitation was sent to{" "}
+              <span className="font-semibold text-primary">{invitedEmail}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-3">
+            <p className="text-sm text-muted-foreground">
+              You&apos;re currently logged in as{" "}
+              <span className="font-medium text-foreground">{user.email}</span>
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Please log out and sign in with the correct account to accept this invitation.
+            </p>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button onClick={handleLogout} className="w-full">
+              Log Out & Switch Account
+            </Button>
+            <Button variant="ghost" onClick={handleGoToDashboard} className="w-full">
+              Cancel
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // User not logged in + user EXISTS in database
+  if (!user && userExistsInDb) {
+    return (
+      <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+        <Card className="max-w-md w-full shadow-xl rounded-2xl border-primary/30">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Users className="h-8 w-8 text-primary" />
+            </div>
+            <CardTitle className="text-2xl">Welcome Back!</CardTitle>
+            <CardDescription className="text-base">
+              You have an account! Please log in to accept this invitation to{" "}
+              <span className="font-semibold text-primary">{team?.team_name}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center">
+            <div className="p-4 rounded-xl bg-muted/50 border">
+              <p className="text-sm text-muted-foreground">
+                Invited email: <span className="font-medium text-foreground">{invitedEmail}</span>
+              </p>
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button onClick={handleLoginRedirect} className="w-full py-6 text-lg rounded-xl">
+              Log In to Accept
+            </Button>
+            <Button variant="ghost" onClick={handleGoToDashboard} className="w-full">
+              Cancel
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // User not logged in + user DOES NOT EXIST in database
+  if (!user && !userExistsInDb) {
+    return (
+      <div className="flex h-screen items-center justify-center px-4 bg-gradient-to-br from-background to-muted/30">
+        <Card className="max-w-md w-full shadow-xl rounded-2xl border-green-500/30">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center">
+              <Users className="h-8 w-8 text-green-500" />
+            </div>
+            <CardTitle className="text-2xl">Join {team?.team_name}</CardTitle>
+            <CardDescription className="text-base">
+              {ownerName ? (
+                <>
+                  <span className="font-medium text-foreground">{ownerName}</span> has invited you to join their team
+                </>
+              ) : (
+                "You've been invited to join this team"
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <div className="p-4 rounded-xl bg-muted/50 border">
+              <h3 className="text-xl font-semibold text-primary mb-2">{team?.team_name}</h3>
+              <p className="text-sm text-muted-foreground">
+                Invited email: <span className="font-medium text-foreground">{invitedEmail}</span>
+              </p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Create your account to join the team and collaborate on sales calls, transcripts, and AI analysis.
+            </p>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button onClick={handleSignupRedirect} className="w-full py-6 text-lg rounded-xl">
+              Create Account & Join
+            </Button>
+            <Button variant="ghost" onClick={handleGoToDashboard} className="w-full">
+              Cancel
             </Button>
           </CardFooter>
         </Card>

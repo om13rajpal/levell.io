@@ -79,6 +79,19 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 
+// Format duration (stored in minutes) to human readable format
+function formatDuration(minutes?: number | null): string {
+  if (!minutes) return "—";
+  const m = Math.floor(minutes);
+  if (m <= 0) return "—";
+  const h = Math.floor(m / 60);
+  const mins = m % 60;
+  if (h > 0) {
+    return `${h}h ${mins}m`;
+  }
+  return `${mins}m`;
+}
+
 function industryFromDomain(domain: string) {
   if (!domain) return "Unknown";
   if (domain.includes("tech")) return "Technology";
@@ -944,7 +957,7 @@ export default function CompanyDetailsPage() {
                           >
                             <TableCell className="font-medium">{t.title}</TableCell>
                             <TableCell>
-                              {t.duration ? `${Math.round(t.duration)} sec` : "—"}
+                              {t.duration ? formatDuration(t.duration) : "—"}
                             </TableCell>
                             <TableCell>
                               {t.ai_overall_score != null &&

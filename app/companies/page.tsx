@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardHeader,
@@ -64,6 +65,48 @@ import axiosClient from "@/lib/axiosClient";
 import Image from "next/image";
 
 // --------------------------------------------------
+// Cache utilities
+// --------------------------------------------------
+const CACHE_TTL = {
+  COMPANIES: 5 * 60 * 1000, // 5 minutes
+};
+
+function getCachedData<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const cached = localStorage.getItem(key);
+    if (!cached) return null;
+    return JSON.parse(cached);
+  } catch {
+    return null;
+  }
+}
+
+function setCachedData(key: string, data: any, timestamp?: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({ data, timestamp: timestamp || Date.now() })
+    );
+  } catch {
+    // Ignore cache errors
+  }
+}
+
+function isCacheValid(key: string, ttl: number): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const cached = localStorage.getItem(key);
+    if (!cached) return false;
+    const { timestamp } = JSON.parse(cached);
+    return Date.now() - timestamp < ttl;
+  } catch {
+    return false;
+  }
+}
+
+// --------------------------------------------------
 // Utility – extract industry from domain
 // --------------------------------------------------
 function industryFromDomain(domain: string) {
@@ -98,39 +141,59 @@ function getDomainFromUrl(url: string): string {
 // MAIN PAGE
 // --------------------------------------------------
 export default function CompaniesPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [myCompany, setMyCompany] = useState<any>(null);
   const [detectedCompanies, setDetectedCompanies] = useState<any[]>([]);
   const [calls, setCalls] = useState<any[]>([]);
 
-  // Filters & state
-  const [q, setQ] = useState("");
-  const [industry, setIndustry] = useState("all");
-  const [risk, setRisk] = useState("all");
-  const [sortBy, setSortBy] = useState("calls");
+  // Combined filter state for reduced re-renders
+  const [filters, setFilters] = useState({
+    q: "",
+    industry: "all",
+    risk: "all",
+    sortBy: "calls",
+  });
 
   // Pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Goal modal
-  const [selectedCompany, setSelectedCompany] = useState<any>(null);
-  const [goal, setGoal] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  // Add Company modal
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [newCompanyName, setNewCompanyName] = useState("");
-  const [newCompanyDomain, setNewCompanyDomain] = useState("");
-  const [newCompanyUrl, setNewCompanyUrl] = useState("");
-  const [addingSaving, setAddingSaving] = useState(false);
+  // Modal states combined
+  const [modalState, setModalState] = useState({
+    selectedCompany: null as any,
+    goal: "",
+    saving: false,
+    addDialogOpen: false,
+    newCompanyName: "",
+    newCompanyDomain: "",
+    newCompanyUrl: "",
+    addingSaving: false,
+  });
 
   // Predict Companies
   const [predicting, setPredicting] = useState(false);
+  const [predictionClicked, setPredictionClicked] = useState(false);
+
+  // LocalStorage key for prediction state
+  const PREDICTION_CLICKED_KEY = "prediction_companies_clicked";
 
   // --------------------------------------------------
-  // Load Data - OPTIMIZED: Parallel API calls
+  // Load prediction clicked state from localStorage
+  // --------------------------------------------------
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedState = localStorage.getItem(PREDICTION_CLICKED_KEY);
+      if (savedState === "true") {
+        setPredictionClicked(true);
+      }
+    }
+  }, []);
+
+  // --------------------------------------------------
+  // Load Data - OPTIMIZED: Parallel API calls with caching
   // --------------------------------------------------
   useEffect(() => {
     async function load() {
@@ -144,42 +207,73 @@ export default function CompaniesPage() {
         return;
       }
 
-      // Get user's company first
-      const myCompResult = await supabase
-        .from("company")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
+      const cacheKey = `companies-data-${user.id}`;
+
+      // Check cache first
+      const cached = getCachedData<{
+        data: { myCompany: any; detectedCompanies: any[]; calls: any[] };
+        timestamp: number;
+      }>(cacheKey);
+
+      if (cached && isCacheValid(cacheKey, CACHE_TTL.COMPANIES)) {
+        setMyCompany(cached.data.myCompany);
+        setDetectedCompanies(cached.data.detectedCompanies);
+        setCalls(cached.data.calls);
+        setLoading(false);
+
+        // Clear prediction state if companies exist
+        if (cached.data.detectedCompanies.length > 0) {
+          localStorage.removeItem(PREDICTION_CLICKED_KEY);
+          setPredictionClicked(false);
+        }
+        return;
+      }
+
+      // Parallel fetch: user company and detected companies
+      const [myCompResult, allDetectedResult] = await Promise.all([
+        supabase.from("company").select("*").eq("user_id", user.id).single(),
+        supabase.from("companies").select("*"),
+      ]);
 
       const myCompanyId = myCompResult.data?.id;
 
-      // Parallel API calls - filter companies by user's company_id
-      const [detectedResult, callsResult] = await Promise.all([
-        myCompanyId
-          ? supabase.from("companies").select("*").eq("company_id", myCompanyId)
-          : supabase.from("companies").select("*"),
-        supabase.from("company_calls").select("company_id, created_at, transcript_id"),
+      // Filter detected companies by user's company
+      const detectedResult = {
+        data: myCompanyId
+          ? (allDetectedResult.data || []).filter(
+              (c: any) => c.company_id === myCompanyId
+            )
+          : allDetectedResult.data || [],
+      };
+
+      // Get the detected company IDs to filter calls
+      const detectedCompanyIds = detectedResult.data.map((c: any) => c.id);
+
+      if (detectedCompanyIds.length === 0) {
+        setMyCompany(myCompResult.data || null);
+        setDetectedCompanies([]);
+        setCalls([]);
+        setLoading(false);
+        return;
+      }
+
+      // Parallel fetch: calls and transcripts
+      const [callsResult, transcriptsResult] = await Promise.all([
+        supabase
+          .from("company_calls")
+          .select("company_id, created_at, transcript_id")
+          .in("company_id", detectedCompanyIds),
+        supabase.from("transcripts").select("id, ai_overall_score"),
       ]);
 
-      // Fetch transcript scores for all calls
-      const transcriptIds = (callsResult.data || [])
-        .map((c) => c.transcript_id)
-        .filter(Boolean);
-
-      let transcriptScores: Record<number, number> = {};
-      if (transcriptIds.length > 0) {
-        const { data: transcripts } = await supabase
-          .from("transcripts")
-          .select("id, ai_overall_score")
-          .in("id", transcriptIds);
-
-        if (transcripts) {
-          transcripts.forEach((t) => {
-            if (t.ai_overall_score != null && !isNaN(t.ai_overall_score)) {
-              transcriptScores[t.id] = Number(t.ai_overall_score);
-            }
-          });
-        }
+      // Build transcript scores map
+      const transcriptScores: Record<number, number> = {};
+      if (transcriptsResult.data) {
+        transcriptsResult.data.forEach((t) => {
+          if (t.ai_overall_score != null && !isNaN(t.ai_overall_score)) {
+            transcriptScores[t.id] = Number(t.ai_overall_score);
+          }
+        });
       }
 
       // Attach scores to calls
@@ -188,10 +282,25 @@ export default function CompaniesPage() {
         score: transcriptScores[call.transcript_id] ?? null,
       }));
 
-      setMyCompany(myCompResult.data || null);
-      setDetectedCompanies(detectedResult.data || []);
-      setCalls(callsWithScores);
+      const resultData = {
+        myCompany: myCompResult.data || null,
+        detectedCompanies: detectedResult.data,
+        calls: callsWithScores,
+      };
+
+      // Cache the results
+      setCachedData(cacheKey, resultData);
+
+      setMyCompany(resultData.myCompany);
+      setDetectedCompanies(resultData.detectedCompanies);
+      setCalls(resultData.calls);
       setLoading(false);
+
+      // Clear prediction state if companies exist
+      if (resultData.detectedCompanies.length > 0) {
+        localStorage.removeItem(PREDICTION_CLICKED_KEY);
+        setPredictionClicked(false);
+      }
     }
 
     load();
@@ -253,25 +362,30 @@ export default function CompaniesPage() {
   }, [combinedData]);
 
   // --------------------------------------------------
-  // Filters
+  // Filters with debounced search
   // --------------------------------------------------
   const filtered = useMemo(() => {
     let rows = [...combinedData];
 
-    if (q.trim())
+    if (filters.q.trim())
       rows = rows.filter((c) =>
-        c.company_name.toLowerCase().includes(q.toLowerCase())
+        c.company_name.toLowerCase().includes(filters.q.toLowerCase())
       );
-    if (industry !== "all") rows = rows.filter((c) => c.industry === industry);
-    if (risk !== "all") rows = rows.filter((c) => (c.risk ?? "Low") === risk);
+    if (filters.industry !== "all")
+      rows = rows.filter((c) => c.industry === filters.industry);
+    if (filters.risk !== "all")
+      rows = rows.filter((c) => (c.risk ?? "Low") === filters.risk);
 
     rows.sort((a, b) =>
-      sortBy === "score" ? b.score - a.score : b.calls - a.calls
+      filters.sortBy === "score" ? (b.score || 0) - (a.score || 0) : b.calls - a.calls
     );
     return rows;
-  }, [q, industry, risk, sortBy, combinedData]);
+  }, [filters, combinedData]);
 
-  const industries = Array.from(new Set(combinedData.map((c) => c.industry)));
+  const industries = useMemo(
+    () => Array.from(new Set(combinedData.map((c) => c.industry))),
+    [combinedData]
+  );
 
   const maxPage = Math.ceil(filtered.length / pageSize);
   const startIndex = (page - 1) * pageSize;
@@ -285,44 +399,73 @@ export default function CompaniesPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [q, industry, risk, sortBy]);
+  }, [filters]);
 
   // --------------------------------------------------
-  // Memoized Filter Handlers
+  // Memoized Filter Handlers with debounce for search
   // --------------------------------------------------
-  const handleSearch = useCallback((value: string) => setQ(value), []);
-  const handleIndustryChange = useCallback((value: string) => setIndustry(value), []);
-  const handleRiskChange = useCallback((value: string) => setRisk(value), []);
-  const handleSortChange = useCallback((value: string) => setSortBy(value), []);
+  const handleSearch = useCallback((value: string) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      setFilters((prev) => ({ ...prev, q: value }));
+    }, 300);
+  }, []);
+
+  const handleIndustryChange = useCallback(
+    (value: string) => setFilters((prev) => ({ ...prev, industry: value })),
+    []
+  );
+
+  const handleRiskChange = useCallback(
+    (value: string) => setFilters((prev) => ({ ...prev, risk: value })),
+    []
+  );
+
+  const handleSortChange = useCallback(
+    (value: string) => setFilters((prev) => ({ ...prev, sortBy: value })),
+    []
+  );
+
+  const handleRowClick = useCallback(
+    (companyId: number) => {
+      router.push(`/companies/${companyId}`);
+    },
+    [router]
+  );
 
   // --------------------------------------------------
   // Save Goal
   // --------------------------------------------------
-  async function saveGoal() {
-    if (!goal.trim()) {
+  const saveGoal = useCallback(async () => {
+    if (!modalState.goal.trim()) {
       toast.error("Please enter a company goal");
       return;
     }
 
     try {
-      setSaving(true);
+      setModalState((prev) => ({ ...prev, saving: true }));
 
       const { error } = await supabase
         .from("companies")
-        .update({ company_goal_objective: goal })
-        .eq("id", selectedCompany.id);
+        .update({ company_goal_objective: modalState.goal })
+        .eq("id", modalState.selectedCompany.id);
 
       if (error) throw error;
 
       toast.success("Company goal saved!");
-      setSelectedCompany(null);
-      setGoal("");
+      setModalState((prev) => ({
+        ...prev,
+        selectedCompany: null,
+        goal: "",
+        saving: false,
+      }));
     } catch (err: any) {
       toast.error(err.message);
-    } finally {
-      setSaving(false);
+      setModalState((prev) => ({ ...prev, saving: false }));
     }
-  }
+  }, [modalState.goal, modalState.selectedCompany]);
 
   // --------------------------------------------------
   // Predict Companies (trigger n8n workflow)
@@ -339,8 +482,13 @@ export default function CompaniesPage() {
         return;
       }
 
-      await axiosClient.get(
-        `https://n8n.omrajpal.tech/webhook/c7fd515a-cdcc-461f-9446-09cac79e73ea?userid=${user.id}`
+      // Save prediction clicked state to localStorage
+      localStorage.setItem(PREDICTION_CLICKED_KEY, "true");
+      setPredictionClicked(true);
+
+      await axiosClient.post(
+        "https://n8n.omrajpal.tech/webhook/c7fd515a-cdcc-461f-9446-09cac79e73ea",
+        { user_id: user.id }
       );
 
       toast.success("Prediction workflow triggered successfully!");
@@ -354,42 +502,40 @@ export default function CompaniesPage() {
   // --------------------------------------------------
   // Add New Company
   // --------------------------------------------------
-  async function addNewCompany() {
-    if (!newCompanyName.trim()) {
+  const addNewCompany = useCallback(async () => {
+    if (!modalState.newCompanyName.trim()) {
       toast.error("Please enter a company name");
       return;
     }
 
     try {
-      setAddingSaving(true);
+      setModalState((prev) => ({ ...prev, addingSaving: true }));
 
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
         toast.error("User not authenticated");
+        setModalState((prev) => ({ ...prev, addingSaving: false }));
         return;
       }
 
-      // First get the user's company to link to
-      const { data: userCompany } = await supabase
-        .from("company")
-        .select("id")
-        .eq("user_id", user.id)
-        .single();
+      // Parallel: insert company and get user's company
+      const [userCompanyResult, insertResult] = await Promise.all([
+        supabase.from("company").select("id").eq("user_id", user.id).single(),
+        supabase
+          .from("companies")
+          .insert([
+            {
+              company_name: modalState.newCompanyName,
+              domain: modalState.newCompanyDomain || null,
+              company_id: myCompany?.id || null,
+            },
+          ])
+          .select(),
+      ]);
 
-      const { data, error } = await supabase
-        .from("companies")
-        .insert([
-          {
-            company_name: newCompanyName,
-            domain: newCompanyDomain || null,
-            company_id: userCompany?.id || null,
-          },
-        ])
-        .select();
-
-      if (error) throw error;
+      if (insertResult.error) throw insertResult.error;
 
       toast.success("Company added successfully!");
 
@@ -397,17 +543,26 @@ export default function CompaniesPage() {
       const { data: detected } = await supabase.from("companies").select("*");
       setDetectedCompanies(detected || []);
 
+      // Invalidate cache
+      if (user) {
+        const cacheKey = `companies-data-${user.id}`;
+        localStorage.removeItem(cacheKey);
+      }
+
       // Reset form and close dialog
-      setNewCompanyName("");
-      setNewCompanyDomain("");
-      setNewCompanyUrl("");
-      setAddDialogOpen(false);
+      setModalState((prev) => ({
+        ...prev,
+        newCompanyName: "",
+        newCompanyDomain: "",
+        newCompanyUrl: "",
+        addDialogOpen: false,
+        addingSaving: false,
+      }));
     } catch (err: any) {
       toast.error(err.message);
-    } finally {
-      setAddingSaving(false);
+      setModalState((prev) => ({ ...prev, addingSaving: false }));
     }
-  }
+  }, [modalState.newCompanyName, modalState.newCompanyDomain, myCompany]);
 
   // --------------------------------------------------
   // Loading State
@@ -456,9 +611,7 @@ export default function CompaniesPage() {
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Building2 className="h-6 w-6 text-primary" />
-                    </div>
+                    <MyCompanyLogo url={myCompany.company_url} name={myCompany.company_name} />
                     <div>
                       <h3 className="font-semibold text-lg">{myCompany.company_name}</h3>
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
@@ -542,7 +695,12 @@ export default function CompaniesPage() {
                 {predicting ? "Predicting..." : "Predict Companies"}
               </Button>
 
-              <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
+              <Button
+                className="gap-2"
+                onClick={() =>
+                  setModalState((prev) => ({ ...prev, addDialogOpen: true }))
+                }
+              >
                 <Plus className="h-4 w-4" /> Add Company
               </Button>
             </div>
@@ -554,13 +712,13 @@ export default function CompaniesPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search companies..."
-                value={q}
+                defaultValue={filters.q}
                 onChange={(e) => handleSearch(e.target.value)}
                 className="pl-9"
               />
             </div>
 
-            <Select value={industry} onValueChange={handleIndustryChange}>
+            <Select value={filters.industry} onValueChange={handleIndustryChange}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Industry" />
               </SelectTrigger>
@@ -574,7 +732,7 @@ export default function CompaniesPage() {
               </SelectContent>
             </Select>
 
-            <Select value={risk} onValueChange={handleRiskChange}>
+            <Select value={filters.risk} onValueChange={handleRiskChange}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -586,7 +744,7 @@ export default function CompaniesPage() {
               </SelectContent>
             </Select>
 
-            <Select value={sortBy} onValueChange={handleSortChange}>
+            <Select value={filters.sortBy} onValueChange={handleSortChange}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
@@ -599,19 +757,57 @@ export default function CompaniesPage() {
 
           {/* Companies Table */}
           {filtered.length === 0 ? (
-            <div className="py-16">
-              <div className="flex flex-col items-center justify-center text-center">
-                <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                  <Building2 className="h-6 w-6 text-muted-foreground" />
+            predictionClicked ? (
+              // Prediction in progress animation
+              <div className="py-16">
+                <div className="flex flex-col items-center justify-center text-center">
+                  <div className="relative mb-6">
+                    {/* Outer rotating ring */}
+                    <div className="absolute inset-0 h-24 w-24 rounded-full border-4 border-primary/20 animate-pulse" />
+                    <div className="h-24 w-24 rounded-full border-4 border-transparent border-t-primary animate-spin" />
+                    {/* Inner sparkle icon */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="relative">
+                        <Sparkles className="h-8 w-8 text-primary animate-pulse" />
+                        <div className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary animate-ping" />
+                        <div className="absolute -bottom-1 -left-1 h-2 w-2 rounded-full bg-primary animate-ping" style={{ animationDelay: '0.5s' }} />
+                      </div>
+                    </div>
+                  </div>
+                  <h3 className="font-semibold text-xl mb-2 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                    Predicting Companies
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-sm mb-4">
+                    Our AI is analyzing your call transcripts to detect and predict potential companies. This may take a moment...
+                  </p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span>Processing</span>
+                  </div>
                 </div>
-                <h3 className="font-medium text-lg mb-1">No companies found</h3>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  {q || industry !== "all" || risk !== "all"
-                    ? "Try adjusting your filters to see more results."
-                    : "Companies will appear here once detected from your call transcripts."}
-                </p>
               </div>
-            </div>
+            ) : (
+              // Default empty state
+              <div className="py-16">
+                <div className="flex flex-col items-center justify-center text-center">
+                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                    <Building2 className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="font-medium text-lg mb-1">No companies found</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    {filters.q ||
+                    filters.industry !== "all" ||
+                    filters.risk !== "all"
+                      ? "Try adjusting your filters to see more results."
+                      : "Companies will appear here once detected from your call transcripts."}
+                  </p>
+                </div>
+              </div>
+            )
           ) : (
             <div className="rounded-lg border">
               <Table>
@@ -631,9 +827,7 @@ export default function CompaniesPage() {
                     <TableRow
                       key={c.id}
                       className="cursor-pointer"
-                      onClick={() =>
-                        (window.location.href = `/companies/${c.id}`)
-                      }
+                      onClick={() => handleRowClick(c.id)}
                     >
                       <TableCell>
                         <div className="flex items-center gap-3">
@@ -671,12 +865,15 @@ export default function CompaniesPage() {
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedCompany(c);
+                            setModalState((prev) => ({
+                              ...prev,
+                              selectedCompany: c,
+                            }));
                           }}
-                          >
-                            <Target className="h-3.5 w-3.5" />
-                            Add Goal
-                          </Button>
+                        >
+                          <Target className="h-3.5 w-3.5" />
+                          Add Goal
+                        </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -760,8 +957,10 @@ export default function CompaniesPage() {
 
       {/* GOAL MODAL */}
       <Dialog
-        open={!!selectedCompany}
-        onOpenChange={() => setSelectedCompany(null)}
+        open={!!modalState.selectedCompany}
+        onOpenChange={() =>
+          setModalState((prev) => ({ ...prev, selectedCompany: null }))
+        }
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -770,7 +969,8 @@ export default function CompaniesPage() {
               Set Company Goal
             </DialogTitle>
             <DialogDescription>
-              Define a goal or objective for {selectedCompany?.company_name}
+              Define a goal or objective for{" "}
+              {modalState.selectedCompany?.company_name}
             </DialogDescription>
           </DialogHeader>
 
@@ -780,19 +980,30 @@ export default function CompaniesPage() {
               <Textarea
                 id="goal"
                 placeholder="e.g., Close enterprise deal by Q4, Expand to 10 seats..."
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
+                value={modalState.goal}
+                onChange={(e) =>
+                  setModalState((prev) => ({ ...prev, goal: e.target.value }))
+                }
                 rows={3}
               />
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedCompany(null)}>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setModalState((prev) => ({ ...prev, selectedCompany: null }))
+              }
+            >
               Cancel
             </Button>
-            <Button onClick={saveGoal} disabled={saving} className="gap-2">
-              {saving ? (
+            <Button
+              onClick={saveGoal}
+              disabled={modalState.saving}
+              className="gap-2"
+            >
+              {modalState.saving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Saving...
@@ -806,7 +1017,12 @@ export default function CompaniesPage() {
       </Dialog>
 
       {/* ADD COMPANY MODAL */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+      <Dialog
+        open={modalState.addDialogOpen}
+        onOpenChange={(open) =>
+          setModalState((prev) => ({ ...prev, addDialogOpen: open }))
+        }
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -826,8 +1042,13 @@ export default function CompaniesPage() {
               <Input
                 id="company-name"
                 placeholder="Enter company name"
-                value={newCompanyName}
-                onChange={(e) => setNewCompanyName(e.target.value)}
+                value={modalState.newCompanyName}
+                onChange={(e) =>
+                  setModalState((prev) => ({
+                    ...prev,
+                    newCompanyName: e.target.value,
+                  }))
+                }
               />
             </div>
 
@@ -836,8 +1057,13 @@ export default function CompaniesPage() {
               <Input
                 id="company-domain"
                 placeholder="e.g., technology, finance, healthcare"
-                value={newCompanyDomain}
-                onChange={(e) => setNewCompanyDomain(e.target.value)}
+                value={modalState.newCompanyDomain}
+                onChange={(e) =>
+                  setModalState((prev) => ({
+                    ...prev,
+                    newCompanyDomain: e.target.value,
+                  }))
+                }
               />
             </div>
 
@@ -846,8 +1072,13 @@ export default function CompaniesPage() {
               <Input
                 id="company-url"
                 placeholder="https://example.com"
-                value={newCompanyUrl}
-                onChange={(e) => setNewCompanyUrl(e.target.value)}
+                value={modalState.newCompanyUrl}
+                onChange={(e) =>
+                  setModalState((prev) => ({
+                    ...prev,
+                    newCompanyUrl: e.target.value,
+                  }))
+                }
               />
             </div>
           </div>
@@ -856,16 +1087,23 @@ export default function CompaniesPage() {
             <Button
               variant="outline"
               onClick={() => {
-                setAddDialogOpen(false);
-                setNewCompanyName("");
-                setNewCompanyDomain("");
-                setNewCompanyUrl("");
+                setModalState((prev) => ({
+                  ...prev,
+                  addDialogOpen: false,
+                  newCompanyName: "",
+                  newCompanyDomain: "",
+                  newCompanyUrl: "",
+                }));
               }}
             >
               Cancel
             </Button>
-            <Button onClick={addNewCompany} disabled={addingSaving} className="gap-2">
-              {addingSaving ? (
+            <Button
+              onClick={addNewCompany}
+              disabled={modalState.addingSaving}
+              className="gap-2"
+            >
+              {modalState.addingSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Adding...
@@ -1033,6 +1271,36 @@ function CompanyLogo({ domain, companyName }: { domain: string; companyName: str
         width={32}
         height={32}
         className="h-8 w-8 object-cover"
+        onError={() => setImageError(true)}
+        unoptimized
+      />
+    </div>
+  );
+}
+
+function MyCompanyLogo({ url, name }: { url?: string; name?: string }) {
+  const [imageError, setImageError] = useState(false);
+
+  const cleanDomain = getDomainFromUrl(url || "");
+  const logoUrl = cleanDomain ? `https://logo.clearbit.com/${cleanDomain}` : null;
+
+  // Show fallback if no url or image failed to load
+  if (!logoUrl || imageError) {
+    return (
+      <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+        <Building2 className="h-6 w-6 text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-12 w-12 rounded-xl shrink-0 overflow-hidden bg-white shadow-sm">
+      <Image
+        src={logoUrl}
+        alt={`${name || "Company"} logo`}
+        width={48}
+        height={48}
+        className="h-12 w-12 object-contain"
         onError={() => setImageError(true)}
         unoptimized
       />

@@ -257,3 +257,184 @@ export async function updateSalesProcess(sales_motion: string, framework: string
       .eq("id", user.id);
   } catch {}
 }
+
+/**
+ * Copy company and user data from team owner to invited user
+ * This function copies all the data from steps 3-6 of onboarding
+ */
+export async function copyTeamOwnerDataToUser(
+  userId: string,
+  teamId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Get team details to find the owner
+    const { data: team, error: teamError } = await supabase
+      .from("teams")
+      .select("owner")
+      .eq("id", teamId)
+      .single();
+
+    if (teamError || !team) {
+      console.error("Error fetching team:", teamError);
+      return { success: false, error: "Team not found" };
+    }
+
+    const ownerId = team.owner;
+
+    // Get owner's user data (sales_motion, framework)
+    const { data: ownerData, error: ownerError } = await supabase
+      .from("users")
+      .select("sales_motion, framework")
+      .eq("id", ownerId)
+      .single();
+
+    if (ownerError) {
+      console.error("Error fetching owner data:", ownerError);
+      // Continue without owner user data - not critical
+    }
+
+    // Get owner's company data
+    const { data: ownerCompany, error: companyError } = await supabase
+      .from("company")
+      .select("*")
+      .eq("user_id", ownerId)
+      .maybeSingle();
+
+    if (companyError) {
+      console.error("Error fetching owner company:", companyError);
+      // Continue without company data - not critical
+    }
+
+    // Update the new user with owner's settings
+    const userUpdateData: Record<string, any> = {};
+
+    if (ownerData?.sales_motion) {
+      userUpdateData.sales_motion = ownerData.sales_motion;
+    }
+    if (ownerData?.framework) {
+      userUpdateData.framework = ownerData.framework;
+    }
+
+    // Update user with copied data
+    if (Object.keys(userUpdateData).length > 0) {
+      const { error: userUpdateError } = await supabase
+        .from("users")
+        .update(userUpdateData)
+        .eq("id", userId);
+
+      if (userUpdateError) {
+        console.error("Error updating user with owner data:", userUpdateError);
+      }
+    }
+
+    // Copy company data for the new user (create a reference or copy)
+    if (ownerCompany) {
+      // Check if user already has a company record
+      const { data: existingCompany } = await supabase
+        .from("company")
+        .select("id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (!existingCompany) {
+        // Create company record for the new user with same data
+        const { error: companyCreateError } = await supabase
+          .from("company")
+          .insert({
+            user_id: userId,
+            company_name: ownerCompany.company_name,
+            company_url: ownerCompany.company_url,
+            // Copy any other relevant fields from owner's company
+          });
+
+        if (companyCreateError) {
+          console.error("Error creating company for user:", companyCreateError);
+        }
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Error copying team owner data:", err);
+    return { success: false, error: "Failed to copy team data" };
+  }
+}
+
+/**
+ * Complete invite-based onboarding
+ * Copies team owner data and marks onboarding as complete
+ */
+export async function completeInviteOnboarding(
+  userId: string,
+  teamId: number,
+  inviteToken: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Import team service functions dynamically to avoid circular deps
+    const { acceptInvitation } = await import("./team");
+
+    // 1. Copy team owner data to user (steps 3-6 data)
+    const copyResult = await copyTeamOwnerDataToUser(userId, teamId);
+    if (!copyResult.success) {
+      console.error("Warning: Failed to copy team data:", copyResult.error);
+      // Continue anyway - this is not critical
+    }
+
+    // 2. Accept the team invitation
+    const acceptResult = await acceptInvitation(inviteToken, userId);
+    if (!acceptResult.success) {
+      return { success: false, error: acceptResult.error || "Failed to accept invitation" };
+    }
+
+    // 3. Mark onboarding as complete
+    const { error: onboardingError } = await supabase
+      .from("users")
+      .update({ is_onboarding_done: true })
+      .eq("id", userId);
+
+    if (onboardingError) {
+      console.error("Error marking onboarding complete:", onboardingError);
+      return { success: false, error: "Failed to complete onboarding" };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Error completing invite onboarding:", err);
+    return { success: false, error: "An unexpected error occurred" };
+  }
+}
+
+/**
+ * Check if user is in invite-based onboarding flow
+ */
+export function isInviteOnboarding(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem("invite_onboarding") === "true";
+}
+
+/**
+ * Get pending invite token from localStorage
+ */
+export function getPendingInviteToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("pending_invite_token");
+}
+
+/**
+ * Get pending invite team ID from localStorage
+ */
+export function getPendingInviteTeamId(): number | null {
+  if (typeof window === "undefined") return null;
+  const teamId = localStorage.getItem("invite_team_id");
+  return teamId ? parseInt(teamId, 10) : null;
+}
+
+/**
+ * Clear invite-related data from localStorage
+ */
+export function clearInviteData(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("invite_onboarding");
+  localStorage.removeItem("pending_invite_token");
+  localStorage.removeItem("invite_team_id");
+}

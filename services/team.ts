@@ -144,30 +144,47 @@ export async function createTeamInvitation(
     }
 
     // Generate invite URL
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || "";
     const inviteUrl = `${baseUrl}/team/invite/${token}`;
 
-    // Send invitation email via Supabase Edge Function or direct email
-    // For now, we'll use Supabase's built-in auth magic link system
-    try {
-      const { error: emailError } = await supabase.auth.signInWithOtp({
-        email: email.toLowerCase(),
-        options: {
-          emailRedirectTo: inviteUrl,
-          data: {
-            invite_type: "team",
-            team_id: teamId,
-            token: token,
-          },
-        },
-      });
+    // Get inviter's name for the email
+    const { data: inviterData } = await supabase
+      .from("users")
+      .select("full_name, email")
+      .eq("id", invitedBy)
+      .single();
 
-      if (emailError) {
-        console.error("Email sending error:", emailError);
+    const inviterDisplayName = inviterData?.full_name || inviterData?.email || "A team member";
+
+    // Get team name for the email
+    const { data: teamData } = await supabase
+      .from("teams")
+      .select("team_name")
+      .eq("id", teamId)
+      .single();
+
+    const teamDisplayName = teamData?.team_name || "the team";
+
+    // Send invitation email via custom email service
+    try {
+      // Import dynamically to avoid build issues
+      const { sendTeamInvitationEmail } = await import("./email");
+
+      const emailResult = await sendTeamInvitationEmail(
+        email.toLowerCase(),
+        inviterDisplayName,
+        teamDisplayName,
+        inviteUrl,
+        7 // 7 days expiry
+      );
+
+      if (!emailResult.success) {
+        console.error("Email sending error:", emailResult.error);
         // Still return success with the invite URL - user can share manually
       }
     } catch (emailErr) {
       console.error("Email error:", emailErr);
+      // Still return success with the invite URL - user can share manually
     }
 
     return { success: true, inviteUrl };

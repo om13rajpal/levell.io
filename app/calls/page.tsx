@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback, memo } from "react";
 import {
   Card,
   CardContent,
@@ -34,9 +34,11 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Search,
   Filter,
@@ -44,25 +46,62 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  CalendarIcon
+  CalendarIcon,
+  Loader2
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { useTranscriptStore } from "@/store/useTranscriptStore";
 import { supabase } from "@/lib/supabaseClient";
+import { getTranscriptsWithCache, isCacheValid, CACHE_KEYS, CACHE_TTL } from "@/lib/supabaseCache";
 
-export default function CallsDashboard() {
+// Format duration (stored in minutes) to human readable format
+function formatDuration(minutes?: number | null): string {
+  if (!minutes) return "—";
+  const m = Math.floor(minutes);
+  if (m <= 0) return "—";
+  const h = Math.floor(m / 60);
+  const mins = m % 60;
+  if (h > 0) {
+    return `${h}h ${mins}m`;
+  }
+  return `${mins}m`;
+}
+
+// Loading skeleton component
+const TableSkeleton = memo(() => (
+  <TableBody>
+    {[...Array(5)].map((_, i) => (
+      <TableRow key={i}>
+        <TableCell><Skeleton className="h-4 w-[200px]" /></TableCell>
+        <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+        <TableCell><Skeleton className="h-6 w-[60px]" /></TableCell>
+        <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
+      </TableRow>
+    ))}
+  </TableBody>
+));
+TableSkeleton.displayName = "TableSkeleton";
+
+function CallsDashboard() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [scoreRange, setScoreRange] = useState([0, 100]);
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [durationMin, setDurationMin] = useState<string>("");
   const [durationMax, setDurationMax] = useState<string>("");
+  const [onlyScoredCalls, setOnlyScoredCalls] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -71,135 +110,154 @@ export default function CallsDashboard() {
   const transcripts = useTranscriptStore((s) => s.transcripts);
   const setTranscripts = useTranscriptStore((s) => s.setTranscripts);
 
-  // ------------------------------------------------------------------
-  // ⭐ 1. LOAD FROM LOCALSTORAGE FIRST (instant UI)
-  // ------------------------------------------------------------------
+  // Debounce search input with loading state for smooth UX
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const saved = localStorage.getItem("transcripts-cache");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        console.log("Loaded transcripts from localStorage:", parsed);
-        setTranscripts(parsed);
-      } catch (err) {
-        console.error("Invalid transcripts-cache:", err);
-      }
+    // Show searching state immediately when user types
+    if (search !== debouncedSearch) {
+      setIsSearching(true);
     }
-  }, [setTranscripts]);
 
-  // ------------------------------------------------------------------
-  // ⭐ 2. IF NO LOCALSTORAGE → FETCH FROM SUPABASE AND STORE
-  // ------------------------------------------------------------------
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+      // Add a slight delay before hiding the loader for smoother transition
+      setTimeout(() => setIsSearching(false), 150);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [search, debouncedSearch]);
+
+  // Single optimized data fetching effect using centralized cache
   useEffect(() => {
     const fetchTranscripts = async () => {
+      if (typeof window === "undefined") return;
+
       try {
-        if (!transcripts || transcripts.length === 0) {
-          console.log("No local storage transcripts → Fetching from Supabase...");
-        } else {
-          console.log("Local storage transcripts found → Skipping fetch");
-          return; // Already loaded from localStorage
-        }
+        setIsLoading(true);
 
-        // Read token
+        // Get auth token
         const token = localStorage.getItem("sb-rpowalzrbddorfnnmccp-auth-token");
-        if (!token) return;
-
-        const parsed = JSON.parse(token);
-        const userId = parsed?.user?.id;
-        if (!userId) return;
-
-        // Fetch Supabase data
-        const { data, error } = await supabase
-          .from("transcripts")
-          .select("*")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          console.error("Supabase error:", error);
+        if (!token) {
+          setIsLoading(false);
           return;
         }
 
-        console.log("Fetched from Supabase:", data);
+        const parsed = JSON.parse(token);
+        const userId = parsed?.user?.id;
+        if (!userId) {
+          setIsLoading(false);
+          return;
+        }
 
-        // Save to Zustand
-        setTranscripts(data ?? []);
-
-        // ⭐ Save to localStorage so next reload is instant
-        localStorage.setItem("transcripts-cache", JSON.stringify(data ?? []));
+        // Use centralized cache system
+        const data = await getTranscriptsWithCache(userId, supabase);
+        setTranscripts(data);
       } catch (err) {
-        console.error("Error during transcript fetch:", err);
+        console.error("Error fetching transcripts:", err);
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchTranscripts();
-  }, [transcripts, setTranscripts]);
+  }, [setTranscripts]);
 
-  // ------------------------------------------------------------------
-  // SEARCH FILTER + ALL FILTERS + PAGINATION
-  // ------------------------------------------------------------------
-  const filteredTranscripts = transcripts.filter((t) => {
-    // Search filter
-    if (search && !t?.title?.toLowerCase().includes(search.toLowerCase())) {
-      return false;
-    }
-
-    // Score range filter
-    if (t.ai_overall_score != null) {
-      if (t.ai_overall_score < scoreRange[0] || t.ai_overall_score > scoreRange[1]) {
+  // Memoized filtered transcripts - only recalculate when dependencies change
+  const filteredTranscripts = useMemo(() => {
+    return transcripts.filter((t) => {
+      // Search filter
+      if (debouncedSearch && !t?.title?.toLowerCase().includes(debouncedSearch.toLowerCase())) {
         return false;
       }
-    }
 
-    // Date from filter
-    if (dateFrom && t.created_at) {
-      const transcriptDate = new Date(t.created_at);
-      if (transcriptDate < dateFrom) {
-        return false;
+      // Only scored calls filter - check for valid numeric score
+      if (onlyScoredCalls) {
+        const score = t.ai_overall_score;
+        // Check if score is a valid number (not null, undefined, or NaN)
+        if (score == null || (typeof score === 'number' && isNaN(score))) {
+          return false;
+        }
       }
-    }
 
-    // Date to filter
-    if (dateTo && t.created_at) {
-      const transcriptDate = new Date(t.created_at);
-      const endOfDay = new Date(dateTo);
-      endOfDay.setHours(23, 59, 59, 999);
-      if (transcriptDate > endOfDay) {
-        return false;
+      // Score range filter
+      if (t.ai_overall_score != null) {
+        if (t.ai_overall_score < scoreRange[0] || t.ai_overall_score > scoreRange[1]) {
+          return false;
+        }
       }
-    }
 
-    // Duration filter (min)
-    if (durationMin && t.duration) {
-      const minSeconds = parseInt(durationMin);
-      if (!isNaN(minSeconds) && t.duration < minSeconds) {
-        return false;
+      // Date from filter
+      if (dateFrom && t.created_at) {
+        const transcriptDate = new Date(t.created_at);
+        if (transcriptDate < dateFrom) {
+          return false;
+        }
       }
-    }
 
-    // Duration filter (max)
-    if (durationMax && t.duration) {
-      const maxSeconds = parseInt(durationMax);
-      if (!isNaN(maxSeconds) && t.duration > maxSeconds) {
-        return false;
+      // Date to filter
+      if (dateTo && t.created_at) {
+        const transcriptDate = new Date(t.created_at);
+        const endOfDay = new Date(dateTo);
+        endOfDay.setHours(23, 59, 59, 999);
+        if (transcriptDate > endOfDay) {
+          return false;
+        }
       }
-    }
 
-    return true;
-  });
+      // Duration filter (min)
+      if (durationMin && t.duration) {
+        const minSeconds = parseInt(durationMin);
+        if (!isNaN(minSeconds) && t.duration < minSeconds) {
+          return false;
+        }
+      }
 
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredTranscripts.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedTranscripts = filteredTranscripts.slice(startIndex, endIndex);
+      // Duration filter (max)
+      if (durationMax && t.duration) {
+        const maxSeconds = parseInt(durationMax);
+        if (!isNaN(maxSeconds) && t.duration > maxSeconds) {
+          return false;
+        }
+      }
 
-  // Reset to first page when search changes
-  useEffect(() => {
+      return true;
+    });
+  }, [transcripts, debouncedSearch, scoreRange, dateFrom, dateTo, durationMin, durationMax, onlyScoredCalls]);
+
+  // Memoized pagination calculations
+  const { totalPages, startIndex, endIndex, paginatedTranscripts } = useMemo(() => {
+    const totalPages = Math.ceil(filteredTranscripts.length / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedTranscripts = filteredTranscripts.slice(startIndex, endIndex);
+
+    return {
+      totalPages,
+      startIndex,
+      endIndex,
+      paginatedTranscripts,
+    };
+  }, [filteredTranscripts, currentPage, pageSize]);
+
+  // Memoized handlers to prevent re-creation on every render
+  const handleResetFilters = useCallback(() => {
+    setScoreRange([0, 100]);
+    setDateFrom(undefined);
+    setDateTo(undefined);
+    setDurationMin("");
+    setDurationMax("");
+    setOnlyScoredCalls(false);
+    setIsDialogOpen(false);
+  }, []);
+
+  const handlePageSizeChange = useCallback((value: string) => {
+    setPageSize(Number(value));
     setCurrentPage(1);
-  }, [search]);
+  }, []);
+
+  const handleNavigateToTranscript = useCallback((id: number) => {
+    router.push(`/calls/${id}`);
+  }, [router]);
 
   return (
     <SidebarProvider
@@ -224,7 +282,11 @@ export default function CallsDashboard() {
 
                 <div className="flex items-center gap-2">
                   <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    {isSearching ? (
+                      <Loader2 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground animate-spin" />
+                    ) : (
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    )}
                     <Input
                       placeholder="Search transcripts..."
                       value={search}
@@ -248,6 +310,21 @@ export default function CallsDashboard() {
                       </DialogHeader>
 
                       <div className="space-y-6 py-2">
+                        {/* Only Scored Calls Filter */}
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="only-scored"
+                            checked={onlyScoredCalls}
+                            onCheckedChange={(checked) => setOnlyScoredCalls(checked === true)}
+                          />
+                          <Label
+                            htmlFor="only-scored"
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            Only show scored calls
+                          </Label>
+                        </div>
+
                         {/* Score Range Filter */}
                         <div>
                           <Label className="text-sm font-medium mb-2 block">
@@ -354,14 +431,7 @@ export default function CallsDashboard() {
                       <DialogFooter>
                         <Button
                           variant="ghost"
-                          onClick={() => {
-                            setScoreRange([0, 100]);
-                            setDateFrom(undefined);
-                            setDateTo(undefined);
-                            setDurationMin("");
-                            setDurationMax("");
-                            setIsDialogOpen(false);
-                          }}
+                          onClick={handleResetFilters}
                         >
                           Reset
                         </Button>
@@ -393,52 +463,54 @@ export default function CallsDashboard() {
                       </TableRow>
                     </TableHeader>
 
-                    <TableBody>
-                      {paginatedTranscripts.map((t) => (
-                        <TableRow
-                          key={t.id}
-                          className="hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() =>
-                            (window.location.href = `/calls/${t.id}`)
-                          }
-                        >
-                          <TableCell className="font-medium">{t.title}</TableCell>
-                          <TableCell>{Math.round(t.duration)} sec</TableCell>
-                          <TableCell>
-                            {t.ai_overall_score != null && !isNaN(t.ai_overall_score) ? (
-                              <Badge
-                                variant="outline"
-                                className={
-                                  t.ai_overall_score >= 80
-                                    ? "border-green-500/50 text-green-700 dark:text-green-400"
-                                    : t.ai_overall_score >= 60
-                                    ? "border-yellow-500/50 text-yellow-700 dark:text-yellow-400"
-                                    : "border-red-500/50 text-red-700 dark:text-red-400"
-                                }
-                              >
-                                {Math.round(t.ai_overall_score)}
-                              </Badge>
-                            ) : (
-                              <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20">
-                                <div className="relative flex h-2 w-2">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                    {isLoading || isSearching ? (
+                      <TableSkeleton />
+                    ) : (
+                      <TableBody>
+                        {paginatedTranscripts.map((t) => (
+                          <TableRow
+                            key={t.id}
+                            className="hover:bg-muted/50 cursor-pointer transition-colors"
+                            onClick={() => handleNavigateToTranscript(t.id)}
+                          >
+                            <TableCell className="font-medium">{t.title}</TableCell>
+                            <TableCell>{formatDuration(t.duration)}</TableCell>
+                            <TableCell>
+                              {t.ai_overall_score != null && !isNaN(t.ai_overall_score) ? (
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    t.ai_overall_score >= 80
+                                      ? "border-green-500/50 text-green-700 dark:text-green-400"
+                                      : t.ai_overall_score >= 60
+                                      ? "border-yellow-500/50 text-yellow-700 dark:text-yellow-400"
+                                      : "border-red-500/50 text-red-700 dark:text-red-400"
+                                  }
+                                >
+                                  {Math.round(t.ai_overall_score)}
+                                </Badge>
+                              ) : (
+                                <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border border-primary/20">
+                                  <div className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                                  </div>
+                                  <span className="text-[10px] font-medium text-primary/80">Scoring</span>
                                 </div>
-                                <span className="text-[10px] font-medium text-primary/80">Scoring</span>
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {t.created_at
-                              ? new Date(t.created_at).toLocaleString()
-                              : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {t.created_at
+                                ? new Date(t.created_at).toLocaleString()
+                                : "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    )}
                   </Table>
 
-                  {paginatedTranscripts.length === 0 && (
+                  {!isLoading && paginatedTranscripts.length === 0 && (
                     <div className="text-center text-sm text-muted-foreground py-6">
                       No transcripts found.
                     </div>
@@ -447,7 +519,7 @@ export default function CallsDashboard() {
               </Card>
 
               {/* Pagination Controls */}
-              {filteredTranscripts.length > 0 && (
+              {!isLoading && filteredTranscripts.length > 0 && (
                 <div className="flex items-center justify-between px-4">
                   <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
                     Showing {startIndex + 1} to {Math.min(endIndex, filteredTranscripts.length)} of{" "}
@@ -460,10 +532,7 @@ export default function CallsDashboard() {
                       </Label>
                       <Select
                         value={`${pageSize}`}
-                        onValueChange={(value) => {
-                          setPageSize(Number(value));
-                          setCurrentPage(1);
-                        }}
+                        onValueChange={handlePageSizeChange}
                       >
                         <SelectTrigger size="sm" className="w-20" id="rows-per-page">
                           <SelectValue placeholder={pageSize} />
@@ -532,3 +601,5 @@ export default function CallsDashboard() {
     </SidebarProvider>
   );
 }
+
+export default CallsDashboard;

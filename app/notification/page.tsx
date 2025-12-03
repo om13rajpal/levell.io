@@ -13,6 +13,12 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
+
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+import { SiteHeader } from "@/components/site-header";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function NotificationsPage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -120,52 +126,109 @@ export default function NotificationsPage() {
     setSaving(false);
   };
 
+  // Loading skeleton
+  if (loading) {
+    return (
+      <SidebarProvider
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 72)",
+            "--header-height": "calc(var(--spacing) * 12)",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar variant="inset" />
+        <SidebarInset>
+          <SiteHeader heading="Notifications" />
+          <div className="mx-auto w-full max-w-6xl p-6 sm:p-8 space-y-8">
+            <header>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-72" />
+            </header>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              {[1, 2].map((i) => (
+                <Card key={i} className="border-border/60 bg-card/60 shadow-sm backdrop-blur-sm">
+                  <CardHeader>
+                    <Skeleton className="h-5 w-40 mb-1" />
+                    <Skeleton className="h-3 w-32" />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {[1, 2, 3, 4].map((j) => (
+                      <div key={j} className="flex items-center justify-between">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-5 w-10 rounded-full" />
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    );
+  }
+
   return (
-    <div className="mx-auto w-full max-w-6xl p-6 sm:p-8 space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
-        <p className="text-sm text-muted-foreground">
-          Choose when and how you want to be notified.
-        </p>
-      </header>
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": "calc(var(--spacing) * 72)",
+          "--header-height": "calc(var(--spacing) * 12)",
+        } as React.CSSProperties
+      }
+    >
+      <AppSidebar variant="inset" />
+      <SidebarInset>
+        <SiteHeader heading="Notifications" />
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <NotifySection
-          title="Email Notifications"
-          description="Stay updated via email"
-          toggles={[
-            {
-              label: "Weekly performance",
-              checked: emailWeekly,
-              onChange: setEmailWeekly,
-            },
-            {
-              label: "Task reminders",
-              checked: emailReminders,
-              onChange: setEmailReminders,
-            },
-          ]}
-          disabled={loading || saving}
-        />
-        <NotifySection
-          title="In-app Notifications"
-          description="Control app alerts"
-          toggles={[
-            { label: "Mentions", checked: inAppMentions, onChange: setInAppMentions },
-            { label: "Integration status", checked: inAppIntegration, onChange: setInAppIntegration },
-            { label: "Call processed", checked: inAppProcessed, onChange: setInAppProcessed },
-            { label: "Product updates", checked: inAppUpdates, onChange: setInAppUpdates },
-          ]}
-          disabled={loading || saving}
-        />
-      </div>
+        <div className="mx-auto w-full max-w-6xl p-6 sm:p-8 space-y-8">
+          <header>
+            <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
+            <p className="text-sm text-muted-foreground">
+              Choose when and how you want to be notified.
+            </p>
+          </header>
 
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={loading || saving}>
-          {saving ? "Saving..." : "Save Changes"}
-        </Button>
-      </div>
-    </div>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <NotifySection
+              title="Email Notifications"
+              description="Stay updated via email"
+              toggles={[
+                {
+                  label: "Weekly performance",
+                  checked: emailWeekly,
+                  onChange: setEmailWeekly,
+                },
+                {
+                  label: "Task reminders",
+                  checked: emailReminders,
+                  onChange: setEmailReminders,
+                },
+              ]}
+              disabled={loading || saving}
+            />
+            <NotifySection
+              title="In-app Notifications"
+              description="Control app alerts"
+              toggles={[
+                { label: "Mentions", checked: inAppMentions, onChange: setInAppMentions },
+                { label: "Integration status", checked: inAppIntegration, onChange: setInAppIntegration },
+                { label: "Call processed", checked: inAppProcessed, onChange: setInAppProcessed },
+                { label: "Product updates", checked: inAppUpdates, onChange: setInAppUpdates },
+              ]}
+              disabled={loading || saving}
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={handleSave} disabled={loading || saving}>
+              {saving ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
