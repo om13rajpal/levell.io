@@ -14,13 +14,17 @@ export interface TeamInvitation {
 }
 
 /**
- * Generate a unique invitation token
+ * Generate a cryptographically secure invitation token
+ * Uses Web Crypto API for secure random values
  */
 function generateToken(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const randomValues = new Uint32Array(48); // 48 characters for better entropy
+  crypto.getRandomValues(randomValues);
+
   let token = "";
-  for (let i = 0; i < 32; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let i = 0; i < 48; i++) {
+    token += chars.charAt(randomValues[i] % chars.length);
   }
   return token;
 }
@@ -336,6 +340,61 @@ export async function acceptInvitation(
     if (userUpdateError) {
       console.error("Error updating user team_id:", userUpdateError);
       // Don't fail - the important part (adding to members) worked
+    }
+
+    // Assign "Member" tag to the new user by default
+    try {
+      // Get the Member tag for this team
+      const { data: memberTag } = await supabase
+        .from("team_tags")
+        .select("id")
+        .eq("team_id", team.id)
+        .ilike("tag_name", "member")
+        .maybeSingle();
+
+      if (memberTag) {
+        // Check if user already has this tag
+        const { data: existingTag } = await supabase
+          .from("team_member_tags")
+          .select("id")
+          .eq("team_id", team.id)
+          .eq("user_id", userId)
+          .eq("tag_id", memberTag.id)
+          .maybeSingle();
+
+        if (!existingTag) {
+          // Assign the Member tag to the new user
+          await supabase.from("team_member_tags").insert({
+            team_id: team.id,
+            user_id: userId,
+            tag_id: memberTag.id,
+          });
+          console.log("✅ Assigned Member tag to new team member");
+        }
+      } else {
+        // Member tag doesn't exist - ensure team has default tags
+        await ensureTeamTags(team.id);
+
+        // Try again to get and assign the Member tag
+        const { data: newMemberTag } = await supabase
+          .from("team_tags")
+          .select("id")
+          .eq("team_id", team.id)
+          .ilike("tag_name", "member")
+          .maybeSingle();
+
+        if (newMemberTag) {
+          await supabase.from("team_member_tags").insert({
+            team_id: team.id,
+            user_id: userId,
+            tag_id: newMemberTag.id,
+          });
+          console.log("✅ Assigned Member tag to new team member (after creating tags)");
+        }
+      }
+    } catch (tagError) {
+      console.error("Error assigning Member tag:", tagError);
+      // Don't fail - user is still added to team
     }
 
     // Mark invitation as accepted

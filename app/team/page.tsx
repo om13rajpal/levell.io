@@ -74,6 +74,9 @@ import {
   Calendar,
   UserCircle,
   Link2,
+  MessageSquare,
+  Phone,
+  TrendingUp,
 } from "lucide-react";
 
 type Team = {
@@ -143,6 +146,16 @@ export default function TeamPage() {
   const [roleSaving, setRoleSaving] = useState(false);
 
   const [loading, setLoading] = useState(true);
+
+  // Coaching notes and stats for current user
+  const [coachingNotes, setCoachingNotes] = useState<any[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [myStats, setMyStats] = useState<{
+    totalCalls: number;
+    avgScore: number;
+    recentCalls: number;
+  }>({ totalCalls: 0, avgScore: 0, recentCalls: 0 });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -333,6 +346,98 @@ export default function TeamPage() {
   }, [team, userId, getRoleForUser]);
 
   const isInTeam = !!team;
+
+  // Fetch coaching notes and stats for current user when in a team
+  useEffect(() => {
+    if (!userId || !team) {
+      setCoachingNotes([]);
+      setStatsLoading(false);
+      return;
+    }
+
+    const fetchNotesAndStats = async () => {
+      setNotesLoading(true);
+      setStatsLoading(true);
+
+      try {
+        // Fetch coaching notes
+        const { data: notesData } = await supabase
+          .from("coaching_notes")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (notesData && notesData.length > 0) {
+          // Get coach info separately
+          const coachIds = [...new Set(notesData.map((n) => n.coach_id).filter(Boolean))];
+          let coachMap: Record<string, any> = {};
+          if (coachIds.length > 0) {
+            const { data: coaches } = await supabase
+              .from("users")
+              .select("id, full_name, email, name")
+              .in("id", coachIds);
+            if (coaches) {
+              coachMap = Object.fromEntries(coaches.map((c) => [c.id, c]));
+            }
+          }
+          const notesWithCoach = notesData.map((note) => ({
+            ...note,
+            coach: coachMap[note.coach_id] || null,
+          }));
+          setCoachingNotes(notesWithCoach);
+        } else {
+          setCoachingNotes([]);
+        }
+
+        // Fetch user stats - total calls and scores
+        // Filter out calls with null duration or duration < 5 minutes
+        const { data: transcripts, error: transcriptsError } = await supabase
+          .from("transcripts")
+          .select("id, ai_overall_score, created_at, duration")
+          .eq("user_id", userId)
+          .not("duration", "is", null)
+          .gte("duration", 5);
+
+        if (transcriptsError) {
+          console.error("Error fetching transcripts:", transcriptsError);
+          setMyStats({ totalCalls: 0, avgScore: 0, recentCalls: 0 });
+        } else if (transcripts && transcripts.length > 0) {
+          const totalCalls = transcripts.length;
+
+          // Calculate average score using ai_overall_score field
+          let totalScore = 0;
+          let scoredCalls = 0;
+          transcripts.forEach((t: any) => {
+            if (t.ai_overall_score != null && !isNaN(Number(t.ai_overall_score))) {
+              totalScore += Number(t.ai_overall_score);
+              scoredCalls++;
+            }
+          });
+          const avgScore = scoredCalls > 0 ? Math.round(totalScore / scoredCalls) : 0;
+
+          // Count recent calls (last 7 days)
+          const weekAgo = new Date();
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          const recentCalls = transcripts.filter(
+            (t) => new Date(t.created_at) >= weekAgo
+          ).length;
+
+          setMyStats({ totalCalls, avgScore, recentCalls });
+        } else {
+          setMyStats({ totalCalls: 0, avgScore: 0, recentCalls: 0 });
+        }
+      } catch (err) {
+        console.error("Error fetching stats:", err);
+        setMyStats({ totalCalls: 0, avgScore: 0, recentCalls: 0 });
+      } finally {
+        setNotesLoading(false);
+        setStatsLoading(false);
+      }
+    };
+
+    fetchNotesAndStats();
+  }, [userId, team]);
 
   const handleCreateTeam = async () => {
     if (!createTeamName.trim() || !userId) return;
@@ -1394,6 +1499,136 @@ export default function TeamPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* My Stats and Coaching Notes - Side by Side Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* My Stats Card */}
+                <Card className="@container/card shadow-xs bg-gradient-to-br from-card to-primary/5">
+                  <CardHeader className="pb-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                          <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                            <TrendingUp className="h-4 w-4 text-primary" />
+                          </div>
+                          My Performance
+                        </CardTitle>
+                        <CardDescription className="mt-1">Your personal call statistics</CardDescription>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs gap-1.5"
+                        onClick={() => router.push("/calls")}
+                      >
+                        View Calls
+                        <ArrowRight className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {statsLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="flex flex-col items-center gap-2 p-4 rounded-xl bg-blue-500/5 border border-blue-500/10">
+                          <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+                            <Phone className="h-5 w-5 text-blue-600" />
+                          </div>
+                          <span className="text-3xl font-bold text-blue-600">{myStats.totalCalls}</span>
+                          <span className="text-xs text-muted-foreground text-center font-medium">Total Calls</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-2 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
+                          <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                            <BarChart3 className="h-5 w-5 text-emerald-600" />
+                          </div>
+                          <span className={`text-3xl font-bold ${
+                            myStats.avgScore >= 80 ? "text-emerald-600" :
+                            myStats.avgScore >= 60 ? "text-amber-600" : "text-red-500"
+                          }`}>
+                            {myStats.avgScore > 0 ? myStats.avgScore : "—"}
+                          </span>
+                          <span className="text-xs text-muted-foreground text-center font-medium">Avg Score</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-2 p-4 rounded-xl bg-purple-500/5 border border-purple-500/10">
+                          <div className="h-10 w-10 rounded-full bg-purple-500/10 flex items-center justify-center">
+                            <Calendar className="h-5 w-5 text-purple-600" />
+                          </div>
+                          <span className="text-3xl font-bold text-purple-600">{myStats.recentCalls}</span>
+                          <span className="text-xs text-muted-foreground text-center font-medium">This Week</span>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* My Coaching Notes Card */}
+                <Card className="@container/card shadow-xs">
+                  <CardHeader className="pb-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                          <div className="h-8 w-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                            <MessageSquare className="h-4 w-4 text-indigo-600" />
+                          </div>
+                          My Coaching Notes
+                        </CardTitle>
+                        <CardDescription className="mt-1">
+                          {coachingNotes.length > 0
+                            ? `${coachingNotes.length} ${coachingNotes.length === 1 ? "note" : "notes"} from your coaches`
+                            : "Feedback from your team coaches"}
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    {notesLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : coachingNotes.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-center">
+                        <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
+                          <MessageSquare className="h-6 w-6 text-muted-foreground/50" />
+                        </div>
+                        <p className="text-sm font-medium text-muted-foreground">No coaching notes yet</p>
+                        <p className="text-xs text-muted-foreground/70 mt-1">
+                          Your coaches will add feedback here
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
+                        {coachingNotes.map((note) => (
+                          <div
+                            key={note.id}
+                            className="p-3 rounded-xl border bg-gradient-to-br from-muted/30 to-muted/10 hover:from-muted/40 hover:to-muted/20 transition-all"
+                          >
+                            <p className="text-sm leading-relaxed">{note.note}</p>
+                            <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
+                              <div className="flex items-center gap-2">
+                                <div className="h-5 w-5 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                                  <UserCircle className="h-3 w-3 text-indigo-600" />
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {note.coach?.full_name || note.coach?.name || note.coach?.email || "Admin"}
+                                </span>
+                              </div>
+                              <span className="text-xs text-muted-foreground/70">
+                                {new Date(note.created_at).toLocaleDateString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                })}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </>
           )}
         </div>

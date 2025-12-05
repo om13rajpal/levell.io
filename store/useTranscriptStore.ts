@@ -210,20 +210,38 @@ export const useTranscriptStore = create<TranscriptStore>()(
       {
         name: "transcript-storage",
         storage: createJSONStorage(() => localStorage),
+        // Only persist minimal metadata, NOT the full transcripts array
+        // This prevents QuotaExceededError when there are many transcripts
         partialize: (state) => ({
-          transcripts: state.transcripts,
+          // Don't persist transcripts - fetch them live to avoid localStorage quota issues
           lastFetched: state.lastFetched,
         }),
-        version: 1,
+        version: 2, // Bump version to clear old cached data
         migrate: (persistedState: any, version: number) => {
-          if (version === 0) {
-            // Migration from version 0 to 1
+          // Clear any old cached transcripts on migration
+          if (version < 2) {
             return {
-              ...persistedState,
               lastFetched: null,
+              // Don't carry over old transcripts data
             }
           }
           return persistedState as TranscriptStore
+        },
+        onRehydrateStorage: () => (state) => {
+          // Clear any existing localStorage data on app start to prevent quota issues
+          try {
+            const stored = localStorage.getItem("transcript-storage")
+            if (stored) {
+              const parsed = JSON.parse(stored)
+              // If there are transcripts in storage, clear them
+              if (parsed?.state?.transcripts && parsed.state.transcripts.length > 0) {
+                localStorage.removeItem("transcript-storage")
+                console.log("Cleared old transcript cache to prevent quota issues")
+              }
+            }
+          } catch (e) {
+            // Ignore errors
+          }
         },
       }
     ),

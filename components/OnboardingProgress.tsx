@@ -2,14 +2,18 @@
 
 import { Progress } from "@/components/ui/progress";
 
-export function OnboardingProgress({ step }: { step: number }) {
-  const TOTAL = 6;
-  const value = (step / TOTAL) * 100;
+interface OnboardingProgressProps {
+  step: number;
+  totalSteps?: number;
+}
+
+export function OnboardingProgress({ step, totalSteps = 6 }: OnboardingProgressProps) {
+  const value = (step / totalSteps) * 100;
 
   return (
     <div className="p-4 bg-background">
       <p className="text-sm text-muted-foreground">
-        Step {step} of {TOTAL}
+        Step {step} of {totalSteps}
       </p>
       <Progress value={value} />
     </div>

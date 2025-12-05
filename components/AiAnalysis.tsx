@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/collapsible";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 
 import {
   Bold,
@@ -66,10 +67,17 @@ import {
   Info,
   RefreshCcw,
   Lightbulb,
+  Loader2,
+  Building2,
+  Target,
+  Users,
+  Package,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchWebhookData, updateWebhookData, WebhookDataPayload } from "@/services/onboarding";
+import { toast } from "sonner";
 
 //
 // ==========================
@@ -263,18 +271,70 @@ function ToolbarPlugin() {
 export default function ReviewAIEditor() {
   const [open, setOpen] = useState(false);
   const [markdown, setMarkdown] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [jsonData, setJsonData] = useState<WebhookDataPayload | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
 
   //
-  // ⭐ Load from LocalStorage FIRST
+  // ⭐ Load from Supabase (PRIMARY) or LocalStorage (FALLBACK)
   //
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    const loadData = async () => {
+      try {
+        // First try Supabase
+        const result = await fetchWebhookData();
 
-    const saved = localStorage.getItem("webhook_markdown");
-    if (saved) {
-      console.log("📦 Loaded markdown from localStorage");
-      setMarkdown(saved);
-    }
+        if (result.success) {
+          if (result.markdown) {
+            console.log("📦 Loaded markdown from Supabase");
+            setMarkdown(result.markdown);
+            localStorage.setItem("webhook_markdown", result.markdown);
+          }
+          if (result.data) {
+            console.log("📦 Loaded json_val from Supabase:", result.data);
+            setJsonData(result.data);
+            localStorage.setItem("company_json_data", JSON.stringify(result.data));
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Fallback to localStorage
+        console.log("📦 Falling back to localStorage");
+        const savedMarkdown = localStorage.getItem("webhook_markdown");
+        if (savedMarkdown) {
+          setMarkdown(savedMarkdown);
+        }
+
+        const savedJson = localStorage.getItem("company_json_data");
+        if (savedJson) {
+          try {
+            let parsed = savedJson;
+            let attempts = 0;
+            while (typeof parsed === "string" && attempts < 5) {
+              parsed = JSON.parse(parsed);
+              attempts++;
+            }
+            if (parsed && typeof parsed === "object") {
+              setJsonData(parsed as WebhookDataPayload);
+            }
+          } catch (e) {
+            console.error("Error parsing JSON from localStorage:", e);
+          }
+        }
+      } catch (err) {
+        console.error("Load error:", err);
+        // Fallback to localStorage
+        const savedMarkdown = localStorage.getItem("webhook_markdown");
+        if (savedMarkdown) {
+          setMarkdown(savedMarkdown);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
 
   //
@@ -294,10 +354,8 @@ export default function ReviewAIEditor() {
             // @ts-ignore
             payload.new.markdown ||
             // @ts-ignore
-
             payload.new?.payload?.markdown ||
             // @ts-ignore
-
             payload.new?.payload?.data ||
             "";
 
@@ -309,26 +367,29 @@ export default function ReviewAIEditor() {
 
           // ===== JSON (AUTO-PARSED FROM JSONB — FIXED) =====
           // @ts-ignore
-
-          let jsonData = payload.new.json_val;
+          let jsonDataPayload = payload.new.json_val;
 
           // fallback if nested under payload
           // @ts-ignore
-
-          if (!jsonData && payload.new?.payload?.json_val) {
+          if (!jsonDataPayload && payload.new?.payload?.json_val) {
             // @ts-ignore
-
-            jsonData = payload.new.payload.json_val;
+            jsonDataPayload = payload.new.payload.json_val;
           }
 
-          console.log("🟢 JSON received:", jsonData);
+          console.log("🟢 JSON received:", jsonDataPayload);
 
-          if (jsonData) {
+          if (jsonDataPayload) {
             // If jsonData is already a string, store it directly; otherwise stringify it
-            const jsonString = typeof jsonData === "string"
-              ? jsonData
-              : JSON.stringify(jsonData);
+            const jsonString = typeof jsonDataPayload === "string"
+              ? jsonDataPayload
+              : JSON.stringify(jsonDataPayload);
             localStorage.setItem("company_json_data", jsonString);
+
+            // Update state
+            const parsed = typeof jsonDataPayload === "string"
+              ? JSON.parse(jsonDataPayload)
+              : jsonDataPayload;
+            setJsonData(parsed);
             console.log("📦 Saved company_json_data to localStorage");
           }
         }
@@ -358,6 +419,16 @@ export default function ReviewAIEditor() {
     ],
   };
 
+  // Loading state
+  if (loading) {
+    return (
+      <div className="w-full max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[400px] gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Loading analysis data...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-5">
       {/* HEADER */}
@@ -378,6 +449,111 @@ export default function ReviewAIEditor() {
           </AlertDescription>
         </Alert>
       </div>
+
+      {/* STRUCTURED DATA PREVIEW */}
+      {jsonData && (
+        <Collapsible open={showPreview} onOpenChange={setShowPreview}>
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full justify-start"
+            >
+              <Building2 className="h-4 w-4 text-indigo-500" />
+              Extracted Data Preview
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 transition-transform ml-auto",
+                  showPreview && "rotate-180"
+                )}
+              />
+            </Button>
+          </CollapsibleTrigger>
+
+          <CollapsibleContent>
+            <div className="mt-3 p-4 border border-border/60 rounded-xl bg-muted/30 space-y-4">
+              {/* Company Info */}
+              {jsonData.company_info && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Building2 className="h-4 w-4 text-sky-500" />
+                    Company Information
+                  </div>
+                  <div className="pl-6 space-y-1 text-sm text-muted-foreground">
+                    {jsonData.company_info.company_name && (
+                      <p><span className="font-medium text-foreground">Name:</span> {jsonData.company_info.company_name}</p>
+                    )}
+                    {jsonData.company_info.website && (
+                      <p><span className="font-medium text-foreground">Website:</span> {jsonData.company_info.website}</p>
+                    )}
+                    {jsonData.company_info.value_proposition && (
+                      <p><span className="font-medium text-foreground">Value Prop:</span> {jsonData.company_info.value_proposition}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Products & Services */}
+              {jsonData.products_and_services && jsonData.products_and_services.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Package className="h-4 w-4 text-emerald-500" />
+                    Products & Services
+                  </div>
+                  <div className="pl-6 flex flex-wrap gap-2">
+                    {jsonData.products_and_services.map((product, i) => {
+                      const name = typeof product === "string" ? product : product.name;
+                      return (
+                        <Badge key={i} variant="secondary" className="text-xs">
+                          {name}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ICP */}
+              {jsonData.ideal_customer_profile && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Target className="h-4 w-4 text-violet-500" />
+                    Ideal Customer Profile
+                  </div>
+                  <div className="pl-6 space-y-1 text-sm text-muted-foreground">
+                    {jsonData.ideal_customer_profile.industry && (
+                      <p><span className="font-medium text-foreground">Industry:</span> {jsonData.ideal_customer_profile.industry}</p>
+                    )}
+                    {jsonData.ideal_customer_profile.company_size && (
+                      <p><span className="font-medium text-foreground">Company Size:</span> {jsonData.ideal_customer_profile.company_size}</p>
+                    )}
+                    {jsonData.ideal_customer_profile.region && (
+                      <p><span className="font-medium text-foreground">Region:</span> {jsonData.ideal_customer_profile.region}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Buyer Personas */}
+              {jsonData.buyer_personas && jsonData.buyer_personas.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Users className="h-4 w-4 text-rose-500" />
+                    Buyer Personas ({jsonData.buyer_personas.length})
+                  </div>
+                  <div className="pl-6 flex flex-wrap gap-2">
+                    {jsonData.buyer_personas.map((persona, i) => (
+                      <Badge key={i} variant="outline" className="text-xs">
+                        {persona.name || persona.job_title}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {/* RERUN BUTTON */}
       <div className="flex justify-between items-center">

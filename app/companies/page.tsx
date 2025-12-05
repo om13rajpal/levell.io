@@ -54,6 +54,8 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -63,6 +65,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import axiosClient from "@/lib/axiosClient";
 import Image from "next/image";
+import { getCompaniesPaginated, getCompanyStats, type CompanyStats } from "@/lib/supabaseCache";
 
 // --------------------------------------------------
 // Cache utilities
@@ -142,12 +145,15 @@ function getDomainFromUrl(url: string): string {
 // --------------------------------------------------
 export default function CompaniesPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isTableLoading, setIsTableLoading] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [myCompany, setMyCompany] = useState<any>(null);
   const [detectedCompanies, setDetectedCompanies] = useState<any[]>([]);
   const [calls, setCalls] = useState<any[]>([]);
+  const [totalCompaniesCount, setTotalCompaniesCount] = useState(0);
+  const [companyStats, setCompanyStats] = useState<CompanyStats | null>(null);
 
   // Combined filter state for reduced re-renders
   const [filters, setFilters] = useState({
@@ -156,6 +162,7 @@ export default function CompaniesPage() {
     risk: "all",
     sortBy: "calls",
   });
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -192,72 +199,122 @@ export default function CompaniesPage() {
     }
   }, []);
 
+  // Store user's company ID to avoid refetching
+  const [myCompanyId, setMyCompanyId] = useState<string | null>(null);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+
   // --------------------------------------------------
-  // Load Data - OPTIMIZED: Parallel API calls with caching
+  // Debounce search for server-side filtering
   // --------------------------------------------------
   useEffect(() => {
-    async function load() {
-      setLoading(true);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(filters.q);
+      setPage(1); // Reset to first page on search
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filters.q]);
 
+  // --------------------------------------------------
+  // Initial load - fetch user's company once
+  // --------------------------------------------------
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadUserCompany() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
 
-      const cacheKey = `companies-data-${user.id}`;
-
-      // Check cache first
-      const cached = getCachedData<{
-        data: { myCompany: any; detectedCompanies: any[]; calls: any[] };
-        timestamp: number;
-      }>(cacheKey);
-
-      if (cached && isCacheValid(cacheKey, CACHE_TTL.COMPANIES)) {
-        setMyCompany(cached.data.myCompany);
-        setDetectedCompanies(cached.data.detectedCompanies);
-        setCalls(cached.data.calls);
-        setLoading(false);
-
-        // Clear prediction state if companies exist
-        if (cached.data.detectedCompanies.length > 0) {
-          localStorage.removeItem(PREDICTION_CLICKED_KEY);
-          setPredictionClicked(false);
+      if (!user || !isMounted) {
+        if (isMounted) {
+          setIsInitialLoading(false);
+          setInitialLoadDone(true);
         }
         return;
       }
 
-      // Parallel fetch: user company and detected companies
-      const [myCompResult, allDetectedResult] = await Promise.all([
-        supabase.from("company").select("*").eq("user_id", user.id).single(),
-        supabase.from("companies").select("*"),
-      ]);
+      // Fetch user's company once
+      const myCompResult = await supabase
+        .from("company")
+        .select("*")
+        .eq("user_id", user.id)
+        .single();
 
-      const myCompanyId = myCompResult.data?.id;
-
-      // Filter detected companies by user's company
-      const detectedResult = {
-        data: myCompanyId
-          ? (allDetectedResult.data || []).filter(
-              (c: any) => c.company_id === myCompanyId
-            )
-          : allDetectedResult.data || [],
-      };
-
-      // Get the detected company IDs to filter calls
-      const detectedCompanyIds = detectedResult.data.map((c: any) => c.id);
-
-      if (detectedCompanyIds.length === 0) {
+      if (isMounted) {
         setMyCompany(myCompResult.data || null);
+        setMyCompanyId(myCompResult.data?.id || null);
+        setInitialLoadDone(true);
+
+        // Fetch aggregate stats (runs once)
+        if (myCompResult.data?.id) {
+          const stats = await getCompanyStats(myCompResult.data.id, supabase);
+          if (isMounted) {
+            setCompanyStats(stats);
+          }
+        }
+      }
+    }
+
+    loadUserCompany();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // --------------------------------------------------
+  // Load paginated companies - only fetch batch for current page
+  // --------------------------------------------------
+  useEffect(() => {
+    // Wait for initial load to complete
+    if (!initialLoadDone) return;
+
+    let isMounted = true;
+
+    async function loadCompanies() {
+      if (!myCompanyId) {
         setDetectedCompanies([]);
         setCalls([]);
-        setLoading(false);
+        setTotalCompaniesCount(0);
+        setIsInitialLoading(false);
+        setIsTableLoading(false);
         return;
       }
 
-      // Parallel fetch: calls and transcripts
+      // Show table skeleton during fetch (not full page loading)
+      setIsTableLoading(true);
+
+      // Use server-side pagination - fetch ONLY the current page's batch
+      const paginatedResult = await getCompaniesPaginated(
+        myCompanyId,
+        supabase,
+        page,
+        pageSize,
+        debouncedSearch
+      );
+
+      if (!isMounted) return;
+
+      setDetectedCompanies(paginatedResult.data);
+      setTotalCompaniesCount(paginatedResult.totalCount);
+
+      // Clear prediction state if companies exist
+      if (paginatedResult.totalCount > 0) {
+        localStorage.removeItem(PREDICTION_CLICKED_KEY);
+        setPredictionClicked(false);
+      }
+
+      // Get the detected company IDs to fetch their calls
+      const detectedCompanyIds = paginatedResult.data.map((c: any) => c.id);
+
+      if (detectedCompanyIds.length === 0) {
+        setCalls([]);
+        setIsTableLoading(false);
+        setIsInitialLoading(false);
+        return;
+      }
+
+      // Fetch calls and transcripts for the visible companies only
       const [callsResult, transcriptsResult] = await Promise.all([
         supabase
           .from("company_calls")
@@ -265,6 +322,8 @@ export default function CompaniesPage() {
           .in("company_id", detectedCompanyIds),
         supabase.from("transcripts").select("id, ai_overall_score"),
       ]);
+
+      if (!isMounted) return;
 
       // Build transcript scores map
       const transcriptScores: Record<number, number> = {};
@@ -282,29 +341,17 @@ export default function CompaniesPage() {
         score: transcriptScores[call.transcript_id] ?? null,
       }));
 
-      const resultData = {
-        myCompany: myCompResult.data || null,
-        detectedCompanies: detectedResult.data,
-        calls: callsWithScores,
-      };
-
-      // Cache the results
-      setCachedData(cacheKey, resultData);
-
-      setMyCompany(resultData.myCompany);
-      setDetectedCompanies(resultData.detectedCompanies);
-      setCalls(resultData.calls);
-      setLoading(false);
-
-      // Clear prediction state if companies exist
-      if (resultData.detectedCompanies.length > 0) {
-        localStorage.removeItem(PREDICTION_CLICKED_KEY);
-        setPredictionClicked(false);
-      }
+      setCalls(callsWithScores);
+      setIsTableLoading(false);
+      setIsInitialLoading(false);
     }
 
-    load();
-  }, []);
+    loadCompanies();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initialLoadDone, myCompanyId, page, pageSize, debouncedSearch]);
 
   // --------------------------------------------------
   // Enhancing detected company objects
@@ -342,24 +389,27 @@ export default function CompaniesPage() {
   }, [detectedCompanies, calls]);
 
   // --------------------------------------------------
-  // Stats calculations
+  // Stats calculations - use server-side aggregate stats
   // --------------------------------------------------
   const stats = useMemo(() => {
-    const totalCompanies = combinedData.length;
-    const totalCalls = combinedData.reduce((sum, c) => sum + c.calls, 0);
+    // Use server-side aggregate stats for accurate totals
+    if (companyStats) {
+      return {
+        totalCompanies: companyStats.totalCompanies,
+        totalCalls: companyStats.totalCalls,
+        avgScore: companyStats.avgScore,
+        atRisk: companyStats.atRiskCount,
+      };
+    }
 
-    // Only include companies with valid scores in average
-    const companiesWithScores = combinedData.filter((c) => c.score != null);
-    const avgScore = companiesWithScores.length > 0
-      ? Math.round(
-          companiesWithScores.reduce((sum, c) => sum + (c.score || 0), 0) / companiesWithScores.length
-        )
-      : 0;
-
-    const atRisk = combinedData.filter((c) => c.risk === "Critical").length;
-
-    return { totalCompanies, totalCalls, avgScore, atRisk };
-  }, [combinedData]);
+    // Fallback to page data while loading
+    return {
+      totalCompanies: totalCompaniesCount,
+      totalCalls: combinedData.reduce((sum, c) => sum + c.calls, 0),
+      avgScore: 0,
+      atRisk: combinedData.filter((c) => c.risk === "Critical").length,
+    };
+  }, [companyStats, totalCompaniesCount, combinedData]);
 
   // --------------------------------------------------
   // Filters with debounced search
@@ -387,19 +437,15 @@ export default function CompaniesPage() {
     [combinedData]
   );
 
-  const maxPage = Math.ceil(filtered.length / pageSize);
+  // Server-side pagination - no need to slice, data is already paginated
+  const maxPage = Math.ceil(totalCompaniesCount / pageSize) || 1;
   const startIndex = (page - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const pageItems = filtered.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + pageSize, totalCompaniesCount);
+  const pageItems = filtered; // Already paginated from server
 
   useEffect(() => {
     if (page > maxPage && maxPage > 0) setPage(1);
   }, [maxPage, page]);
-
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [filters]);
 
   // --------------------------------------------------
   // Memoized Filter Handlers with debounce for search
@@ -565,9 +611,9 @@ export default function CompaniesPage() {
   }, [modalState.newCompanyName, modalState.newCompanyDomain, myCompany]);
 
   // --------------------------------------------------
-  // Loading State
+  // Initial Loading State - only show full page loader on first load
   // --------------------------------------------------
-  if (loading) {
+  if (isInitialLoading && detectedCompanies.length === 0) {
     return (
       <SidebarProvider
         style={
@@ -756,7 +802,46 @@ export default function CompaniesPage() {
           </div>
 
           {/* Companies Table */}
-          {filtered.length === 0 ? (
+          <ErrorBoundary>
+          {isTableLoading ? (
+            // Table skeleton during loading
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Industry</TableHead>
+                    <TableHead className="text-center">Calls</TableHead>
+                    <TableHead>Last Call</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-center">Score</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...Array(pageSize)].map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Skeleton className="h-10 w-10 rounded-lg" />
+                          <div className="space-y-2">
+                            <Skeleton className="h-4 w-[150px]" />
+                            <Skeleton className="h-3 w-[100px]" />
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-4 w-[30px] mx-auto" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-6 w-[60px] mx-auto rounded-full" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-4 w-[40px] mx-auto" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-8 w-[80px] ml-auto" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : filtered.length === 0 ? (
             predictionClicked ? (
               // Prediction in progress animation
               <div className="py-16">
@@ -881,13 +966,14 @@ export default function CompaniesPage() {
                 </Table>
               </div>
           )}
+          </ErrorBoundary>
 
           {/* Pagination */}
-          {filtered.length > pageSize && (
+          {totalCompaniesCount > 0 && (
             <div className="flex items-center justify-between py-4">
                   <p className="text-sm text-muted-foreground">
-                    Showing {startIndex + 1} to {Math.min(endIndex, filtered.length)} of{" "}
-                    {filtered.length} companies
+                    Showing {startIndex + 1} to {endIndex} of{" "}
+                    {totalCompaniesCount} companies
                   </p>
                   <div className="flex items-center gap-2">
                     <Select

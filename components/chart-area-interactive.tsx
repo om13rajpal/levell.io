@@ -29,7 +29,8 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { useTranscriptStore } from "@/store/useTranscriptStore"
+import { supabase } from "@/lib/supabaseClient"
+import { getUserIdFromCache } from "@/lib/supabaseCache"
 
 const chartConfig = {
   score: {
@@ -40,73 +41,87 @@ const chartConfig = {
 
 export function ChartAreaInteractive() {
   const isMobile = useIsMobile()
-  const [timeRange, setTimeRange] = React.useState("90d")
-  const transcripts = useTranscriptStore((s) => s.transcripts)
-  const [chartData, setChartData] = React.useState<Array<{ date: string; score: number }>>([])
+  const [percentFilter, setPercentFilter] = React.useState("100")
+  const [chartData, setChartData] = React.useState<Array<{ index: number; score: number; title: string }>>([])
+  const [totalScoredCount, setTotalScoredCount] = React.useState(0)
+  const [hasTranscripts, setHasTranscripts] = React.useState(false)
 
   React.useEffect(() => {
     if (isMobile) {
-      setTimeRange("7d")
+      setPercentFilter("50")
     }
   }, [isMobile])
 
-  // Process transcripts into chart data
+  // Fetch all scored transcripts for the chart
   React.useEffect(() => {
-    if (!transcripts || transcripts.length === 0) {
-      setChartData([])
-      return
+    let isMounted = true
+
+    const fetchChartData = async () => {
+      const userId = getUserIdFromCache()
+      if (!userId) return
+
+      // First check if user has any transcripts
+      const { count: totalCount } = await supabase
+        .from('transcripts')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+
+      if (isMounted) {
+        setHasTranscripts((totalCount || 0) > 0)
+      }
+
+      // Fetch all scored transcripts for the chart (no date limit)
+      const { data, error } = await supabase
+        .from('transcripts')
+        .select('title, ai_overall_score')
+        .eq('user_id', userId)
+        .not('ai_overall_score', 'is', null)
+        .not('duration', 'is', null)
+        .gte('duration', 5)
+        .order('created_at', { ascending: true })
+
+      if (error) {
+        console.error('Error fetching chart data:', error)
+        return
+      }
+
+      if (isMounted && data) {
+        setTotalScoredCount(data.length)
+
+        // Create individual data points for each call (not grouped by date)
+        const chartDataPoints = data.map((item, idx) => ({
+          index: idx + 1,
+          score: Math.round(Number(item.ai_overall_score)),
+          title: item.title || `Call ${idx + 1}`
+        }))
+
+        setChartData(chartDataPoints)
+      }
     }
 
-    // Filter transcripts with valid scores and dates
-    const scoredTranscripts = transcripts
-      .filter((t) => t.ai_overall_score != null && !isNaN(t.ai_overall_score) && t.created_at)
-      .map((t) => ({
-        date: new Date(t.created_at).toISOString().split('T')[0], // YYYY-MM-DD format
-        score: Number(t.ai_overall_score),
-        timestamp: new Date(t.created_at).getTime()
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp)
+    fetchChartData()
 
-    // Group by date and calculate average score per day
-    const groupedByDate = scoredTranscripts.reduce((acc, item) => {
-      if (!acc[item.date]) {
-        acc[item.date] = []
-      }
-      acc[item.date].push(item.score)
-      return acc
-    }, {} as Record<string, number[]>)
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
-    const processedData = Object.entries(groupedByDate).map(([date, scores]) => ({
-      date,
-      score: Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
-    }))
-
-    setChartData(processedData)
-  }, [transcripts])
-
-  // Filter data based on time range
+  // Filter data based on percentage of total transcripts
   const filteredData = React.useMemo(() => {
     if (chartData.length === 0) return []
 
-    const now = new Date()
-    let cutoffDate = new Date()
+    const percent = parseInt(percentFilter)
+    const dataPointsToShow = Math.max(1, Math.ceil((chartData.length * percent) / 100))
 
-    switch (timeRange) {
-      case "7d":
-        cutoffDate.setDate(now.getDate() - 7)
-        break
-      case "30d":
-        cutoffDate.setDate(now.getDate() - 30)
-        break
-      case "90d":
-        cutoffDate.setDate(now.getDate() - 90)
-        break
-      default:
-        return chartData
-    }
+    // Show the most recent N% of data points
+    return chartData.slice(-dataPointsToShow)
+  }, [chartData, percentFilter])
 
-    return chartData.filter((item) => new Date(item.date) >= cutoffDate)
-  }, [chartData, timeRange])
+  // Calculate how many transcripts are shown
+  const transcriptsShown = React.useMemo(() => {
+    const percent = parseInt(percentFilter)
+    return Math.max(1, Math.ceil((totalScoredCount * percent) / 100))
+  }, [totalScoredCount, percentFilter])
 
   return (
     <Card className="@container/card">
@@ -114,40 +129,45 @@ export function ChartAreaInteractive() {
         <CardTitle>Call Scores</CardTitle>
         <CardDescription>
           <span className="hidden @[540px]/card:block">
-            Scores for recent calls
+            {totalScoredCount > 0
+              ? `Showing ${transcriptsShown} of ${totalScoredCount} scored calls`
+              : "Scores for your calls"
+            }
           </span>
-          <span className="@[540px]/card:hidden">Recent scores</span>
+          <span className="@[540px]/card:hidden">
+            {totalScoredCount > 0 ? `${transcriptsShown}/${totalScoredCount} calls` : "Recent scores"}
+          </span>
         </CardDescription>
 
         <CardAction>
           <ToggleGroup
             type="single"
-            value={timeRange}
+            value={percentFilter}
             onValueChange={(value) => {
               // Only update if a valid value is provided (prevents deselection issues)
-              if (value) setTimeRange(value)
+              if (value) setPercentFilter(value)
             }}
             variant="outline"
             className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
           >
-            <ToggleGroupItem value="90d">Last 3 months</ToggleGroupItem>
-            <ToggleGroupItem value="30d">Last 30 days</ToggleGroupItem>
-            <ToggleGroupItem value="7d">Last 7 days</ToggleGroupItem>
+            <ToggleGroupItem value="100">All Calls</ToggleGroupItem>
+            <ToggleGroupItem value="50">Recent 50%</ToggleGroupItem>
+            <ToggleGroupItem value="10">Recent 10%</ToggleGroupItem>
           </ToggleGroup>
 
-          <Select value={timeRange} onValueChange={(value) => {
-            if (value) setTimeRange(value)
+          <Select value={percentFilter} onValueChange={(value) => {
+            if (value) setPercentFilter(value)
           }}>
             <SelectTrigger
               className="flex w-40 **:data-[slot=select-value]:block **:data-[slot=select-value]:truncate @[767px]/card:hidden"
               size="sm"
             >
-              <SelectValue placeholder="Last 3 months" />
+              <SelectValue placeholder="All Calls" />
             </SelectTrigger>
             <SelectContent className="rounded-xl">
-              <SelectItem value="90d">Last 3 months</SelectItem>
-              <SelectItem value="30d">Last 30 days</SelectItem>
-              <SelectItem value="7d">Last 7 days</SelectItem>
+              <SelectItem value="100">All Calls</SelectItem>
+              <SelectItem value="50">Recent 50%</SelectItem>
+              <SelectItem value="10">Recent 10%</SelectItem>
             </SelectContent>
           </Select>
         </CardAction>
@@ -157,7 +177,7 @@ export function ChartAreaInteractive() {
         {filteredData.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[250px] text-center">
             {/* Check if there are transcripts but none scored */}
-            {transcripts && transcripts.length > 0 ? (
+            {hasTranscripts ? (
               <>
                 {/* Animated scoring indicator */}
                 <div className="relative mb-6">
@@ -193,7 +213,7 @@ export function ChartAreaInteractive() {
                 </div>
               </>
             ) : (
-              <p className="text-muted-foreground">No calls available for the selected period</p>
+              <p className="text-muted-foreground">No scored calls available yet</p>
             )}
           </div>
         ) : (
@@ -220,29 +240,22 @@ export function ChartAreaInteractive() {
               <CartesianGrid vertical={false} />
 
               <XAxis
-                dataKey="date"
+                dataKey="index"
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
                 minTickGap={32}
-                tickFormatter={(value) =>
-                  new Date(value).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })
-                }
+                tickFormatter={(value) => `#${value}`}
               />
 
               <ChartTooltip
                 cursor={false}
                 content={
                   <ChartTooltipContent
-                    labelFormatter={(value) =>
-                      new Date(value).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })
-                    }
+                    labelFormatter={(value, payload) => {
+                      const item = payload?.[0]?.payload
+                      return item?.title || `Call #${value}`
+                    }}
                     indicator="dot"
                   />
                 }

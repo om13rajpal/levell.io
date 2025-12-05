@@ -133,9 +133,17 @@ export const transcriptColumns: ColumnDef<Transcript>[] = [
   {
     accessorKey: "duration",
     header: "Duration",
-    cell: ({ row }) => (
-      <Badge variant="outline">{Math.round(row.original.duration)} sec</Badge>
-    ),
+    cell: ({ row }) => {
+      const minutes = row.original.duration;
+      if (!minutes || minutes <= 0) return <Badge variant="outline">—</Badge>;
+      const m = Math.floor(minutes);
+      const h = Math.floor(m / 60);
+      const mins = m % 60;
+      if (h > 0) {
+        return <Badge variant="outline">{h}h {mins}m</Badge>;
+      }
+      return <Badge variant="outline">{mins}m</Badge>;
+    },
   },
 
   {
@@ -296,13 +304,29 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
       setSyncLoading(true);
 
       const tokenStr = localStorage.getItem(
-        "sb-rpowalzrbddorfnnmccp-auth-token"
+        "sb-tuzuwzglmyajuxytaowi-auth-token"
       );
-      if (!tokenStr) return;
+      if (!tokenStr) {
+        toast.error("Please log in to sync");
+        setSyncLoading(false);
+        return;
+      }
 
-      const parsed = JSON.parse(tokenStr);
+      let parsed;
+      try {
+        parsed = JSON.parse(tokenStr);
+      } catch {
+        toast.error("Session invalid. Please log in again.");
+        setSyncLoading(false);
+        return;
+      }
+
       const userId = parsed?.user?.id;
-      if (!userId) return;
+      if (!userId) {
+        toast.error("User not found. Please log in again.");
+        setSyncLoading(false);
+        return;
+      }
 
       // Get current transcript count for skip parameter
       const skip = data.length;
@@ -310,23 +334,22 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
       // Make request to n8n webhook using axios with extended timeout
       const webhookUrl = "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89";
 
-      axiosClient.post(webhookUrl, {
+      // Wait for the request to complete and show appropriate feedback
+      const response = await axiosClient.post(webhookUrl, {
         userid: userId,
         skip: skip,
         token: "936d3a85-de3a-42be-a462-9609d2080048",
-      }).catch((err) => {
-        console.error("Webhook request failed:", err);
       });
 
-      // Show toast notification
-      toast.success("Syncing started");
-
-      // Stop animation after 2 seconds
-      setTimeout(() => {
-        setSyncLoading(false);
-      }, 2000);
+      if (response.status >= 200 && response.status < 300) {
+        toast.success("Sync completed successfully");
+      } else {
+        toast.error("Sync failed. Please try again.");
+      }
     } catch (err) {
       console.error("Sync error:", err);
+      toast.error("Sync failed. Please try again.");
+    } finally {
       setSyncLoading(false);
     }
   }, [data.length]);

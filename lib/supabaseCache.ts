@@ -186,61 +186,369 @@ export function invalidateAllCaches(): void {
 }
 
 /**
- * Get transcripts with automatic caching
- * Fetches all transcripts without limit to ensure complete data for filtering
+ * Paginated transcripts result type
+ */
+export interface PaginatedTranscriptsResult {
+  data: any[];
+  totalCount: number;
+  hasMore: boolean;
+  fromCache: boolean;
+}
+
+/**
+ * Progressive cache structure for transcripts
+ */
+interface TranscriptPageCache {
+  pages: Record<number, any[]>;
+  totalCount: number;
+  pageSize: number;
+  timestamp: number;
+  filters: string; // JSON string of filters to invalidate on filter change
+}
+
+const TRANSCRIPT_PAGE_CACHE_KEY = 'transcript-pages-cache';
+const TRANSCRIPT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get cached transcript page from localStorage
+ */
+function getTranscriptPageCache(userId: string, filters: string): TranscriptPageCache | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cached = localStorage.getItem(`${TRANSCRIPT_PAGE_CACHE_KEY}-${userId}`);
+    if (!cached) return null;
+
+    const cache: TranscriptPageCache = JSON.parse(cached);
+
+    // Check if cache is expired
+    if (Date.now() - cache.timestamp > TRANSCRIPT_CACHE_TTL) {
+      localStorage.removeItem(`${TRANSCRIPT_PAGE_CACHE_KEY}-${userId}`);
+      return null;
+    }
+
+    // Check if filters changed - invalidate cache
+    if (cache.filters !== filters) {
+      localStorage.removeItem(`${TRANSCRIPT_PAGE_CACHE_KEY}-${userId}`);
+      return null;
+    }
+
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save transcript page metadata to localStorage cache
+ * NOTE: Only saves totalCount and pageSize, NOT the full page data
+ * to avoid localStorage quota issues
+ */
+function saveTranscriptPageCache(
+  userId: string,
+  page: number,
+  data: any[],
+  totalCount: number,
+  pageSize: number,
+  filters: string
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // Only cache metadata, not full transcript data to avoid quota issues
+    const cache: TranscriptPageCache = {
+      pages: {}, // Don't cache full page data
+      totalCount,
+      pageSize,
+      timestamp: Date.now(),
+      filters,
+    };
+
+    localStorage.setItem(`${TRANSCRIPT_PAGE_CACHE_KEY}-${userId}`, JSON.stringify(cache));
+  } catch (error) {
+    console.error('Error saving transcript page cache:', error);
+  }
+}
+
+/**
+ * Transcript filter options for server-side filtering
+ */
+export interface TranscriptFilters {
+  search?: string;
+  scoreMin?: number;
+  scoreMax?: number;
+  durationMin?: number;
+  durationMax?: number;
+  onlyScoredCalls?: boolean;
+}
+
+/**
+ * Get transcripts with server-side pagination
+ * Always fetches live data to avoid localStorage quota issues
+ */
+export async function getTranscriptsPaginated(
+  userId: string,
+  supabase: SupabaseClient,
+  page: number = 1,
+  pageSize: number = 10,
+  search?: string,
+  scoreMin?: number,
+  scoreMax?: number,
+  filters?: TranscriptFilters
+): Promise<PaginatedTranscriptsResult> {
+  const offset = (page - 1) * pageSize;
+
+  // Get duration filter - use filters object if provided, otherwise default to 5 min
+  const durationMin = filters?.durationMin ?? 5;
+  const durationMax = filters?.durationMax;
+  const onlyScoredCalls = filters?.onlyScoredCalls ?? false;
+
+  // Build the query - fetch only the current page's batch
+  let query = supabase
+    .from('transcripts')
+    .select('*', { count: 'exact' })
+    .eq('user_id', userId)
+    .not('duration', 'is', null)
+    .order('created_at', { ascending: false });
+
+  // Apply duration min filter
+  if (durationMin > 0) {
+    query = query.gte('duration', durationMin);
+  }
+
+  // Apply duration max filter if provided
+  if (durationMax && durationMax > 0) {
+    query = query.lte('duration', durationMax);
+  }
+
+  // Apply only scored calls filter
+  if (onlyScoredCalls) {
+    query = query.not('ai_overall_score', 'is', null);
+  }
+
+  // Apply search filter if provided
+  if (search && search.trim()) {
+    query = query.ilike('title', `%${search.trim()}%`);
+  }
+
+  // Apply score filters if provided
+  if (scoreMin !== undefined && scoreMin > 0) {
+    query = query.gte('ai_overall_score', scoreMin);
+  }
+  if (scoreMax !== undefined && scoreMax < 100) {
+    query = query.lte('ai_overall_score', scoreMax);
+  }
+
+  // Apply pagination - fetch ONLY this page's batch
+  query = query.range(offset, offset + pageSize - 1);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error('Error fetching paginated transcripts:', error);
+    return { data: [], totalCount: 0, hasMore: false, fromCache: false };
+  }
+
+  const totalCount = count || 0;
+  const hasMore = offset + pageSize < totalCount;
+
+  return {
+    data: data || [],
+    totalCount,
+    hasMore,
+    fromCache: false,
+  };
+}
+
+/**
+ * Clear transcript page cache for a user
+ */
+export function clearTranscriptPageCache(userId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(`${TRANSCRIPT_PAGE_CACHE_KEY}-${userId}`);
+  } catch {
+    // Ignore errors
+  }
+}
+
+/**
+ * Get transcripts - fetches live to avoid localStorage quota issues
+ * NOTE: Prefer using getTranscriptsPaginated for better performance
+ * @deprecated Use getTranscriptsPaginated instead for paginated views
  */
 export async function getTranscriptsWithCache(
   userId: string,
   supabase: SupabaseClient
 ): Promise<any[]> {
-  const cacheKey = CACHE_KEYS.TRANSCRIPTS;
-  const ttl = CACHE_TTL.TRANSCRIPTS;
-
-  // Check if cache is valid
-  if (isCacheValid(cacheKey, ttl, userId)) {
-    const cached = getCachedData<any[]>(cacheKey, userId);
-    if (cached) {
-      return cached;
-    }
-  }
-
-  // Fetch all transcripts from Supabase (no limit - need full data for filtering)
+  // Fetch all transcripts from Supabase (no caching to avoid quota issues)
+  // Filter out calls with null duration or duration < 5 minutes
   const { data, error } = await supabase
     .from('transcripts')
     .select('*')
     .eq('user_id', userId)
+    .not('duration', 'is', null)
+    .gte('duration', 5)
     .order('created_at', { ascending: false });
 
   if (error) {
     console.error('Error fetching transcripts:', error);
-    // Return cached data even if expired as fallback
-    return getCachedData<any[]>(cacheKey, userId) || [];
+    return [];
   }
 
-  // Cache the results
-  setCachedData(cacheKey, data || [], userId);
+  // Don't cache full transcript data - causes localStorage quota issues
   return data || [];
 }
 
 /**
- * Get companies with automatic caching
+ * Paginated companies result type
+ */
+export interface PaginatedCompaniesResult {
+  data: any[];
+  totalCount: number;
+  hasMore: boolean;
+  fromCache: boolean;
+}
+
+/**
+ * Progressive cache structure for companies
+ */
+interface CompanyPageCache {
+  pages: Record<number, any[]>;
+  totalCount: number;
+  pageSize: number;
+  timestamp: number;
+  filters: string;
+}
+
+const COMPANY_PAGE_CACHE_KEY = 'company-pages-cache';
+const COMPANY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get cached company page from localStorage
+ */
+function getCompanyPageCache(companyId: string, filters: string): CompanyPageCache | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cached = localStorage.getItem(`${COMPANY_PAGE_CACHE_KEY}-${companyId}`);
+    if (!cached) return null;
+
+    const cache: CompanyPageCache = JSON.parse(cached);
+
+    // Check if cache is expired
+    if (Date.now() - cache.timestamp > COMPANY_CACHE_TTL) {
+      localStorage.removeItem(`${COMPANY_PAGE_CACHE_KEY}-${companyId}`);
+      return null;
+    }
+
+    // Check if filters changed - invalidate cache
+    if (cache.filters !== filters) {
+      localStorage.removeItem(`${COMPANY_PAGE_CACHE_KEY}-${companyId}`);
+      return null;
+    }
+
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save company page metadata to localStorage cache
+ * NOTE: Only saves totalCount and pageSize, NOT the full page data
+ * to avoid localStorage quota issues
+ */
+function saveCompanyPageCache(
+  companyId: string,
+  page: number,
+  data: any[],
+  totalCount: number,
+  pageSize: number,
+  filters: string
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // Only cache metadata, not full company data to avoid quota issues
+    const cache: CompanyPageCache = {
+      pages: {}, // Don't cache full page data
+      totalCount,
+      pageSize,
+      timestamp: Date.now(),
+      filters,
+    };
+
+    localStorage.setItem(`${COMPANY_PAGE_CACHE_KEY}-${companyId}`, JSON.stringify(cache));
+  } catch (error) {
+    console.error('Error saving company page cache:', error);
+  }
+}
+
+/**
+ * Get companies with server-side pagination
+ * Always fetches live data to avoid localStorage quota issues
+ */
+export async function getCompaniesPaginated(
+  companyId: string,
+  supabase: SupabaseClient,
+  page: number = 1,
+  pageSize: number = 10,
+  search?: string
+): Promise<PaginatedCompaniesResult> {
+  const offset = (page - 1) * pageSize;
+
+  // Build the query - fetch only the current page's batch
+  let query = supabase
+    .from('companies')
+    .select('*', { count: 'exact' })
+    .eq('company_id', companyId)
+    .order('company_name', { ascending: true });
+
+  // Apply search filter if provided
+  if (search && search.trim()) {
+    query = query.ilike('company_name', `%${search.trim()}%`);
+  }
+
+  // Apply pagination - fetch ONLY this page's batch
+  query = query.range(offset, offset + pageSize - 1);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error('Error fetching paginated companies:', error);
+    return { data: [], totalCount: 0, hasMore: false, fromCache: false };
+  }
+
+  const totalCount = count || 0;
+  const hasMore = offset + pageSize < totalCount;
+
+  return {
+    data: data || [],
+    totalCount,
+    hasMore,
+    fromCache: false,
+  };
+}
+
+/**
+ * Clear company page cache
+ */
+export function clearCompanyPageCache(companyId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(`${COMPANY_PAGE_CACHE_KEY}-${companyId}`);
+  } catch {
+    // Ignore errors
+  }
+}
+
+/**
+ * Get companies - fetches live to avoid localStorage quota issues
+ * NOTE: Prefer using getCompaniesPaginated for better performance
+ * @deprecated Use getCompaniesPaginated instead for paginated views
  */
 export async function getCompaniesWithCache(
   userId: string,
   supabase: SupabaseClient
 ): Promise<any[]> {
-  const cacheKey = CACHE_KEYS.COMPANIES;
-  const ttl = CACHE_TTL.COMPANIES;
-
-  // Check if cache is valid
-  if (isCacheValid(cacheKey, ttl, userId)) {
-    const cached = getCachedData<any[]>(cacheKey, userId);
-    if (cached) {
-      return cached;
-    }
-  }
-
-  // Fetch from Supabase
+  // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
     .from('companies')
     .select('*')
@@ -249,33 +557,21 @@ export async function getCompaniesWithCache(
 
   if (error) {
     console.error('Error fetching companies:', error);
-    return getCachedData<any[]>(cacheKey, userId) || [];
+    return [];
   }
 
-  // Cache the results
-  setCachedData(cacheKey, data || [], userId);
+  // Don't cache full company data - causes localStorage quota issues
   return data || [];
 }
 
 /**
- * Get user with automatic caching
+ * Get user - fetches live to avoid localStorage quota issues
  */
 export async function getUserWithCache(
   userId: string,
   supabase: SupabaseClient
 ): Promise<any | null> {
-  const cacheKey = CACHE_KEYS.USER;
-  const ttl = CACHE_TTL.USER;
-
-  // Check if cache is valid
-  if (isCacheValid(cacheKey, ttl, userId)) {
-    const cached = getCachedData<any>(cacheKey, userId);
-    if (cached) {
-      return cached;
-    }
-  }
-
-  // Fetch from Supabase
+  // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
     .from('users')
     .select('*')
@@ -284,33 +580,21 @@ export async function getUserWithCache(
 
   if (error) {
     console.error('Error fetching user:', error);
-    return getCachedData<any>(cacheKey, userId) || null;
+    return null;
   }
 
-  // Cache the result
-  setCachedData(cacheKey, data, userId);
+  // Don't cache user data - fetches live per user request
   return data;
 }
 
 /**
- * Get team members with automatic caching
+ * Get team members - fetches live to avoid localStorage quota issues
  */
 export async function getTeamWithCache(
   userId: string,
   supabase: SupabaseClient
 ): Promise<any[]> {
-  const cacheKey = CACHE_KEYS.TEAM;
-  const ttl = CACHE_TTL.TEAM;
-
-  // Check if cache is valid
-  if (isCacheValid(cacheKey, ttl, userId)) {
-    const cached = getCachedData<any[]>(cacheKey, userId);
-    if (cached) {
-      return cached;
-    }
-  }
-
-  // Fetch from Supabase
+  // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
     .from('team_members')
     .select('*, users(*)')
@@ -319,33 +603,21 @@ export async function getTeamWithCache(
 
   if (error) {
     console.error('Error fetching team:', error);
-    return getCachedData<any[]>(cacheKey, userId) || [];
+    return [];
   }
 
-  // Cache the results
-  setCachedData(cacheKey, data || [], userId);
+  // Don't cache team data - fetches live per user request
   return data || [];
 }
 
 /**
- * Get calls with automatic caching
+ * Get calls - fetches live to avoid localStorage quota issues
  */
 export async function getCallsWithCache(
   userId: string,
   supabase: SupabaseClient
 ): Promise<any[]> {
-  const cacheKey = CACHE_KEYS.CALLS;
-  const ttl = CACHE_TTL.CALLS;
-
-  // Check if cache is valid
-  if (isCacheValid(cacheKey, ttl, userId)) {
-    const cached = getCachedData<any[]>(cacheKey, userId);
-    if (cached) {
-      return cached;
-    }
-  }
-
-  // Fetch from Supabase
+  // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
     .from('calls')
     .select('*')
@@ -355,11 +627,10 @@ export async function getCallsWithCache(
 
   if (error) {
     console.error('Error fetching calls:', error);
-    return getCachedData<any[]>(cacheKey, userId) || [];
+    return [];
   }
 
-  // Cache the results
-  setCachedData(cacheKey, data || [], userId);
+  // Don't cache calls data - fetches live per user request
   return data || [];
 }
 
@@ -393,19 +664,17 @@ export function scheduleBackgroundRefresh(
 }
 
 /**
- * Preload cache with data (useful for initial page load)
+ * Preload cache with minimal data (useful for initial page load)
+ * Only preloads counts/stats, not full data to avoid quota issues
  */
 export async function preloadCache(
   userId: string,
   supabase: SupabaseClient
 ): Promise<void> {
   try {
-    // Preload critical data in parallel
+    // Only preload stats (counts), not full data
     await Promise.allSettled([
-      getTranscriptsWithCache(userId, supabase),
-      getCompaniesWithCache(userId, supabase),
-      getUserWithCache(userId, supabase),
-      getTeamWithCache(userId, supabase),
+      getTranscriptStats(userId, supabase),
     ]);
   } catch (error) {
     console.error('Error preloading cache:', error);
@@ -499,13 +768,220 @@ export function clearExpiredCaches(): void {
 }
 
 /**
+ * Transcript stats result type
+ */
+export interface TranscriptStats {
+  totalCount: number;
+  scoredCount: number;
+  avgScore: number;
+  isScoring: boolean;
+}
+
+/**
+ * Get transcript stats (count, scored count, avg score) without fetching all records
+ * Uses Supabase aggregate queries for efficiency
+ */
+export async function getTranscriptStats(
+  userId: string,
+  supabase: SupabaseClient
+): Promise<TranscriptStats> {
+  try {
+    // Get total count (filter out calls with null duration or duration < 5 minutes)
+    const { count: totalCount, error: countError } = await supabase
+      .from('transcripts')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .not('duration', 'is', null)
+      .gte('duration', 5);
+
+    if (countError) throw countError;
+
+    // Get scored transcripts count and sum for average (with duration filter)
+    const { data: scoredData, error: scoredError } = await supabase
+      .from('transcripts')
+      .select('ai_overall_score')
+      .eq('user_id', userId)
+      .not('ai_overall_score', 'is', null)
+      .not('duration', 'is', null)
+      .gte('duration', 5);
+
+    if (scoredError) throw scoredError;
+
+    const scoredCount = scoredData?.length || 0;
+    let avgScore = 0;
+
+    if (scoredCount > 0) {
+      const sum = scoredData.reduce((acc, t) => acc + Number(t.ai_overall_score), 0);
+      avgScore = Math.round(sum / scoredCount);
+    }
+
+    const total = totalCount || 0;
+    const isScoring = total > scoredCount;
+
+    return {
+      totalCount: total,
+      scoredCount,
+      avgScore,
+      isScoring,
+    };
+  } catch (error) {
+    console.error('Error fetching transcript stats:', error);
+    return { totalCount: 0, scoredCount: 0, avgScore: 0, isScoring: false };
+  }
+}
+
+/**
+ * Get recent scored transcripts for chart (limited to maxDays)
+ * Only fetches scored transcripts with dates, ordered by date
+ */
+export async function getRecentScoredTranscripts(
+  userId: string,
+  supabase: SupabaseClient,
+  maxDays: number = 90
+): Promise<Array<{ date: string; score: number }>> {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - maxDays);
+
+    // Filter out calls with null duration or duration < 5 minutes
+    const { data, error } = await supabase
+      .from('transcripts')
+      .select('created_at, ai_overall_score')
+      .eq('user_id', userId)
+      .not('ai_overall_score', 'is', null)
+      .not('duration', 'is', null)
+      .gte('duration', 5)
+      .gte('created_at', cutoffDate.toISOString())
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) return [];
+
+    // Group by date and calculate average score per day
+    const groupedByDate = data.reduce((acc, item) => {
+      const date = new Date(item.created_at).toISOString().split('T')[0];
+      if (!acc[date]) {
+        acc[date] = [];
+      }
+      acc[date].push(Number(item.ai_overall_score));
+      return acc;
+    }, {} as Record<string, number[]>);
+
+    return Object.entries(groupedByDate).map(([date, scores]) => ({
+      date,
+      score: Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
+    }));
+  } catch (error) {
+    console.error('Error fetching recent scored transcripts:', error);
+    return [];
+  }
+}
+
+/**
+ * Company stats interface
+ */
+export interface CompanyStats {
+  totalCompanies: number;
+  totalCalls: number;
+  avgScore: number;
+  atRiskCount: number;
+}
+
+/**
+ * Get aggregate company stats from server
+ * Fetches totals across ALL companies, not just current page
+ */
+export async function getCompanyStats(
+  companyId: string,
+  supabase: SupabaseClient
+): Promise<CompanyStats> {
+  try {
+    // Get total companies count
+    const { count: totalCompanies, error: companyError } = await supabase
+      .from('companies')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', companyId);
+
+    if (companyError) throw companyError;
+
+    // Get all company IDs for this user's company
+    const { data: companyIds, error: idsError } = await supabase
+      .from('companies')
+      .select('id')
+      .eq('company_id', companyId);
+
+    if (idsError) throw idsError;
+
+    const ids = companyIds?.map((c) => c.id) || [];
+
+    if (ids.length === 0) {
+      return { totalCompanies: 0, totalCalls: 0, avgScore: 0, atRiskCount: 0 };
+    }
+
+    // Get total calls count
+    const { count: totalCalls, error: callsError } = await supabase
+      .from('company_calls')
+      .select('*', { count: 'exact', head: true })
+      .in('company_id', ids);
+
+    if (callsError) throw callsError;
+
+    // Get calls with scores for average calculation
+    const { data: callsWithScores, error: scoresError } = await supabase
+      .from('company_calls')
+      .select('transcript_id')
+      .in('company_id', ids);
+
+    if (scoresError) throw scoresError;
+
+    const transcriptIds = callsWithScores?.map((c) => c.transcript_id).filter(Boolean) || [];
+
+    let avgScore = 0;
+    if (transcriptIds.length > 0) {
+      const { data: transcripts, error: transcriptError } = await supabase
+        .from('transcripts')
+        .select('ai_overall_score')
+        .in('id', transcriptIds)
+        .not('ai_overall_score', 'is', null);
+
+      if (!transcriptError && transcripts && transcripts.length > 0) {
+        const sum = transcripts.reduce((acc, t) => acc + Number(t.ai_overall_score), 0);
+        avgScore = Math.round(sum / transcripts.length);
+      }
+    }
+
+    // Count companies with 0 calls (at risk)
+    const { data: callCounts, error: countError } = await supabase
+      .from('company_calls')
+      .select('company_id')
+      .in('company_id', ids);
+
+    if (countError) throw countError;
+
+    const companiesWithCalls = new Set(callCounts?.map((c) => c.company_id) || []);
+    const atRiskCount = ids.length - companiesWithCalls.size;
+
+    return {
+      totalCompanies: totalCompanies || 0,
+      totalCalls: totalCalls || 0,
+      avgScore,
+      atRiskCount,
+    };
+  } catch (error) {
+    console.error('Error fetching company stats:', error);
+    return { totalCompanies: 0, totalCalls: 0, avgScore: 0, atRiskCount: 0 };
+  }
+}
+
+/**
  * Get authenticated user ID from stored token
  */
 export function getUserIdFromCache(): string | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    const tokenStr = localStorage.getItem('sb-rpowalzrbddorfnnmccp-auth-token');
+    const tokenStr = localStorage.getItem('sb-tuzuwzglmyajuxytaowi-auth-token');
     if (!tokenStr) return null;
 
     const parsed = JSON.parse(tokenStr);
@@ -516,9 +992,36 @@ export function getUserIdFromCache(): string | null {
   }
 }
 
+/**
+ * Clear the old transcript-storage Zustand persisted store
+ * This removes the old full transcript data that was cached before pagination
+ */
+export function clearOldTranscriptStorage(): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const oldStorage = localStorage.getItem('transcript-storage');
+    if (oldStorage) {
+      const parsed = JSON.parse(oldStorage);
+      // If the old storage has more than 50 transcripts, clear it
+      // This indicates it was from before pagination was implemented
+      if (parsed?.state?.transcripts?.length > 50) {
+        localStorage.removeItem('transcript-storage');
+        console.log('Cleared old transcript storage with', parsed.state.transcripts.length, 'records');
+      }
+    }
+  } catch (error) {
+    // If parsing fails, just remove the corrupted storage
+    localStorage.removeItem('transcript-storage');
+  }
+}
+
 // Auto-cleanup expired caches every 5 minutes
 if (typeof window !== 'undefined') {
   setInterval(() => {
     clearExpiredCaches();
   }, 5 * 60 * 1000);
+
+  // Clear old transcript storage on initial load
+  clearOldTranscriptStorage();
 }

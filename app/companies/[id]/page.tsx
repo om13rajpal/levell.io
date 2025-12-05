@@ -57,6 +57,7 @@ import {
   Building2,
   Mail,
   UserCircle,
+  Loader2,
 } from "lucide-react";
 import {
   Area,
@@ -181,103 +182,183 @@ export default function CompanyDetailsPage() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Pagination state
+  // Server-side pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [totalTranscripts, setTotalTranscripts] = useState(0);
+  const [transcriptsLoading, setTranscriptsLoading] = useState(false);
+
+  // Stats - loaded separately for performance
+  const [stats, setStats] = useState<{
+    totalCalls: number;
+    avgScore: number;
+    lastCall: string;
+    primaryContacts: number;
+  }>({ totalCalls: 0, avgScore: 0, lastCall: "No calls yet", primaryContacts: 0 });
+
+  // Fetch transcripts for a specific page (server-side pagination)
+  const fetchTranscriptsPage = useCallback(async (transcriptIds: string[], page: number, size: number) => {
+    if (transcriptIds.length === 0) return;
+
+    setTranscriptsLoading(true);
+    const offset = (page - 1) * size;
+
+    const { data, error } = await supabase
+      .from("transcripts")
+      .select("*")
+      .in("id", transcriptIds)
+      .not("duration", "is", null)
+      .gte("duration", 5)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + size - 1);
+
+    if (!error && data) {
+      setTranscripts(data);
+    }
+    setTranscriptsLoading(false);
+  }, []);
+
+  // Store transcript IDs for pagination
+  const [allTranscriptIds, setAllTranscriptIds] = useState<string[]>([]);
 
   // Memoized pagination handlers
   const handlePageChange = useCallback((newPage: number) => {
     setCurrentPage(newPage);
-  }, []);
+    fetchTranscriptsPage(allTranscriptIds, newPage, pageSize);
+  }, [fetchTranscriptsPage, allTranscriptIds, pageSize]);
 
   const handlePageSizeChange = useCallback((newSize: number) => {
     setPageSize(newSize);
     setCurrentPage(1);
-  }, []);
+    fetchTranscriptsPage(allTranscriptIds, 1, newSize);
+  }, [fetchTranscriptsPage, allTranscriptIds]);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
 
       // Parallel API calls - fetch company and calls simultaneously
-      // Include company_contacts and ai_recommendations from schema
+      // Include company_contacts, ai_recommendations, risk_summary, and ai_relationship from schema
       const [companyResult, callDataResult] = await Promise.all([
-        supabase.from("companies").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations").eq("id", id).single(),
+        supabase.from("companies").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations, risk_summary, ai_relationship").eq("id", id).single(),
         supabase.from("company_calls")
           .select("id, created_at, transcript_id")
           .eq("company_id", id)
           .order("created_at", { ascending: false })
       ]);
 
+      // Log any errors for debugging
+      if (companyResult.error) {
+        console.error("Company fetch error:", companyResult.error);
+      }
+
       const comp = companyResult.data;
       const callData = callDataResult.data || [];
 
-      // Fetch transcripts if we have call data
-      // transcript_id in company_calls is FK to transcripts.id (not fireflies_id)
+      // Get transcript IDs from company_calls
+      const transcriptIds = callData.map((c) => c.transcript_id).filter(Boolean);
+      setAllTranscriptIds(transcriptIds);
+
+      // Get total count of valid transcripts (with duration filter)
+      let totalCount = 0;
       let transcriptData: any[] = [];
-      if (callData.length > 0) {
-        const transcriptIds = callData.map((c) => c.transcript_id).filter(Boolean);
-        if (transcriptIds.length > 0) {
-          const { data } = await supabase
-            .from("transcripts")
-            .select("*")
-            .in("id", transcriptIds);
-          transcriptData = data || [];
+
+      if (transcriptIds.length > 0) {
+        // Get count first
+        const { count } = await supabase
+          .from("transcripts")
+          .select("*", { count: "exact", head: true })
+          .in("id", transcriptIds)
+          .not("duration", "is", null)
+          .gte("duration", 5);
+
+        totalCount = count || 0;
+        setTotalTranscripts(totalCount);
+
+        // Fetch stats data (scored transcripts for average calculation)
+        const { data: scoredData } = await supabase
+          .from("transcripts")
+          .select("ai_overall_score, ai_deal_risk_alerts, created_at, title")
+          .in("id", transcriptIds)
+          .not("duration", "is", null)
+          .gte("duration", 5)
+          .not("ai_overall_score", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        // Calculate stats
+        const scoredTranscripts = scoredData || [];
+        const avgScore = scoredTranscripts.length > 0
+          ? Math.round(
+              scoredTranscripts.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) /
+              scoredTranscripts.length
+            )
+          : 0;
+
+        const lastCall = callData.length > 0
+          ? formatDateTime(callData[0].created_at)
+          : "No calls yet";
+
+        // Extract contacts
+        let allAttendees: any[] = [];
+        if (comp?.company_contacts && Array.isArray(comp.company_contacts)) {
+          allAttendees = comp.company_contacts;
         }
+
+        setStats({
+          totalCalls: callData.length,
+          avgScore,
+          lastCall,
+          primaryContacts: allAttendees.slice(0, 5).length,
+        });
+
+        // Fetch first page of transcripts for table
+        const { data: firstPageData } = await supabase
+          .from("transcripts")
+          .select("*")
+          .in("id", transcriptIds)
+          .not("duration", "is", null)
+          .gte("duration", 5)
+          .order("created_at", { ascending: false })
+          .range(0, pageSize - 1);
+
+        transcriptData = firstPageData || [];
       }
 
       // Extract contacts - prefer company_contacts from DB if available
-      let allAttendees: any[] = [];
+      let contactsList: any[] = [];
 
       // First check if company has stored contacts
       if (comp?.company_contacts && Array.isArray(comp.company_contacts)) {
-        allAttendees = comp.company_contacts;
+        contactsList = comp.company_contacts;
       } else {
         // Fall back to extracting from transcripts
         transcriptData.forEach((t) => {
           if (t.meeting_attendees) {
             t.meeting_attendees.forEach((a: any) => {
-              if (!allAttendees.find((x) => x.email === a.email)) {
-                allAttendees.push(a);
+              if (!contactsList.find((x) => x.email === a.email)) {
+                contactsList.push(a);
               }
             });
           }
         });
       }
 
+      // Update stats with contacts if not already set
+      setStats(prev => ({
+        ...prev,
+        primaryContacts: contactsList.slice(0, 5).length,
+      }));
+
       setCompany(comp);
       setCalls(callData);
       setTranscripts(transcriptData);
-      setContacts(allAttendees.slice(0, 5));
+      setContacts(contactsList.slice(0, 5));
       setLoading(false);
     }
 
     load();
-  }, [id]);
-
-  // Calculate stats
-  const stats = useMemo(() => {
-    const totalCalls = calls.length;
-
-    const scoredTranscripts = transcripts.filter(
-      (t) => t.ai_overall_score != null && !isNaN(t.ai_overall_score)
-    );
-
-    const avgScore = scoredTranscripts.length > 0
-      ? Math.round(
-          scoredTranscripts.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) /
-          scoredTranscripts.length
-        )
-      : 0;
-
-    const lastCall = calls.length > 0
-      ? formatDateTime(calls[0].created_at)
-      : "No calls yet";
-
-    const primaryContacts = contacts.length;
-
-    return { totalCalls, avgScore, lastCall, primaryContacts };
-  }, [calls, transcripts, contacts]);
+  }, [id, pageSize]);
 
   // Relationship health data for chart
   const relationshipHealthData = useMemo(() => {
@@ -326,44 +407,10 @@ export default function CompanyDetailsPage() {
     return tasks.slice(0, 5);
   }, [transcripts]);
 
-  // AI Relationship Insights
-  const aiInsights = useMemo(() => {
-    const insights: any[] = [];
-
-    // Aggregate what worked
-    transcripts.slice(0, 3).forEach((t) => {
-      if (t.ai_what_worked) {
-        t.ai_what_worked.slice(0, 2).forEach((item: any) => {
-          insights.push({
-            type: "success",
-            title: item.behavior_skill,
-            description: item.explanation,
-          });
-        });
-      }
-    });
-
-    // Aggregate improvements
-    transcripts.slice(0, 3).forEach((t) => {
-      if (t.ai_improvement_areas) {
-        t.ai_improvement_areas.slice(0, 2).forEach((item: any) => {
-          insights.push({
-            type: "improvement",
-            title: item.category_skill,
-            description: item.do_this_instead,
-          });
-        });
-      }
-    });
-
-    return insights.slice(0, 6);
-  }, [transcripts]);
-
-  // Pagination
-  const totalPages = Math.ceil(transcripts.length / pageSize);
+  // Server-side pagination calculations
+  const totalPages = Math.ceil(totalTranscripts / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedTranscripts = transcripts.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + pageSize, totalTranscripts);
 
   const industry = useMemo(() => {
     return company?.domain ? industryFromDomain(company.domain) : "Unknown";
@@ -696,16 +743,35 @@ export default function CompanyDetailsPage() {
                   </CardContent>
                 </Card>
 
-                {/* Risk Summary */}
+                {/* Risk Summary - prioritize company-level risk_summary */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <AlertTriangle className="h-5 w-5 text-rose-500" />
                       Risk Summary
                     </CardTitle>
+                    {company.risk_summary && company.risk_summary.length > 0 && (
+                      <CardDescription>
+                        Key risks identified for this account
+                      </CardDescription>
+                    )}
                   </CardHeader>
                   <CardContent>
-                    {riskSummary.length === 0 ? (
+                    {/* Company-level Risk Summary (array of strings) */}
+                    {company.risk_summary && company.risk_summary.length > 0 ? (
+                      <div className="space-y-3">
+                        {company.risk_summary.map((risk: string, i: number) => (
+                          <Alert
+                            key={i}
+                            className="bg-rose-500/5 border border-rose-200/40 dark:border-rose-500/20"
+                          >
+                            <AlertDescription className="text-sm text-rose-700 dark:text-rose-300">
+                              {risk}
+                            </AlertDescription>
+                          </Alert>
+                        ))}
+                      </div>
+                    ) : riskSummary.length === 0 ? (
                       <div className="flex items-center gap-2 text-green-600">
                         <CheckCircle className="h-5 w-5" />
                         <span>No significant risks detected</span>
@@ -853,70 +919,34 @@ export default function CompanyDetailsPage() {
                 </Card>
               )}
 
-              {/* AI Relationship Insights */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-indigo-500" />
-                    AI Relationship Insights
-                  </CardTitle>
-                  <CardDescription>
-                    Key insights from your interactions with this company
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {aiInsights.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-center">
-                      <div className="relative mb-4">
-                        <div className="absolute inset-0 rounded-full bg-indigo-500/20 animate-ping" style={{ animationDuration: "2s" }} />
-                        <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 flex items-center justify-center">
-                          <Sparkles className="h-6 w-6 text-indigo-500 animate-pulse" />
-                        </div>
-                      </div>
-                      <p className="text-sm font-medium text-foreground mb-1">Generating Insights</p>
-                      <p className="text-xs text-muted-foreground max-w-xs">
-                        AI is analyzing your calls to provide relationship insights...
-                      </p>
-                      <div className="flex items-center gap-1.5 mt-3">
-                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "0ms" }} />
-                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <div className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "300ms" }} />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {aiInsights.map((insight, i) => (
+              {/* AI Relationship Insights from Database */}
+              {company.ai_relationship && company.ai_relationship.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5 text-cyan-500" />
+                      AI Relationship Insights
+                    </CardTitle>
+                    <CardDescription>
+                      Key relationship dynamics and insights for this account
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {company.ai_relationship.map((insight: string, i: number) => (
                         <Alert
                           key={i}
-                          className={
-                            insight.type === "success"
-                              ? "bg-emerald-500/5 border border-emerald-200/40 dark:border-emerald-500/20"
-                              : "bg-amber-500/5 border border-amber-200/40 dark:border-amber-500/20"
-                          }
+                          className="bg-cyan-500/5 border border-cyan-200/40 dark:border-cyan-500/20"
                         >
-                          <AlertTitle
-                            className={
-                              insight.type === "success"
-                                ? "text-emerald-700 dark:text-emerald-300"
-                                : "text-amber-700 dark:text-amber-300"
-                            }
-                          >
-                            {insight.type === "success" ? (
-                              <CheckCircle className="h-4 w-4 inline mr-2" />
-                            ) : (
-                              <AlertTriangle className="h-4 w-4 inline mr-2" />
-                            )}
-                            {insight.title}
-                          </AlertTitle>
-                          <AlertDescription className="text-sm mt-1">
-                            {insight.description}
+                          <AlertDescription className="text-sm text-cyan-700 dark:text-cyan-300">
+                            {insight}
                           </AlertDescription>
                         </Alert>
                       ))}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Call History Table */}
               <Card>
@@ -940,14 +970,14 @@ export default function CompanyDetailsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {paginatedTranscripts.length === 0 ? (
+                      {transcripts.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={4} className="text-center text-muted-foreground">
                             No calls recorded yet.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        paginatedTranscripts.map((t) => (
+                        transcripts.map((t) => (
                           <TableRow
                             key={t.id}
                             className="hover:bg-muted/50 cursor-pointer transition-colors"
@@ -996,12 +1026,11 @@ export default function CompanyDetailsPage() {
                   </Table>
 
                   {/* Pagination */}
-                  {transcripts.length > 0 && (
+                  {totalTranscripts > 0 && (
                     <div className="flex items-center justify-between mt-4">
-                      <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
-                        Showing {startIndex + 1} to{" "}
-                        {Math.min(endIndex, transcripts.length)} of{" "}
-                        {transcripts.length} call(s).
+                      <div className="text-muted-foreground hidden flex-1 text-sm lg:flex items-center gap-2">
+                        {transcriptsLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Showing {startIndex + 1} to {endIndex} of {totalTranscripts} call(s).
                       </div>
                       <div className="flex w-full items-center gap-8 lg:w-fit">
                         <div className="hidden items-center gap-2 lg:flex">
@@ -1032,7 +1061,7 @@ export default function CompanyDetailsPage() {
                             variant="outline"
                             className="hidden h-8 w-8 p-0 lg:flex"
                             onClick={() => handlePageChange(1)}
-                            disabled={currentPage === 1}
+                            disabled={currentPage === 1 || transcriptsLoading}
                           >
                             <ChevronsLeft className="h-4 w-4" />
                           </Button>
@@ -1043,7 +1072,7 @@ export default function CompanyDetailsPage() {
                             onClick={() =>
                               handlePageChange(Math.max(1, currentPage - 1))
                             }
-                            disabled={currentPage === 1}
+                            disabled={currentPage === 1 || transcriptsLoading}
                           >
                             <ChevronLeft className="h-4 w-4" />
                           </Button>
@@ -1054,7 +1083,7 @@ export default function CompanyDetailsPage() {
                             onClick={() =>
                               handlePageChange(Math.min(totalPages, currentPage + 1))
                             }
-                            disabled={currentPage === totalPages || totalPages === 0}
+                            disabled={currentPage === totalPages || totalPages === 0 || transcriptsLoading}
                           >
                             <ChevronRight className="h-4 w-4" />
                           </Button>
@@ -1063,7 +1092,7 @@ export default function CompanyDetailsPage() {
                             className="hidden size-8 lg:flex"
                             size="icon"
                             onClick={() => handlePageChange(totalPages)}
-                            disabled={currentPage === totalPages || totalPages === 0}
+                            disabled={currentPage === totalPages || totalPages === 0 || transcriptsLoading}
                           >
                             <ChevronsRight className="h-4 w-4" />
                           </Button>

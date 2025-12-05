@@ -22,7 +22,14 @@ export default function Step1() {
       const saved = localStorage.getItem("onboarding_signup");
 
       if (saved) {
-        setForm(JSON.parse(saved));
+        try {
+          setForm(JSON.parse(saved));
+        } catch {
+          // If localStorage is corrupted, clear it and load fresh user data
+          localStorage.removeItem("onboarding_signup");
+          const userData = await getAuthUserData();
+          setForm({ fullname: userData.name, email: userData.email });
+        }
       } else {
         // Use async Supabase call to get fresh user data
         const userData = await getAuthUserData();

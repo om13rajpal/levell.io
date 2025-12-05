@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Card,
@@ -63,6 +63,8 @@ import {
   MessageSquare,
   Plus,
   History,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import {
   Bar,
@@ -108,6 +110,36 @@ const CATEGORY_LABELS: Record<string, string> = {
   objection_handling: "Objections",
 };
 
+// Helper to parse JSONB fields that may come as strings or arrays
+function parseJsonbArray(data: any): string[] {
+  if (!data) return [];
+
+  // Already an array
+  if (Array.isArray(data)) {
+    return data.map(item => String(item).trim()).filter(Boolean);
+  }
+
+  // String that looks like a JSON array
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return parsed.map(item => String(item).trim()).filter(Boolean);
+      }
+      // Single string value
+      return [data.trim()].filter(Boolean);
+    } catch {
+      // Not valid JSON, treat as comma-separated or single value
+      if (data.includes(",")) {
+        return data.split(",").map(s => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+      }
+      return [data.trim()].filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
 const chartConfig = {
   score: {
     label: "Score",
@@ -124,19 +156,41 @@ export default function TeamMemberProfilePage() {
   const [transcripts, setTranscripts] = useState<any[]>([]);
   const [coachingNotes, setCoachingNotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  // Pagination
+  // Server-side pagination for transcripts
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [totalTranscripts, setTotalTranscripts] = useState(0);
+  const [transcriptsLoading, setTranscriptsLoading] = useState(false);
+
+  // Stats - loaded separately for performance
+  const [stats, setStats] = useState<{
+    totalCalls: number;
+    avgScore: number;
+    trend: number;
+    dealRiskRate: number;
+  }>({ totalCalls: 0, avgScore: 0, trend: 0, dealRiskRate: 0 });
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  // Chart data - fetched separately from paginated table data
+  const [chartData, setChartData] = useState<any[]>([]);
 
   // Add coaching note dialog
   const [addNoteOpen, setAddNoteOpen] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      const currentUid = user?.id || null;
+      setCurrentUserId(currentUid);
 
       // Fetch member details
       const { data: memberData } = await supabase
@@ -145,74 +199,195 @@ export default function TeamMemberProfilePage() {
         .eq("id", memberId)
         .single();
 
-      // Fetch transcripts for this user
+      // Get member's team to check admin status
+      if (memberData?.team_id && currentUid) {
+        // Fetch team tags
+        const { data: tagsData } = await supabase
+          .from("team_tags")
+          .select("*")
+          .eq("team_id", memberData.team_id);
+
+        // Fetch member tags for current user
+        const { data: memberTagsData } = await supabase
+          .from("team_member_tags")
+          .select("*")
+          .eq("team_id", memberData.team_id)
+          .eq("user_id", currentUid);
+
+        // Check if current user has admin tag
+        if (tagsData && memberTagsData) {
+          const adminTag = tagsData.find(
+            (t) => t.tag_name.toLowerCase() === "admin"
+          );
+          if (adminTag && memberTagsData.some((mt) => mt.tag_id === adminTag.id)) {
+            setIsAdmin(true);
+          }
+        }
+
+        // Also check if current user is team owner
+        const { data: teamData } = await supabase
+          .from("teams")
+          .select("owner")
+          .eq("id", memberData.team_id)
+          .single();
+
+        if (teamData?.owner === currentUid) {
+          setIsAdmin(true);
+        }
+      }
+
+      // Fetch stats using aggregate queries (much faster than fetching all)
+      setStatsLoading(true);
+      const { count: totalCount } = await supabase
+        .from("transcripts")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", memberId)
+        .not("duration", "is", null)
+        .gte("duration", 5);
+
+      setTotalTranscripts(totalCount || 0);
+
+      // Fetch scored transcripts for stats calculation AND chart visualization
+      // Include ai_category_breakdown and title for charts
+      const { data: scoredData } = await supabase
+        .from("transcripts")
+        .select("ai_overall_score, ai_deal_risk_alerts, ai_category_breakdown, created_at, title")
+        .eq("user_id", memberId)
+        .not("duration", "is", null)
+        .gte("duration", 5)
+        .not("ai_overall_score", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(50); // Get recent 50 for stats calculation and charts
+
+      // Calculate stats from scored data
+      const scoredTranscripts = scoredData || [];
+      const avgScore = scoredTranscripts.length > 0
+        ? Math.round(
+            scoredTranscripts.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) /
+            scoredTranscripts.length
+          )
+        : 0;
+
+      // Calculate performance trend (last 5 vs previous 5)
+      const recentScores = scoredTranscripts.slice(0, 5);
+      const olderScores = scoredTranscripts.slice(5, 10);
+      const recentAvg = recentScores.length > 0
+        ? recentScores.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) / recentScores.length
+        : 0;
+      const olderAvg = olderScores.length > 0
+        ? olderScores.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) / olderScores.length
+        : recentAvg;
+      const trend = olderAvg > 0 ? Math.round(((recentAvg - olderAvg) / olderAvg) * 100) : 0;
+
+      // Calculate deal risk rate
+      const riskyDeals = scoredTranscripts.filter(
+        (t) => t.ai_deal_risk_alerts && t.ai_deal_risk_alerts.length > 0
+      ).length;
+      const dealRiskRate = scoredTranscripts.length > 0
+        ? Math.round((riskyDeals / scoredTranscripts.length) * 100)
+        : 0;
+
+      setStats({
+        totalCalls: totalCount || 0,
+        avgScore,
+        trend,
+        dealRiskRate,
+      });
+      setStatsLoading(false);
+
+      // Store scored data for chart visualization
+      setChartData(scoredTranscripts);
+
+      // Fetch first page of transcripts for table (server-side pagination)
       const { data: transcriptData } = await supabase
         .from("transcripts")
         .select("*")
         .eq("user_id", memberId)
-        .order("created_at", { ascending: false });
+        .not("duration", "is", null)
+        .gte("duration", 5)
+        .order("created_at", { ascending: false })
+        .range(0, pageSize - 1);
+
+      setTranscripts(transcriptData || []);
 
       // Fetch coaching notes
-      const { data: notesData } = await supabase
+      const { data: notesData, error: notesError } = await supabase
         .from("coaching_notes")
         .select("*")
         .eq("user_id", memberId)
         .order("created_at", { ascending: false });
 
+      let notesWithCoach: any[] = [];
+      if (notesError) {
+        console.log("Coaching notes not available:", notesError.message);
+      } else if (notesData) {
+        // Fetch coach info for each note
+        const coachIds = [...new Set(notesData.map(n => n.coach_id).filter(Boolean))];
+        let coachMap: Record<string, any> = {};
+
+        if (coachIds.length > 0) {
+          const { data: coaches } = await supabase
+            .from("users")
+            .select("id, full_name, email")
+            .in("id", coachIds);
+
+          if (coaches) {
+            coachMap = Object.fromEntries(coaches.map(c => [c.id, c]));
+          }
+        }
+
+        // Attach coach info to notes
+        notesWithCoach = notesData.map(note => ({
+          ...note,
+          coach: coachMap[note.coach_id] || null
+        }));
+      }
+
       setMember(memberData);
-      setTranscripts(transcriptData || []);
-      setCoachingNotes(notesData || []);
+      setCoachingNotes(notesWithCoach);
       setLoading(false);
     }
 
     load();
+  }, [memberId, pageSize]);
+
+  // Fetch transcripts for a specific page (server-side pagination)
+  const fetchTranscriptsPage = useCallback(async (page: number, size: number) => {
+    setTranscriptsLoading(true);
+    const offset = (page - 1) * size;
+
+    const { data, error } = await supabase
+      .from("transcripts")
+      .select("*")
+      .eq("user_id", memberId)
+      .not("duration", "is", null)
+      .gte("duration", 5)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + size - 1);
+
+    if (!error && data) {
+      setTranscripts(data);
+    }
+    setTranscriptsLoading(false);
   }, [memberId]);
 
-  // Calculate stats
-  const stats = useMemo(() => {
-    const totalCalls = transcripts.length;
+  // Handle page changes with server-side fetch
+  const handlePageChange = useCallback((newPage: number) => {
+    setCurrentPage(newPage);
+    fetchTranscriptsPage(newPage, pageSize);
+  }, [fetchTranscriptsPage, pageSize]);
 
-    const scoredTranscripts = transcripts.filter(
-      (t) => t.ai_overall_score != null && !isNaN(t.ai_overall_score)
-    );
+  const handlePageSizeChange = useCallback((newSize: number) => {
+    setPageSize(newSize);
+    setCurrentPage(1);
+    fetchTranscriptsPage(1, newSize);
+  }, [fetchTranscriptsPage]);
 
-    const avgScore = scoredTranscripts.length > 0
-      ? Math.round(
-          scoredTranscripts.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) /
-          scoredTranscripts.length
-        )
-      : 0;
-
-    // Calculate performance trend (last 5 vs previous 5)
-    const recentScores = scoredTranscripts.slice(0, 5);
-    const olderScores = scoredTranscripts.slice(5, 10);
-
-    const recentAvg = recentScores.length > 0
-      ? recentScores.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) / recentScores.length
-      : 0;
-
-    const olderAvg = olderScores.length > 0
-      ? olderScores.reduce((acc, t) => acc + Number(t.ai_overall_score), 0) / olderScores.length
-      : recentAvg;
-
-    const trend = olderAvg > 0 ? Math.round(((recentAvg - olderAvg) / olderAvg) * 100) : 0;
-
-    // Calculate deal risk rate
-    const riskyDeals = scoredTranscripts.filter(
-      (t) => t.ai_deal_risk_alerts && t.ai_deal_risk_alerts.length > 0
-    ).length;
-    const dealRiskRate = scoredTranscripts.length > 0
-      ? Math.round((riskyDeals / scoredTranscripts.length) * 100)
-      : 0;
-
-    return { totalCalls, avgScore, trend, dealRiskRate };
-  }, [transcripts]);
-
-  // Score breakdown by category
+  // Score breakdown by category - uses chartData (scored transcripts) not paginated table data
   const scoreBreakdown = useMemo(() => {
     const categoryScores: Record<string, { total: number; count: number }> = {};
 
-    transcripts.forEach((t) => {
+    chartData.forEach((t) => {
       if (t.ai_category_breakdown) {
         Object.entries(t.ai_category_breakdown).forEach(([key, value]: any) => {
           if (!categoryScores[key]) {
@@ -229,10 +404,29 @@ export default function TeamMemberProfilePage() {
       score: count > 0 ? Math.round(total / count) : 0,
       fullMark: 100,
     }));
-  }, [transcripts]);
+  }, [chartData]);
 
-  // Key strengths
+  // Parse user's stored AI fields from the users table
+  const userAiRecommendations = useMemo(() => {
+    return parseJsonbArray(member?.ai_recommendations);
+  }, [member]);
+
+  const userKeyStrengths = useMemo(() => {
+    return parseJsonbArray(member?.key_strengths);
+  }, [member]);
+
+  const userFocusAreas = useMemo(() => {
+    return parseJsonbArray(member?.focus_areas);
+  }, [member]);
+
+  // Key strengths - prioritize stored data, fall back to computed
   const keyStrengths = useMemo(() => {
+    // Use stored key_strengths from users table if available
+    if (userKeyStrengths.length > 0) {
+      return userKeyStrengths.map((skill, i) => ({ skill, count: 0, fromDb: true }));
+    }
+
+    // Fall back to computed from transcripts
     const strengths: Record<string, number> = {};
 
     transcripts.forEach((t) => {
@@ -247,11 +441,17 @@ export default function TeamMemberProfilePage() {
     return Object.entries(strengths)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
-      .map(([skill, count]) => ({ skill, count }));
-  }, [transcripts]);
+      .map(([skill, count]) => ({ skill, count, fromDb: false }));
+  }, [transcripts, userKeyStrengths]);
 
-  // Focus areas
+  // Focus areas - prioritize stored data, fall back to computed
   const focusAreas = useMemo(() => {
+    // Use stored focus_areas from users table if available
+    if (userFocusAreas.length > 0) {
+      return userFocusAreas.map((skill, i) => ({ skill, count: 0, fromDb: true }));
+    }
+
+    // Fall back to computed from transcripts
     const areas: Record<string, number> = {};
 
     transcripts.forEach((t) => {
@@ -266,11 +466,22 @@ export default function TeamMemberProfilePage() {
     return Object.entries(areas)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
-      .map(([skill, count]) => ({ skill, count }));
-  }, [transcripts]);
+      .map(([skill, count]) => ({ skill, count, fromDb: false }));
+  }, [transcripts, userFocusAreas]);
 
-  // AI Coaching Recommendations
+  // AI Coaching Recommendations - prioritize stored data from users table
   const aiRecommendations = useMemo(() => {
+    // Use stored ai_recommendations from users table if available
+    if (userAiRecommendations.length > 0) {
+      return userAiRecommendations.map((rec, i) => ({
+        skill: `Recommendation ${i + 1}`,
+        recommendation: rec,
+        reason: null,
+        fromDb: true,
+      }));
+    }
+
+    // Fall back to computed from transcripts
     const recommendations: any[] = [];
 
     transcripts.slice(0, 5).forEach((t) => {
@@ -280,6 +491,7 @@ export default function TeamMemberProfilePage() {
             skill: item.category_skill,
             recommendation: item.do_this_instead,
             reason: item.why_this_works_better,
+            fromDb: false,
           });
         });
       }
@@ -294,11 +506,11 @@ export default function TeamMemberProfilePage() {
     }, []);
 
     return unique.slice(0, 5);
-  }, [transcripts]);
+  }, [transcripts, userAiRecommendations]);
 
-  // Score history for chart
+  // Score history for chart - uses chartData (scored transcripts) not paginated table data
   const scoreHistory = useMemo(() => {
-    return transcripts
+    return chartData
       .filter((t) => t.ai_overall_score != null && t.created_at)
       .map((t) => ({
         date: new Date(t.created_at).toLocaleDateString(),
@@ -307,13 +519,12 @@ export default function TeamMemberProfilePage() {
       }))
       .reverse()
       .slice(-20);
-  }, [transcripts]);
+  }, [chartData]);
 
-  // Pagination
-  const totalPages = Math.ceil(transcripts.length / pageSize);
+  // Server-side pagination calculations
+  const totalPages = Math.ceil(totalTranscripts / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedTranscripts = transcripts.slice(startIndex, endIndex);
+  const endIndex = Math.min(startIndex + pageSize, totalTranscripts);
 
   // Save coaching note
   const saveCoachingNote = async () => {
@@ -350,6 +561,27 @@ export default function TeamMemberProfilePage() {
     }
 
     setSavingNote(false);
+  };
+
+  // Delete coaching note
+  const deleteCoachingNote = async (noteId: string) => {
+    setDeletingNoteId(noteId);
+
+    const { error } = await supabase
+      .from("coaching_notes")
+      .delete()
+      .eq("id", noteId);
+
+    if (error) {
+      toast.error("Failed to delete note");
+      console.error("Delete error:", error);
+    } else {
+      toast.success("Coaching note deleted");
+      // Remove note from local state
+      setCoachingNotes((prev) => prev.filter((n) => n.id !== noteId));
+    }
+
+    setDeletingNoteId(null);
   };
 
   if (loading) {
@@ -596,14 +828,14 @@ export default function TeamMemberProfilePage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {paginatedTranscripts.length === 0 ? (
+                      {transcripts.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={4} className="text-center text-muted-foreground">
                             No calls recorded.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        paginatedTranscripts.map((t) => (
+                        transcripts.map((t) => (
                           <TableRow
                             key={t.id}
                             className="hover:bg-muted/50 cursor-pointer transition-colors"
@@ -647,20 +879,18 @@ export default function TeamMemberProfilePage() {
                   </Table>
 
                   {/* Pagination */}
-                  {transcripts.length > 0 && (
+                  {totalTranscripts > 0 && (
                     <div className="flex items-center justify-between mt-4">
-                      <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
-                        Showing {startIndex + 1} to {Math.min(endIndex, transcripts.length)} of {transcripts.length}
+                      <div className="text-muted-foreground hidden flex-1 text-sm lg:flex items-center gap-2">
+                        {transcriptsLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Showing {startIndex + 1} to {endIndex} of {totalTranscripts}
                       </div>
                       <div className="flex w-full items-center gap-8 lg:w-fit">
                         <div className="hidden items-center gap-2 lg:flex">
                           <Label className="text-sm font-medium">Rows per page</Label>
                           <Select
                             value={`${pageSize}`}
-                            onValueChange={(value) => {
-                              setPageSize(Number(value));
-                              setCurrentPage(1);
-                            }}
+                            onValueChange={(value) => handlePageSizeChange(Number(value))}
                           >
                             <SelectTrigger size="sm" className="w-20">
                               <SelectValue placeholder={pageSize} />
@@ -679,8 +909,8 @@ export default function TeamMemberProfilePage() {
                             variant="outline"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => setCurrentPage(1)}
-                            disabled={currentPage === 1}
+                            onClick={() => handlePageChange(1)}
+                            disabled={currentPage === 1 || transcriptsLoading}
                           >
                             <ChevronsLeft className="h-4 w-4" />
                           </Button>
@@ -688,8 +918,8 @@ export default function TeamMemberProfilePage() {
                             variant="outline"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                            disabled={currentPage === 1}
+                            onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                            disabled={currentPage === 1 || transcriptsLoading}
                           >
                             <ChevronLeft className="h-4 w-4" />
                           </Button>
@@ -700,8 +930,8 @@ export default function TeamMemberProfilePage() {
                             variant="outline"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                            disabled={currentPage === totalPages || totalPages === 0}
+                            onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                            disabled={currentPage === totalPages || totalPages === 0 || transcriptsLoading}
                           >
                             <ChevronRight className="h-4 w-4" />
                           </Button>
@@ -709,8 +939,8 @@ export default function TeamMemberProfilePage() {
                             variant="outline"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => setCurrentPage(totalPages)}
-                            disabled={currentPage === totalPages || totalPages === 0}
+                            onClick={() => handlePageChange(totalPages)}
+                            disabled={currentPage === totalPages || totalPages === 0 || transcriptsLoading}
                           >
                             <ChevronsRight className="h-4 w-4" />
                           </Button>
@@ -756,7 +986,9 @@ export default function TeamMemberProfilePage() {
                               <CheckCircle className="h-4 w-4 text-green-500" />
                               <span className="text-sm font-medium">{strength.skill}</span>
                             </div>
-                            <Badge variant="secondary">{strength.count}x</Badge>
+                            {!strength.fromDb && strength.count > 0 && (
+                              <Badge variant="secondary">{strength.count}x</Badge>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -798,7 +1030,9 @@ export default function TeamMemberProfilePage() {
                               <AlertTriangle className="h-4 w-4 text-amber-500" />
                               <span className="text-sm font-medium">{area.skill}</span>
                             </div>
-                            <Badge variant="outline">{area.count}x flagged</Badge>
+                            {!area.fromDb && area.count > 0 && (
+                              <Badge variant="outline">{area.count}x flagged</Badge>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -925,22 +1159,49 @@ export default function TeamMemberProfilePage() {
                     </CardTitle>
                     <CardDescription>Manager feedback and development notes</CardDescription>
                   </div>
-                  <Button onClick={() => setAddNoteOpen(true)} size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Note
-                  </Button>
+                  {isAdmin && (
+                    <Button onClick={() => setAddNoteOpen(true)} size="sm">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Note
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent>
                   {coachingNotes.length === 0 ? (
                     <p className="text-muted-foreground text-sm">No coaching notes yet.</p>
                   ) : (
                     <div className="space-y-4">
-                      {coachingNotes.map((note, i) => (
-                        <div key={i} className="border rounded-lg p-4 bg-muted/20">
-                          <p className="text-sm">{note.note}</p>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            {new Date(note.created_at).toLocaleString()}
-                          </p>
+                      {coachingNotes.map((note) => (
+                        <div key={note.id} className="border rounded-lg p-4 bg-muted/20">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="text-sm flex-1">{note.note}</p>
+                            {isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                                onClick={() => deleteCoachingNote(note.id)}
+                                disabled={deletingNoteId === note.id}
+                              >
+                                {deletingNoteId === note.id ? (
+                                  <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/50">
+                            <p className="text-xs text-muted-foreground">
+                              Added by{" "}
+                              <span className="font-medium text-foreground/80">
+                                {note.coach?.full_name || note.coach?.email || "Admin"}
+                              </span>
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(note.created_at).toLocaleString()}
+                            </p>
+                          </div>
                         </div>
                       ))}
                     </div>

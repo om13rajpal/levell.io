@@ -20,6 +20,8 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 
+import { fetchWebhookData, updateWebhookData, WebhookDataPayload } from "@/services/onboarding";
+
 /* ---------------- TYPES ---------------- */
 type CompanyInfo = {
   website: string;
@@ -202,11 +204,25 @@ export default function EditBusinessProfilePage() {
     );
   };
 
-  /* ---------------- LOAD FROM SUPABASE (PRIMARY) OR LOCALSTORAGE (FALLBACK) ---------------- */
+  /* ---------------- LOAD FROM WEBHOOK_DATA (PRIMARY) OR LOCALSTORAGE (FALLBACK) ---------------- */
   useEffect(() => {
     const loadData = async () => {
       try {
-        // First, try to fetch from Supabase
+        // First, try to fetch from webhook_data table
+        const result = await fetchWebhookData();
+
+        if (result.success && result.data) {
+          console.log("📦 Loaded business profile from webhook_data:", result.data);
+          const ensured = ensureProfile(result.data);
+          populateFormFromProfile(ensured);
+
+          // Sync to localStorage for offline access
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(ensured));
+          setLoading(false);
+          return;
+        }
+
+        // If no webhook_data, try users table business_profile as fallback
         const {
           data: { user },
         } = await supabase.auth.getUser();
@@ -220,11 +236,11 @@ export default function EditBusinessProfilePage() {
             .single();
 
           if (!userError && userData?.business_profile) {
-            console.log("📦 Loaded business profile from Supabase");
+            console.log("📦 Loaded business profile from users table");
             const ensured = ensureProfile(userData.business_profile);
             populateFormFromProfile(ensured);
 
-            // Also sync to localStorage for offline access
+            // Sync to localStorage for offline access
             localStorage.setItem(STORAGE_KEY, JSON.stringify(ensured));
             setLoading(false);
             return;
@@ -322,7 +338,7 @@ export default function EditBusinessProfilePage() {
     loadData();
   }, []);
 
-  /* ---------------- SAVE TO SUPABASE & LOCAL STORAGE ---------------- */
+  /* ---------------- SAVE TO WEBHOOK_DATA, SUPABASE & LOCAL STORAGE ---------------- */
   const onSave = async () => {
     setSaving(true);
 
@@ -360,6 +376,21 @@ export default function EditBusinessProfilePage() {
 
       // Save to localStorage
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
+
+      // Save to webhook_data table (primary)
+      const webhookPayload: WebhookDataPayload = {
+        company_info: updatedProfile.company_info,
+        products_and_services: updatedProfile.products_and_services,
+        ideal_customer_profile: updatedProfile.ideal_customer_profile,
+        buyer_personas: updatedProfile.buyer_personas,
+        talk_tracks: updatedProfile.talk_tracks,
+        objection_handling: updatedProfile.objection_handling,
+      };
+
+      const webhookResult = await updateWebhookData(webhookPayload);
+      if (!webhookResult.success) {
+        console.error("webhook_data save error:", webhookResult.error);
+      }
 
       // Save to Supabase
       const {

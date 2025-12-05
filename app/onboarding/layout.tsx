@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import { OnboardingProgress } from "@/components/OnboardingProgress";
 import { usePathname } from "next/navigation";
+import { isInviteOnboarding } from "@/services/onboarding";
 
 export default function OnboardingLayout({
   children,
@@ -10,7 +12,18 @@ export default function OnboardingLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const step = Number(pathname.split("step")[1]) || 1;
+  const rawStep = Number(pathname.split("step")[1]) || 1;
+  const [isInviteFlow, setIsInviteFlow] = useState(false);
+
+  // Check if this is an invite-based onboarding
+  useEffect(() => {
+    setIsInviteFlow(isInviteOnboarding());
+  }, []);
+
+  // For invite flow: only 2 steps (step 1 = profile, step 2 = connect tools)
+  // For normal flow: 6 steps
+  const totalSteps = isInviteFlow ? 2 : 6;
+  const step = isInviteFlow ? Math.min(rawStep, 2) : rawStep;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -22,7 +35,7 @@ export default function OnboardingLayout({
       {/* Centered Progress Bar (40% width) */}
       <div className="w-full flex justify-center py-4">
         <div className="w-[40%]">
-          <OnboardingProgress step={step} />
+          <OnboardingProgress step={step} totalSteps={totalSteps} />
         </div>
       </div>
 

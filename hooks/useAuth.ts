@@ -7,7 +7,7 @@ export function useAuth() {
   const router = useRouter();
 
   useEffect(() => {
-    const token = localStorage.getItem("sb-rpowalzrbddorfnnmccp-auth-token");
+    const token = localStorage.getItem("sb-tuzuwzglmyajuxytaowi-auth-token");
     if (!token) {
       router.replace("/login");
     } else {

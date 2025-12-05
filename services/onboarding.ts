@@ -438,3 +438,228 @@ export function clearInviteData(): void {
   localStorage.removeItem("pending_invite_token");
   localStorage.removeItem("invite_team_id");
 }
+
+/* ================================================================= */
+/* WEBHOOK DATA CRUD OPERATIONS */
+/* ================================================================= */
+
+export interface WebhookDataPayload {
+  company_info?: {
+    website?: string;
+    company_name?: string;
+    value_proposition?: string;
+  };
+  products_and_services?: Array<{ name: string; description?: string } | string>;
+  ideal_customer_profile?: {
+    region?: string;
+    industry?: string;
+    tech_stack?: string;
+    company_size?: string;
+    sales_motion?: string;
+  };
+  buyer_personas?: Array<{
+    name: string;
+    goals?: string[];
+    job_title?: string;
+    pain_points?: string[];
+    responsibilities?: string[];
+    decision_influence?: string;
+    information_sources?: string[];
+  }>;
+  talk_tracks?: Array<string | { text: string }>;
+  objection_handling?: Array<{
+    objection: string;
+    response: string;
+  }>;
+}
+
+/**
+ * Fetch webhook_data json_val for the current user's company
+ */
+export async function fetchWebhookData(): Promise<{
+  success: boolean;
+  data?: WebhookDataPayload;
+  markdown?: string;
+  companyId?: number;
+  error?: string;
+}> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Not authenticated" };
+
+    // First get the company id for the user
+    const { data: company, error: companyError } = await supabase
+      .from("company")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (companyError || !company) {
+      return { success: false, error: "No company found" };
+    }
+
+    // Fetch webhook_data using company_id
+    const { data: webhookData, error: webhookError } = await supabase
+      .from("webhook_data")
+      .select("json_val, markdown")
+      .eq("company_id", company.id)
+      .maybeSingle();
+
+    if (webhookError) {
+      console.error("Error fetching webhook_data:", webhookError);
+      return { success: false, error: webhookError.message };
+    }
+
+    if (!webhookData) {
+      return { success: true, data: undefined, companyId: company.id };
+    }
+
+    return {
+      success: true,
+      data: webhookData.json_val as WebhookDataPayload,
+      markdown: webhookData.markdown || undefined,
+      companyId: company.id,
+    };
+  } catch (err) {
+    console.error("fetchWebhookData error:", err);
+    return { success: false, error: "Failed to fetch webhook data" };
+  }
+}
+
+/**
+ * Update webhook_data json_val for the current user's company
+ */
+export async function updateWebhookData(
+  jsonVal: WebhookDataPayload,
+  markdown?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Not authenticated" };
+
+    // First get the company id for the user
+    const { data: company, error: companyError } = await supabase
+      .from("company")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (companyError || !company) {
+      return { success: false, error: "No company found" };
+    }
+
+    // Build update object
+    const updateData: {
+      json_val: WebhookDataPayload;
+      updated_at: string;
+      markdown?: string;
+    } = {
+      json_val: jsonVal,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (markdown !== undefined) {
+      updateData.markdown = markdown;
+    }
+
+    // Update webhook_data
+    const { error: updateError } = await supabase
+      .from("webhook_data")
+      .update(updateData)
+      .eq("company_id", company.id);
+
+    if (updateError) {
+      console.error("Error updating webhook_data:", updateError);
+      return { success: false, error: updateError.message };
+    }
+
+    // Also update localStorage for offline access
+    localStorage.setItem("company_json_data", JSON.stringify(jsonVal));
+    if (markdown) {
+      localStorage.setItem("webhook_markdown", markdown);
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("updateWebhookData error:", err);
+    return { success: false, error: "Failed to update webhook data" };
+  }
+}
+
+/**
+ * Create webhook_data record if it doesn't exist
+ */
+export async function createOrUpdateWebhookData(
+  jsonVal: WebhookDataPayload,
+  markdown?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Not authenticated" };
+
+    // First get or create the company for the user
+    let companyId: number | null = null;
+
+    const { data: existingCompany } = await supabase
+      .from("company")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingCompany?.id) {
+      companyId = existingCompany.id;
+    } else {
+      // Create company if doesn't exist
+      const { data: newCompany, error: createError } = await supabase
+        .from("company")
+        .insert({
+          user_id: user.id,
+          company_name: jsonVal.company_info?.company_name || "Unnamed Company",
+          company_url: jsonVal.company_info?.website || "",
+        })
+        .select("id")
+        .single();
+
+      if (createError || !newCompany) {
+        console.error("Error creating company:", createError);
+        return { success: false, error: "Failed to create company" };
+      }
+      companyId = newCompany.id;
+    }
+
+    // Upsert webhook_data
+    const { error: upsertError } = await supabase
+      .from("webhook_data")
+      .upsert(
+        {
+          company_id: companyId,
+          json_val: jsonVal,
+          markdown: markdown || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "company_id" }
+      );
+
+    if (upsertError) {
+      console.error("Error upserting webhook_data:", upsertError);
+      return { success: false, error: upsertError.message };
+    }
+
+    // Update localStorage
+    localStorage.setItem("company_json_data", JSON.stringify(jsonVal));
+    if (markdown) {
+      localStorage.setItem("webhook_markdown", markdown);
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("createOrUpdateWebhookData error:", err);
+    return { success: false, error: "Failed to save webhook data" };
+  }
+}

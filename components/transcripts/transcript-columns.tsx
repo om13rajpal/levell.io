@@ -27,9 +27,17 @@ export const transcriptColumns: ColumnDef<Transcript>[] = [
   {
     accessorKey: "duration",
     header: "Duration",
-    cell: ({ row }) => (
-      <div>{Math.round(row.original.duration)} sec</div>
-    )
+    cell: ({ row }) => {
+      const minutes = row.original.duration;
+      if (!minutes || minutes <= 0) return <div>—</div>;
+      const m = Math.floor(minutes);
+      const h = Math.floor(m / 60);
+      const mins = m % 60;
+      if (h > 0) {
+        return <div>{h}h {mins}m</div>;
+      }
+      return <div>{mins}m</div>;
+    }
   },
   {
     header: "Audio",

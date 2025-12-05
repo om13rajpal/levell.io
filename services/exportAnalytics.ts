@@ -2,7 +2,6 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
 import html2canvas from "html2canvas";
 
 // Types
@@ -35,8 +34,10 @@ interface ScoreDistribution {
 }
 
 interface ScoreTrend {
-  date: string;
+  index?: number;
+  date?: string;
   score: number;
+  title?: string;
 }
 
 interface TopPerformer {
@@ -54,6 +55,14 @@ interface Company {
   riskCount?: number;
 }
 
+interface CallsPerRep {
+  id: string;
+  name: string;
+  email: string;
+  totalCalls: number;
+  avgScore: number;
+}
+
 interface ExportData {
   teamName: string;
   teamStats: TeamStats;
@@ -64,12 +73,16 @@ interface ExportData {
   topPerformers: TopPerformer[];
   topCompaniesByVolume: Company[];
   criticalRiskCompanies: Company[];
+  callsPerRepData?: CallsPerRep[];
 }
 
 /**
- * Export analytics data to a comprehensive PDF report
+ * Export full analytics report to PDF with charts and all data
  */
-export async function exportToPDF(data: ExportData): Promise<void> {
+export async function exportFullPDF(
+  data: ExportData,
+  chartContainerIds: string[]
+): Promise<void> {
   const {
     teamName,
     teamStats,
@@ -80,6 +93,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
     topPerformers,
     topCompaniesByVolume,
     criticalRiskCompanies,
+    callsPerRepData,
   } = data;
 
   // Create PDF document
@@ -134,13 +148,13 @@ export async function exportToPDF(data: ExportData): Promise<void> {
   doc.text(`Generated: ${new Date().toLocaleString()}`, margin, yPos);
 
   // ==================== EXECUTIVE SUMMARY ====================
-  yPos = 95;
+  yPos = 90;
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(99, 102, 241);
   doc.text("Executive Summary", margin, yPos);
 
-  yPos += 15;
+  yPos += 12;
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(0, 0, 0);
@@ -179,7 +193,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
     doc.setFont("helvetica", "normal");
   });
 
-  yPos += cardHeight * 2 + 20;
+  yPos += cardHeight * 2 + 10;
 
   // ==================== SCORE DISTRIBUTION ====================
   checkPageBreak(50);
@@ -188,7 +202,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
   doc.setTextColor(99, 102, 241);
   doc.text("Score Distribution", margin, yPos);
 
-  yPos += 10;
+  yPos += 8;
   const distributionColors: Record<string, [number, number, number]> = {
     "Excellent (80-100)": [34, 197, 94],
     "Good (60-79)": [59, 130, 246],
@@ -209,7 +223,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
     doc.text(`${dist.name}: ${dist.value} calls (${percentage}%)`, margin + 12, yPos + index * 8 + 1);
   });
 
-  yPos += 40;
+  yPos += scoreDistribution.length * 8 + 8;
 
   // ==================== TOP PERFORMERS ====================
   checkPageBreak(60);
@@ -245,12 +259,131 @@ export async function exportToPDF(data: ExportData): Promise<void> {
       },
       margin: { left: margin, right: margin },
     });
-    yPos = (doc as any).lastAutoTable.finalY + 10;
+    yPos = (doc as any).lastAutoTable.finalY + 8;
   } else {
     doc.setFontSize(10);
     doc.setTextColor(128, 128, 128);
-    doc.text("No data available", margin, yPos + 10);
-    yPos += 20;
+    doc.text("No data available", margin, yPos + 8);
+    yPos += 12;
+  }
+
+  // ==================== CALLS PER REP ====================
+  if (callsPerRepData && callsPerRepData.length > 0) {
+    checkPageBreak(60);
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(99, 102, 241);
+    doc.text("Calls Per Rep", margin, yPos);
+
+    yPos += 5;
+    autoTable(doc, {
+      startY: yPos,
+      head: [["Name", "Email", "Total Calls", "Avg Score"]],
+      body: callsPerRepData.map((rep) => [
+        rep.name || "No Name",
+        rep.email,
+        rep.totalCalls.toString(),
+        rep.avgScore.toString(),
+      ]),
+      theme: "striped",
+      headStyles: {
+        fillColor: [99, 102, 241],
+        textColor: 255,
+        fontSize: 9,
+        fontStyle: "bold",
+      },
+      bodyStyles: {
+        fontSize: 9,
+      },
+      columnStyles: {
+        2: { halign: "center", cellWidth: 25 },
+        3: { halign: "center", cellWidth: 25 },
+      },
+      margin: { left: margin, right: margin },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === 3) {
+          const score = parseInt(data.cell.raw as string);
+          if (score >= 80) {
+            data.cell.styles.textColor = [34, 197, 94];
+          } else if (score >= 60) {
+            data.cell.styles.textColor = [234, 179, 8];
+          } else {
+            data.cell.styles.textColor = [239, 68, 68];
+          }
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+    });
+    yPos = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // ==================== CHARTS PAGE ====================
+  doc.addPage();
+  yPos = margin;
+
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(99, 102, 241);
+  doc.text("Visual Analytics", margin, yPos);
+  yPos += 10;
+
+  // Chart titles for reference
+  const chartTitles: Record<string, string> = {
+    "chart-score-trends": "Call Scores Chart",
+    "chart-top-performers": "Top 5 Performers",
+    "chart-category-performance": "Category Performance",
+    "chart-score-distribution": "Score Distribution",
+  };
+
+  // Capture and add each chart
+  for (const containerId of chartContainerIds) {
+    const element = document.getElementById(containerId);
+    if (element) {
+      try {
+        // Add chart title
+        const chartTitle = chartTitles[containerId] || containerId;
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(0, 0, 0);
+
+        // Check if we need a new page before the title
+        if (yPos + 10 > pageHeight - margin) {
+          doc.addPage();
+          yPos = margin;
+        }
+
+        doc.text(chartTitle, margin, yPos);
+        yPos += 5;
+
+        const canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: "#ffffff",
+        });
+
+        const imgData = canvas.toDataURL("image/png");
+        const imgWidth = pageWidth - margin * 2;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+        // Check if we need a new page for the chart
+        if (yPos + imgHeight > pageHeight - margin) {
+          doc.addPage();
+          yPos = margin;
+          // Re-add title on new page
+          doc.setFontSize(12);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(0, 0, 0);
+          doc.text(chartTitle, margin, yPos);
+          yPos += 5;
+        }
+
+        doc.addImage(imgData, "PNG", margin, yPos, imgWidth, imgHeight);
+        yPos += imgHeight + 8;
+      } catch (err) {
+        console.error(`Failed to capture chart ${containerId}:`, err);
+      }
+    }
   }
 
   // ==================== CATEGORY PERFORMANCE ====================
@@ -262,7 +395,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
   doc.setTextColor(99, 102, 241);
   doc.text("Category Performance", margin, yPos);
 
-  yPos += 15;
+  yPos += 10;
   if (categoryPerformance.length > 0) {
     categoryPerformance.forEach((cat, index) => {
       const barWidth = (cat.score / 100) * (pageWidth - margin * 2 - 60);
@@ -286,7 +419,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
       doc.setTextColor(color[0], color[1], color[2]);
       doc.text(`${cat.score}`, pageWidth - margin - 10, yPos + index * 12);
     });
-    yPos += categoryPerformance.length * 12 + 15;
+    yPos += categoryPerformance.length * 12 + 8;
   }
 
   // ==================== REP PERFORMANCE TABLE ====================
@@ -339,7 +472,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
         }
       },
     });
-    yPos = (doc as any).lastAutoTable.finalY + 15;
+    yPos = (doc as any).lastAutoTable.finalY + 8;
   }
 
   // ==================== COMPANY INSIGHTS ====================
@@ -349,7 +482,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
   doc.setTextColor(99, 102, 241);
   doc.text("Company Insights", margin, yPos);
 
-  yPos += 10;
+  yPos += 8;
 
   // Top Companies by Volume
   doc.setFontSize(11);
@@ -375,12 +508,12 @@ export async function exportToPDF(data: ExportData): Promise<void> {
       bodyStyles: { fontSize: 9 },
       margin: { left: margin, right: margin },
     });
-    yPos = (doc as any).lastAutoTable.finalY + 10;
+    yPos = (doc as any).lastAutoTable.finalY + 8;
   } else {
     doc.setFontSize(9);
     doc.setTextColor(128, 128, 128);
     doc.text("No data available", margin, yPos + 5);
-    yPos += 15;
+    yPos += 10;
   }
 
   // Critical Risk Companies
@@ -390,7 +523,7 @@ export async function exportToPDF(data: ExportData): Promise<void> {
   doc.setTextColor(239, 68, 68);
   doc.text("Companies with Critical Risks", margin, yPos);
 
-  yPos += 5;
+  yPos += 4;
   if (criticalRiskCompanies.length > 0) {
     autoTable(doc, {
       startY: yPos,
@@ -408,27 +541,35 @@ export async function exportToPDF(data: ExportData): Promise<void> {
       bodyStyles: { fontSize: 9 },
       margin: { left: margin, right: margin },
     });
+    yPos = (doc as any).lastAutoTable.finalY + 8;
   } else {
     doc.setFontSize(9);
     doc.setTextColor(34, 197, 94);
     doc.text("No critical risks detected", margin, yPos + 5);
+    yPos += 10;
   }
 
   // ==================== SCORE TRENDS ====================
   if (scoreTrendsData.length > 0) {
-    doc.addPage();
-    yPos = margin;
-
+    checkPageBreak(80);
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(99, 102, 241);
-    doc.text("Score Trends (Last 30 Days)", margin, yPos);
+    doc.text("Call Scores (Recent)", margin, yPos);
 
-    yPos += 5;
+    yPos += 4;
+
+    // Handle both old (date-based) and new (index-based) data structures
+    const hasIndex = scoreTrendsData[0]?.index !== undefined;
+
     autoTable(doc, {
       startY: yPos,
-      head: [["Date", "Average Score"]],
-      body: scoreTrendsData.slice(-15).map((trend) => [trend.date, trend.score.toString()]),
+      head: [hasIndex ? ["#", "Call Title", "Score"] : ["Date", "Average Score"]],
+      body: scoreTrendsData.slice(-20).map((trend) =>
+        hasIndex
+          ? [`#${trend.index}`, trend.title || `Call ${trend.index}`, trend.score.toString()]
+          : [trend.date || "", trend.score.toString()]
+      ),
       theme: "striped",
       headStyles: {
         fillColor: [99, 102, 241],
@@ -436,8 +577,26 @@ export async function exportToPDF(data: ExportData): Promise<void> {
         fontSize: 9,
       },
       bodyStyles: { fontSize: 9 },
+      columnStyles: hasIndex ? {
+        0: { cellWidth: 15 },
+        2: { halign: "center", cellWidth: 20 },
+      } : {},
       margin: { left: margin, right: margin },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === (hasIndex ? 2 : 1)) {
+          const score = parseInt(data.cell.raw as string);
+          if (score >= 80) {
+            data.cell.styles.textColor = [34, 197, 94];
+          } else if (score >= 60) {
+            data.cell.styles.textColor = [234, 179, 8];
+          } else {
+            data.cell.styles.textColor = [239, 68, 68];
+          }
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
     });
+    yPos = (doc as any).lastAutoTable.finalY + 8;
   }
 
   // ==================== FOOTER ON ALL PAGES ====================
@@ -456,218 +615,4 @@ export async function exportToPDF(data: ExportData): Promise<void> {
 
   // Save the PDF
   doc.save(`${teamName.replace(/\s+/g, "-")}-analytics-${new Date().toISOString().split("T")[0]}.pdf`);
-}
-
-/**
- * Export analytics data to Excel with multiple sheets
- */
-export function exportToExcel(data: ExportData): void {
-  const {
-    teamName,
-    teamStats,
-    repPerformance,
-    categoryPerformance,
-    scoreDistribution,
-    scoreTrendsData,
-    topPerformers,
-    topCompaniesByVolume,
-    criticalRiskCompanies,
-  } = data;
-
-  // Create workbook
-  const wb = XLSX.utils.book_new();
-
-  // ==================== SUMMARY SHEET ====================
-  const summaryData = [
-    ["Team Analytics Report"],
-    [`Team: ${teamName}`],
-    [`Generated: ${new Date().toLocaleString()}`],
-    [],
-    ["Executive Summary"],
-    ["Metric", "Value"],
-    ["Total Calls Analyzed", teamStats.totalCalls],
-    ["Team Average Score", teamStats.avgScore > 0 ? teamStats.avgScore : "N/A"],
-    ["Score Trend (30 days)", `${teamStats.trend > 0 ? "+" : ""}${teamStats.trend}%`],
-    ["Average Calls Per Rep", teamStats.avgPerRep],
-    [],
-    ["Score Distribution"],
-    ["Category", "Count", "Percentage"],
-    ...scoreDistribution.map((d) => {
-      const total = scoreDistribution.reduce((acc, dist) => acc + dist.value, 0);
-      const percentage = total > 0 ? Math.round((d.value / total) * 100) : 0;
-      return [d.name, d.value, `${percentage}%`];
-    }),
-  ];
-
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-  summarySheet["!cols"] = [{ wch: 25 }, { wch: 15 }, { wch: 12 }];
-  XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
-
-  // ==================== REP PERFORMANCE SHEET ====================
-  const repHeaders = ["Name", "Email", "Total Calls", "Average Score", "Best Category", "Needs Improvement"];
-  const repData = repPerformance.map((rep) => [
-    rep.name || "No Name",
-    rep.email,
-    rep.totalCalls,
-    rep.avgScore,
-    rep.bestCategory,
-    rep.needsImprovement,
-  ]);
-
-  const repSheet = XLSX.utils.aoa_to_sheet([repHeaders, ...repData]);
-  repSheet["!cols"] = [{ wch: 20 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 18 }];
-  XLSX.utils.book_append_sheet(wb, repSheet, "Rep Performance");
-
-  // ==================== TOP PERFORMERS SHEET ====================
-  const topHeaders = ["Rank", "Name", "Email", "Total Calls", "Average Score"];
-  const topData = topPerformers.map((p, i) => [
-    i + 1,
-    p.name || "No Name",
-    p.email,
-    p.totalCalls,
-    p.avgScore,
-  ]);
-
-  const topSheet = XLSX.utils.aoa_to_sheet([topHeaders, ...topData]);
-  topSheet["!cols"] = [{ wch: 8 }, { wch: 20 }, { wch: 30 }, { wch: 12 }, { wch: 12 }];
-  XLSX.utils.book_append_sheet(wb, topSheet, "Top Performers");
-
-  // ==================== CATEGORY PERFORMANCE SHEET ====================
-  const catHeaders = ["Category", "Average Score", "Rating"];
-  const catData = categoryPerformance.map((cat) => [
-    cat.category,
-    cat.score,
-    cat.score >= 80 ? "Excellent" : cat.score >= 60 ? "Good" : cat.score >= 40 ? "Needs Work" : "Poor",
-  ]);
-
-  const catSheet = XLSX.utils.aoa_to_sheet([catHeaders, ...catData]);
-  catSheet["!cols"] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(wb, catSheet, "Category Performance");
-
-  // ==================== SCORE TRENDS SHEET ====================
-  if (scoreTrendsData.length > 0) {
-    const trendHeaders = ["Date", "Average Score"];
-    const trendData = scoreTrendsData.map((t) => [t.date, t.score]);
-
-    const trendSheet = XLSX.utils.aoa_to_sheet([trendHeaders, ...trendData]);
-    trendSheet["!cols"] = [{ wch: 15 }, { wch: 15 }];
-    XLSX.utils.book_append_sheet(wb, trendSheet, "Score Trends");
-  }
-
-  // ==================== COMPANIES SHEET ====================
-  const companyData = [
-    ["Top Companies by Call Volume"],
-    ["Company", "Call Count"],
-    ...topCompaniesByVolume.map((c) => [c.company_name, c.callCount || 0]),
-    [],
-    ["Companies with Critical Risks"],
-    ["Company", "Risk Count"],
-    ...criticalRiskCompanies.map((c) => [c.company_name, c.riskCount || 0]),
-  ];
-
-  const companySheet = XLSX.utils.aoa_to_sheet(companyData);
-  companySheet["!cols"] = [{ wch: 30 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(wb, companySheet, "Companies");
-
-  // Save the file
-  XLSX.writeFile(wb, `${teamName.replace(/\s+/g, "-")}-analytics-${new Date().toISOString().split("T")[0]}.xlsx`);
-}
-
-/**
- * Capture charts as images and add to PDF
- * This function captures the visible charts on the page
- */
-export async function exportWithCharts(
-  data: ExportData,
-  chartContainerIds: string[]
-): Promise<void> {
-  const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-  });
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 15;
-  let yPos = margin;
-
-  // Header
-  doc.setFillColor(99, 102, 241);
-  doc.rect(0, 0, pageWidth, 40, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
-  doc.setFont("helvetica", "bold");
-  doc.text(`${data.teamName} Analytics`, pageWidth / 2, 25, { align: "center" });
-
-  yPos = 50;
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(10);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, yPos);
-
-  yPos = 60;
-
-  // Capture and add each chart
-  for (const containerId of chartContainerIds) {
-    const element = document.getElementById(containerId);
-    if (element) {
-      try {
-        const canvas = await html2canvas(element, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: "#ffffff",
-        });
-
-        const imgData = canvas.toDataURL("image/png");
-        const imgWidth = pageWidth - margin * 2;
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-        // Check if we need a new page
-        if (yPos + imgHeight > doc.internal.pageSize.getHeight() - margin) {
-          doc.addPage();
-          yPos = margin;
-        }
-
-        doc.addImage(imgData, "PNG", margin, yPos, imgWidth, imgHeight);
-        yPos += imgHeight + 10;
-      } catch (err) {
-        console.error(`Failed to capture chart ${containerId}:`, err);
-      }
-    }
-  }
-
-  // Add data tables
-  doc.addPage();
-  yPos = margin;
-
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(99, 102, 241);
-  doc.text("Rep Performance Data", margin, yPos);
-
-  yPos += 5;
-  if (data.repPerformance.length > 0) {
-    autoTable(doc, {
-      startY: yPos,
-      head: [["Name", "Email", "Calls", "Score", "Best", "Improve"]],
-      body: data.repPerformance.map((rep) => [
-        rep.name || "No Name",
-        rep.email,
-        rep.totalCalls.toString(),
-        rep.avgScore.toString(),
-        rep.bestCategory,
-        rep.needsImprovement,
-      ]),
-      theme: "striped",
-      headStyles: {
-        fillColor: [99, 102, 241],
-        textColor: 255,
-        fontSize: 8,
-      },
-      bodyStyles: { fontSize: 7 },
-      margin: { left: margin, right: margin },
-    });
-  }
-
-  doc.save(`${data.teamName.replace(/\s+/g, "-")}-full-report-${new Date().toISOString().split("T")[0]}.pdf`);
 }

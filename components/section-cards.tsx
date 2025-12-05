@@ -12,48 +12,39 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { useTranscriptStore } from "@/store/useTranscriptStore"
+import { supabase } from "@/lib/supabaseClient"
+import { getTranscriptStats, getUserIdFromCache } from "@/lib/supabaseCache"
 
 export function SectionCards() {
-  const transcripts = useTranscriptStore((s) => s.transcripts)
   const [totalCalls, setTotalCalls] = useState(0)
   const [avgScore, setAvgScore] = useState(0)
   const [scoredCount, setScoredCount] = useState(0)
   const [isScoring, setIsScoring] = useState(false)
 
+  // Fetch stats directly from server without loading all transcripts
   useEffect(() => {
-    if (transcripts && transcripts.length > 0) {
-      // Calculate total calls
-      setTotalCalls(transcripts.length)
+    let isMounted = true
 
-      // Calculate average score from ai_overall_score field
-      const scoredTranscripts = transcripts.filter(
-        (t) => t.ai_overall_score != null && !isNaN(t.ai_overall_score)
-      )
+    const fetchStats = async () => {
+      const userId = getUserIdFromCache()
+      if (!userId) return
 
-      setScoredCount(scoredTranscripts.length)
+      const stats = await getTranscriptStats(userId, supabase)
 
-      // Check if there are unscored calls (scoring in progress)
-      const unscoredCount = transcripts.length - scoredTranscripts.length
-      setIsScoring(unscoredCount > 0 && transcripts.length > 0)
-
-      if (scoredTranscripts.length > 0) {
-        const sum = scoredTranscripts.reduce(
-          (acc, t) => acc + Number(t.ai_overall_score),
-          0
-        )
-        const average = sum / scoredTranscripts.length
-        setAvgScore(Math.round(average))
-      } else {
-        setAvgScore(0)
+      if (isMounted) {
+        setTotalCalls(stats.totalCount)
+        setScoredCount(stats.scoredCount)
+        setAvgScore(stats.avgScore)
+        setIsScoring(stats.isScoring)
       }
-    } else {
-      setTotalCalls(0)
-      setScoredCount(0)
-      setAvgScore(0)
-      setIsScoring(false)
     }
-  }, [transcripts])
+
+    fetchStats()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   return (
     <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">

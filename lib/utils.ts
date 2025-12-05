@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
  */
 export const APP_STORAGE_KEYS = [
   // Auth
-  "sb-rpowalzrbddorfnnmccp-auth-token",
+  "sb-tuzuwzglmyajuxytaowi-auth-token",
 
   // User & Company cache
   "cachedUser",
@@ -76,5 +76,5 @@ export function clearAppStorage(): void {
  */
 export function hasAuthToken(): boolean {
   if (typeof window === "undefined") return false;
-  return !!localStorage.getItem("sb-rpowalzrbddorfnnmccp-auth-token");
+  return !!localStorage.getItem("sb-tuzuwzglmyajuxytaowi-auth-token");
 }

@@ -6,23 +6,51 @@ import Tiptap from "@/components/AiAnalysis";
 import { useRouter } from "next/navigation";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
 import { Loader2 } from "lucide-react";
+import { fetchWebhookData } from "@/services/onboarding";
 
 export default function Step4() {
   const router = useRouter();
   const { checking } = useOnboardingGuard();
 
   const [hasData, setHasData] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
 
-  // Check localStorage on mount for webhook data
+  // Check Supabase (primary) or localStorage (fallback) for webhook data
   useEffect(() => {
     if (checking) return;
-    const markdown = localStorage.getItem("webhook_markdown");
-    if (markdown) {
-      setHasData(true);
-    }
+
+    const checkData = async () => {
+      try {
+        // First try Supabase
+        const result = await fetchWebhookData();
+        if (result.success && (result.data || result.markdown)) {
+          setHasData(true);
+          setLoadingData(false);
+          return;
+        }
+
+        // Fallback to localStorage
+        const markdown = localStorage.getItem("webhook_markdown");
+        const jsonData = localStorage.getItem("company_json_data");
+        if (markdown || jsonData) {
+          setHasData(true);
+        }
+      } catch (err) {
+        console.error("Error checking data:", err);
+        // Fallback to localStorage
+        const markdown = localStorage.getItem("webhook_markdown");
+        if (markdown) {
+          setHasData(true);
+        }
+      } finally {
+        setLoadingData(false);
+      }
+    };
+
+    checkData();
   }, [checking]);
 
-  if (checking) {
+  if (checking || loadingData) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

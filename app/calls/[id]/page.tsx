@@ -48,56 +48,9 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { supabase } from "@/lib/supabaseClient";
-import { useTranscriptStore, useTranscriptActions } from "@/store/useTranscriptStore";
-
 /* ------------------------------------------------------------- */
 /* Helpers */
 /* ------------------------------------------------------------- */
-
-// Cache configuration
-const CACHE_KEY_PREFIX = "transcript_cache_";
-const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
-
-interface CachedTranscript {
-  data: any;
-  timestamp: number;
-}
-
-// Cache helpers
-function getCachedTranscript(id: string): any | null {
-  try {
-    const cacheKey = `${CACHE_KEY_PREFIX}${id}`;
-    const cached = localStorage.getItem(cacheKey);
-    if (!cached) return null;
-
-    const parsed: CachedTranscript = JSON.parse(cached);
-    const now = Date.now();
-
-    // Check if cache is still valid
-    if (now - parsed.timestamp > CACHE_TTL) {
-      localStorage.removeItem(cacheKey);
-      return null;
-    }
-
-    return parsed.data;
-  } catch (error) {
-    console.error("Error reading cache:", error);
-    return null;
-  }
-}
-
-function setCachedTranscript(id: string, data: any): void {
-  try {
-    const cacheKey = `${CACHE_KEY_PREFIX}${id}`;
-    const cached: CachedTranscript = {
-      data,
-      timestamp: Date.now(),
-    };
-    localStorage.setItem(cacheKey, JSON.stringify(cached));
-  } catch (error) {
-    console.error("Error setting cache:", error);
-  }
-}
 
 function formatTimestamp(sec: number) {
   const m = Math.floor(sec / 60)
@@ -374,10 +327,6 @@ export default function CallDetailPage() {
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get Zustand store and actions
-  const transcripts = useTranscriptStore((state) => state.transcripts);
-  const { addTranscript } = useTranscriptActions();
-
   /* ------------------------------------------------------------- */
   /* Memoized computed values for performance */
   /* IMPORTANT: All hooks must be called before any early returns */
@@ -403,7 +352,7 @@ export default function CallDetailPage() {
   const categoryEntries = useMemo(() => Object.entries(aiCategoryBreakdown), [aiCategoryBreakdown]);
 
   /* ------------------------------------------------------------- */
-  /* Optimized data loading with multi-layer caching */
+  /* Data loading - always fetch live to avoid localStorage quota issues */
   /* ------------------------------------------------------------- */
   useEffect(() => {
     async function load() {
@@ -413,30 +362,7 @@ export default function CallDetailPage() {
       const numId = parseInt(callId, 10);
 
       try {
-        // 1️⃣ Check Zustand store first (fastest)
-        const cachedTranscript = transcripts.find((t) => {
-          if (!isNaN(numId) && t.id === numId) return true;
-          if (t.fireflies_id === callId) return true;
-          return false;
-        });
-
-        if (cachedTranscript) {
-          setRow(cachedTranscript);
-          setLoading(false);
-          return;
-        }
-
-        // 2️⃣ Check localStorage cache (fast)
-        const localCached = getCachedTranscript(callId);
-        if (localCached) {
-          setRow(localCached);
-          // Also add to Zustand store for future visits
-          addTranscript(localCached);
-          setLoading(false);
-          return;
-        }
-
-        // 3️⃣ Fetch from Supabase with single optimized query (slow)
+        // Fetch from Supabase with single optimized query
         let query = supabase.from("transcripts").select("*");
 
         // Single query that handles both ID types
@@ -453,10 +379,7 @@ export default function CallDetailPage() {
           setError("Could not load transcript.");
           setRow(null);
         } else {
-          // Cache at all levels
           setRow(data);
-          addTranscript(data);
-          setCachedTranscript(callId, data);
         }
       } catch (err) {
         console.error("Unexpected error:", err);
@@ -467,7 +390,7 @@ export default function CallDetailPage() {
       }
     }
     load();
-  }, [callId, transcripts, addTranscript]);
+  }, [callId]);
 
   /* ------------------------------------------------------------- */
   /* Loading skeleton matching UI design */

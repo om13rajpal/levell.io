@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Button
 } from "@/components/ui/button";
@@ -16,6 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 import {
   IconSparkles,
@@ -31,6 +33,8 @@ import {
   IconPencil,
   IconTrash,
 } from "@tabler/icons-react";
+
+import { fetchWebhookData, updateWebhookData, WebhookDataPayload } from "@/services/onboarding";
 
 /* ---------------- TYPES ---------------- */
 type CompanyInfo = {
@@ -132,6 +136,8 @@ function ensureProfile(data: any): ProfileJson {
 
 export default function ReviewBusinessProfile() {
   const [profile, setProfile] = useState<ProfileJson>(EMPTY_PROFILE);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   // Dialog states
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -172,50 +178,118 @@ export default function ReviewBusinessProfile() {
     response: "",
   });
 
-  /* ---------------- LOAD FROM LOCAL STORAGE ---------------- */
+  /* ---------------- LOAD FROM SUPABASE (PRIMARY) OR LOCALSTORAGE (FALLBACK) ---------------- */
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      console.log("📦 Raw company_json_data from localStorage:", stored);
-      if (stored) {
-        let parsed: any = stored;
+    const loadData = async () => {
+      try {
+        // First try Supabase
+        const result = await fetchWebhookData();
 
-        // Keep parsing while it's a string (handles multiple levels of stringification)
-        let parseAttempts = 0;
-        while (typeof parsed === "string" && parseAttempts < 5) {
-          console.log(`📦 Parse attempt ${parseAttempts + 1}, type: ${typeof parsed}`);
-          parsed = JSON.parse(parsed);
-          parseAttempts++;
-        }
-
-        console.log("📦 Final parsed company_json_data:", parsed);
-        console.log("📦 Type:", typeof parsed);
-        console.log("📦 Keys:", parsed ? Object.keys(parsed) : "null");
-        console.log("📦 products_and_services:", parsed?.products_and_services);
-        if (parsed?.products_and_services?.[0]) {
-          console.log("📦 First product keys:", Object.keys(parsed.products_and_services[0]));
-          console.log("📦 First product:", parsed.products_and_services[0]);
-        }
-
-        if (parsed && typeof parsed === "object") {
-          const ensured = ensureProfile(parsed);
-          console.log("📦 After ensureProfile:", ensured);
+        if (result.success && result.data) {
+          console.log("📦 Loaded profile from Supabase webhook_data:", result.data);
+          const ensured = ensureProfile(result.data);
           setProfile(ensured);
+          // Sync to localStorage for offline access
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(ensured));
+          setLoading(false);
+          return;
         }
+
+        // Fallback to localStorage
+        console.log("📦 Falling back to localStorage");
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          let parsed: any = stored;
+
+          // Keep parsing while it's a string (handles multiple levels of stringification)
+          let parseAttempts = 0;
+          while (typeof parsed === "string" && parseAttempts < 5) {
+            parsed = JSON.parse(parsed);
+            parseAttempts++;
+          }
+
+          if (parsed && typeof parsed === "object") {
+            const ensured = ensureProfile(parsed);
+            setProfile(ensured);
+          }
+        }
+      } catch (err) {
+        console.error("Load error:", err);
+        // Fallback to localStorage on error
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            let parsed: any = stored;
+            let parseAttempts = 0;
+            while (typeof parsed === "string" && parseAttempts < 5) {
+              parsed = JSON.parse(parsed);
+              parseAttempts++;
+            }
+            if (parsed && typeof parsed === "object") {
+              const ensured = ensureProfile(parsed);
+              setProfile(ensured);
+            }
+          }
+        } catch (localErr) {
+          console.error("localStorage fallback error:", localErr);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  /* ---------------- SAVE TO SUPABASE & LOCAL STORAGE ---------------- */
+  const saveToSupabase = useCallback(async (updatedProfile: ProfileJson) => {
+    setSaving(true);
+    try {
+      // Convert ProfileJson to WebhookDataPayload format
+      const payload: WebhookDataPayload = {
+        company_info: updatedProfile.company_info,
+        products_and_services: updatedProfile.products_and_services,
+        ideal_customer_profile: updatedProfile.ideal_customer_profile,
+        buyer_personas: updatedProfile.buyer_personas,
+        talk_tracks: updatedProfile.talk_tracks,
+        objection_handling: updatedProfile.objection_handling,
+      };
+
+      const result = await updateWebhookData(payload);
+      if (!result.success) {
+        console.error("Failed to save to Supabase:", result.error);
+        toast.error("Failed to save changes to server");
       }
     } catch (err) {
-      console.error("Load error:", err);
+      console.error("Save error:", err);
+      toast.error("Failed to save changes");
+    } finally {
+      setSaving(false);
     }
   }, []);
 
-  /* ---------------- SAVE TO STORAGE ---------------- */
-  const updateProfile = (updater: (prev: ProfileJson) => ProfileJson) => {
+  const updateProfile = useCallback((updater: (prev: ProfileJson) => ProfileJson) => {
     setProfile((prev) => {
       const updated = updater(prev);
+      // Save to localStorage immediately
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      // Save to Supabase (debounced/async)
+      saveToSupabase(updated);
       return updated;
     });
-  };
+  }, [saveToSupabase]);
+
+  /* ---------------- LOADING STATE ---------------- */
+  if (loading) {
+    return (
+      <div className="w-full max-w-4xl mx-auto p-6 flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading business profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   /* ================================================================= */
   /* UI LAYOUT (OPTION B — Soft Muted Sections) */
@@ -225,11 +299,19 @@ export default function ReviewBusinessProfile() {
     <div className="w-full max-w-4xl mx-auto p-6 space-y-12">
 
       {/* HEADER */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Business Profile Review</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Review and refine your company profile to ensure AI-powered call analysis is accurate and personalized.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Business Profile Review</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Review and refine your company profile to ensure AI-powered call analysis is accurate and personalized.
+          </p>
+        </div>
+        {saving && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Saving...</span>
+          </div>
+        )}
       </div>
 
       {/* INFO */}

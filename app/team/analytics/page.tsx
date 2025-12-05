@@ -31,11 +31,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@/components/ui/toggle-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/lib/supabaseClient";
@@ -49,9 +47,6 @@ import {
   Users,
   BarChart3,
   Download,
-  FileText,
-  FileSpreadsheet,
-  File,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -87,7 +82,7 @@ import {
   ChartContainer,
 } from "@/components/ui/chart";
 import { toast } from "sonner";
-import { exportToPDF, exportToExcel, exportWithCharts } from "@/services/exportAnalytics";
+import { exportFullPDF } from "@/services/exportAnalytics";
 
 const COLORS = {
   excellent: "#22c55e",
@@ -105,11 +100,14 @@ const TOP_PERFORMER_COLORS = [
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
-  call_setup_control: "Call Setup",
+  call_setup_control: "Setup",
+  call_setup_and_control: "Setup",
   discovery_qualification: "Discovery",
+  discovery_and_qualification: "Discovery",
   active_listening: "Listening",
-  value_communication: "Value Comm",
+  value_communication: "Value",
   next_steps_momentum: "Next Steps",
+  next_steps_and_momentum: "Next Steps",
   objection_handling: "Objections",
 };
 
@@ -129,6 +127,9 @@ export default function TeamAnalyticsPage() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [companyCalls, setCompanyCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Chart filter state
+  const [scoreTrendFilter, setScoreTrendFilter] = useState("100");
 
   // Pagination states
   const [callsPerRepPage, setCallsPerRepPage] = useState(1);
@@ -165,12 +166,17 @@ export default function TeamAnalyticsPage() {
           .in("id", teamRow.members);
         setMembers(memberData || []);
 
-        // Get all transcripts for team members
+        // Get scored transcripts for team members (optimized - only necessary fields)
+        // Filter out calls with null duration or duration < 5 minutes
         const { data: transcriptData } = await supabase
           .from("transcripts")
-          .select("*")
+          .select("id, user_id, title, ai_overall_score, ai_category_breakdown, ai_deal_risk_alerts, created_at, fireflies_id")
           .in("user_id", teamRow.members)
-          .order("created_at", { ascending: false });
+          .not("duration", "is", null)
+          .gte("duration", 5)
+          .not("ai_overall_score", "is", null)
+          .order("created_at", { ascending: true })
+          .limit(500);
         setAllTranscripts(transcriptData || []);
       }
 
@@ -234,29 +240,35 @@ export default function TeamAnalyticsPage() {
     return { totalCalls, avgScore, trend, avgPerRep };
   }, [allTranscripts, members]);
 
-  // Score trends over time
+  // Score trends - individual call scores (like dashboard)
   const scoreTrendsData = useMemo(() => {
-    const byDate: Record<string, { total: number; count: number }> = {};
-
-    allTranscripts
+    const scoredTranscripts = allTranscripts
       .filter((t) => t.ai_overall_score != null && t.created_at)
-      .forEach((t) => {
-        const date = new Date(t.created_at).toLocaleDateString();
-        if (!byDate[date]) {
-          byDate[date] = { total: 0, count: 0 };
-        }
-        byDate[date].total += Number(t.ai_overall_score);
-        byDate[date].count += 1;
-      });
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-    return Object.entries(byDate)
-      .map(([date, { total, count }]) => ({
-        date,
-        score: Math.round(total / count),
-      }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .slice(-30);
+    // Create individual data points for each call
+    return scoredTranscripts.map((t, idx) => ({
+      index: idx + 1,
+      score: Math.round(Number(t.ai_overall_score)),
+      title: t.title || `Call ${idx + 1}`,
+    }));
   }, [allTranscripts]);
+
+  // Filter score trends data based on percentage
+  const filteredScoreTrendsData = useMemo(() => {
+    if (scoreTrendsData.length === 0) return [];
+
+    const percent = parseInt(scoreTrendFilter);
+    const dataPointsToShow = Math.max(1, Math.ceil((scoreTrendsData.length * percent) / 100));
+
+    // Show the most recent N% of data points
+    return scoreTrendsData.slice(-dataPointsToShow);
+  }, [scoreTrendsData, scoreTrendFilter]);
+
+  const scoreTrendsShown = useMemo(() => {
+    const percent = parseInt(scoreTrendFilter);
+    return Math.max(1, Math.ceil((scoreTrendsData.length * percent) / 100));
+  }, [scoreTrendsData.length, scoreTrendFilter]);
 
   // Top 5 performers
   const topPerformers = useMemo(() => {
@@ -462,86 +474,37 @@ export default function TeamAnalyticsPage() {
     repComparisonPage * pageSize
   );
 
-  // Export functions - prepare export data
-  const getExportData = () => ({
-    teamName: team?.team_name || "Team",
-    teamStats,
-    repPerformance,
-    categoryPerformance,
-    scoreDistribution,
-    scoreTrendsData,
-    topPerformers,
-    topCompaniesByVolume,
-    criticalRiskCompanies,
-  });
-
-  const handleExportPDF = async () => {
+  // Download PDF with all page content
+  const handleDownloadPDF = async () => {
     try {
       toast.loading("Generating PDF report...");
-      await exportToPDF(getExportData());
+      await exportFullPDF(
+        {
+          teamName: team?.team_name || "Team",
+          teamStats,
+          repPerformance,
+          categoryPerformance,
+          scoreDistribution,
+          scoreTrendsData,
+          topPerformers,
+          topCompaniesByVolume,
+          criticalRiskCompanies,
+          callsPerRepData,
+        },
+        [
+          "chart-score-trends",
+          "chart-top-performers",
+          "chart-category-performance",
+          "chart-score-distribution",
+        ]
+      );
       toast.dismiss();
-      toast.success("PDF report exported successfully");
+      toast.success("PDF report downloaded successfully");
     } catch (error) {
       toast.dismiss();
       console.error("PDF export error:", error);
-      toast.error("Failed to export PDF");
+      toast.error("Failed to download PDF");
     }
-  };
-
-  const handleExportExcel = () => {
-    try {
-      toast.loading("Generating Excel report...");
-      exportToExcel(getExportData());
-      toast.dismiss();
-      toast.success("Excel report exported successfully");
-    } catch (error) {
-      toast.dismiss();
-      console.error("Excel export error:", error);
-      toast.error("Failed to export Excel");
-    }
-  };
-
-  const handleExportWithCharts = async () => {
-    try {
-      toast.loading("Capturing charts and generating PDF...");
-      await exportWithCharts(getExportData(), [
-        "chart-score-trends",
-        "chart-top-performers",
-        "chart-category-performance",
-        "chart-score-distribution",
-      ]);
-      toast.dismiss();
-      toast.success("Full report with charts exported successfully");
-    } catch (error) {
-      toast.dismiss();
-      console.error("Chart export error:", error);
-      toast.error("Failed to export report with charts");
-    }
-  };
-
-  const handleExportCSV = () => {
-    const headers = ["Name", "Email", "Total Calls", "Average Score", "Best Category", "Needs Improvement"];
-    const rows = repPerformance.map((rep) => [
-      rep.name || "No Name",
-      rep.email,
-      rep.totalCalls,
-      rep.avgScore,
-      rep.bestCategory,
-      rep.needsImprovement,
-    ]);
-
-    const csvContent = [headers, ...rows]
-      .map((row) => row.map(cell => `"${cell}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `team-analytics-${new Date().toISOString().split("T")[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    toast.success("CSV exported successfully");
   };
 
   if (loading) {
@@ -602,32 +565,10 @@ export default function TeamAnalyticsPage() {
                     Comprehensive performance insights for your team
                   </p>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline">
-                      <Download className="h-4 w-4 mr-2" />
-                      Export Analytics
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuItem onClick={handleExportPDF}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleExportWithCharts}>
-                      <BarChart3 className="h-4 w-4 mr-2" />
-                      PDF with Charts
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleExportExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export as Excel
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleExportCSV}>
-                      <File className="h-4 w-4 mr-2" />
-                      Export as CSV
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button variant="outline" onClick={handleDownloadPDF}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Download PDF
+                </Button>
               </div>
 
               {/* Stats Cards */}
@@ -725,12 +666,48 @@ export default function TeamAnalyticsPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <TrendingUp className="h-5 w-5 text-primary" />
-                    Score Trends Over Time
+                    Call Scores
                   </CardTitle>
-                  <CardDescription>Daily average scores across the team</CardDescription>
+                  <CardDescription>
+                    {scoreTrendsData.length > 0
+                      ? `Showing ${scoreTrendsShown} of ${scoreTrendsData.length} scored calls`
+                      : "Individual call scores across the team"
+                    }
+                  </CardDescription>
+                  <CardAction>
+                    <ToggleGroup
+                      type="single"
+                      value={scoreTrendFilter}
+                      onValueChange={(value) => {
+                        if (value) setScoreTrendFilter(value);
+                      }}
+                      variant="outline"
+                      className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
+                    >
+                      <ToggleGroupItem value="100">All Calls</ToggleGroupItem>
+                      <ToggleGroupItem value="50">Recent 50%</ToggleGroupItem>
+                      <ToggleGroupItem value="10">Recent 10%</ToggleGroupItem>
+                    </ToggleGroup>
+
+                    <Select value={scoreTrendFilter} onValueChange={(value) => {
+                      if (value) setScoreTrendFilter(value);
+                    }}>
+                      <SelectTrigger
+                        className="flex w-40 **:data-[slot=select-value]:block **:data-[slot=select-value]:truncate @[767px]/card:hidden"
+                        size="sm"
+                      >
+                        <SelectValue placeholder="All Calls" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        <SelectItem value="100">All Calls</SelectItem>
+                        <SelectItem value="50">Recent 50%</SelectItem>
+                        <SelectItem value="10">Recent 10%</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </CardAction>
                 </CardHeader>
                 <CardContent>
-                  {scoreTrendsData.length === 0 ? (
+                  {filteredScoreTrendsData.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-[250px] text-center">
                       <div className="relative mb-4">
                         <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
@@ -750,11 +727,31 @@ export default function TeamAnalyticsPage() {
                   ) : (
                     <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={scoreTrendsData}>
+                        <LineChart data={filteredScoreTrendsData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                          <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
+                          <XAxis
+                            dataKey="index"
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                            minTickGap={32}
+                            tickFormatter={(value) => `#${value}`}
+                          />
                           <YAxis domain={[0, 100]} tickLine={false} axisLine={false} />
-                          <Tooltip />
+                          <Tooltip
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const item = payload[0].payload;
+                                return (
+                                  <div className="bg-background border rounded-lg shadow-lg p-2 text-sm">
+                                    <p className="font-medium">{item.title}</p>
+                                    <p className="text-muted-foreground">Score: {item.score}</p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
                           <Line
                             type="monotone"
                             dataKey="score"
@@ -960,9 +957,19 @@ export default function TeamAnalyticsPage() {
                     ) : (
                       <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={categoryPerformance}>
+                          <BarChart data={categoryPerformance} margin={{ bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="category" tickLine={false} axisLine={false} tickMargin={8} />
+                            <XAxis
+                              dataKey="category"
+                              tickLine={false}
+                              axisLine={false}
+                              tickMargin={8}
+                              interval={0}
+                              tick={{ fontSize: 11 }}
+                              angle={-25}
+                              textAnchor="end"
+                              height={50}
+                            />
                             <YAxis domain={[0, 100]} tickLine={false} axisLine={false} />
                             <Tooltip />
                             <Bar dataKey="score" fill="var(--primary)" radius={[4, 4, 0, 0]} />
