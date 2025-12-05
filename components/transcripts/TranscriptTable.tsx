@@ -303,27 +303,25 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
     try {
       setSyncLoading(true);
 
-      const tokenStr = localStorage.getItem(
-        "sb-tuzuwzglmyajuxytaowi-auth-token"
-      );
-      if (!tokenStr) {
+      // Get authenticated user from Supabase
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
         toast.error("Please log in to sync");
         setSyncLoading(false);
         return;
       }
 
-      let parsed;
-      try {
-        parsed = JSON.parse(tokenStr);
-      } catch {
-        toast.error("Session invalid. Please log in again.");
-        setSyncLoading(false);
-        return;
-      }
+      const userId = user.id;
 
-      const userId = parsed?.user?.id;
-      if (!userId) {
-        toast.error("User not found. Please log in again.");
+      // Fetch the user's Fireflies API key from api_keys table
+      const { data: apiKeyData, error: apiKeyError } = await supabase
+        .from("api_keys")
+        .select("fireflies")
+        .eq("user_id", userId)
+        .single();
+
+      if (apiKeyError || !apiKeyData?.fireflies) {
+        toast.error("Please connect your Fireflies account first in Settings > Integrations");
         setSyncLoading(false);
         return;
       }
@@ -338,7 +336,7 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
       const response = await axiosClient.post(webhookUrl, {
         userid: userId,
         skip: skip,
-        token: "936d3a85-de3a-42be-a462-9609d2080048",
+        token: apiKeyData.fireflies,
       });
 
       if (response.status >= 200 && response.status < 300) {
