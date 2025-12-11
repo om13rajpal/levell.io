@@ -1337,26 +1337,28 @@ function ScoreIndicator({ score }: { score: number | null }) {
 function CompanyLogo({ domain, companyName }: { domain: string; companyName: string }) {
   const [imageError, setImageError] = useState(false);
 
+  // Check if domain looks like a valid website domain (has a TLD like .com, .io, etc.)
   const cleanDomain = getDomainFromUrl(domain);
-  const logoUrl = cleanDomain ? `https://logo.clearbit.com/${cleanDomain}` : null;
+  const isValidDomain = cleanDomain && /\.[a-z]{2,}$/i.test(cleanDomain);
+  const logoUrl = isValidDomain ? `https://logo.clearbit.com/${cleanDomain}` : null;
 
-  // Show fallback if no domain or image failed to load
+  // Show icon fallback if no valid domain or image failed to load
   if (!logoUrl || imageError) {
     return (
-      <div className="h-8 w-8 rounded bg-muted flex items-center justify-center shrink-0">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
+      <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+        <Building2 className="h-5 w-5 text-muted-foreground" />
       </div>
     );
   }
 
   return (
-    <div className="h-8 w-8 rounded shrink-0 overflow-hidden">
+    <div className="h-10 w-10 rounded-lg shrink-0 overflow-hidden bg-white dark:bg-white/90 shadow-sm border border-border/50">
       <Image
         src={logoUrl}
         alt={`${companyName} logo`}
-        width={32}
-        height={32}
-        className="h-8 w-8 object-cover"
+        width={40}
+        height={40}
+        className="h-10 w-10 object-contain p-1"
         onError={() => setImageError(true)}
         unoptimized
       />

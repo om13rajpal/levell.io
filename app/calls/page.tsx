@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -55,6 +56,8 @@ import {
   Star,
   Calendar,
   FileText,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
@@ -66,7 +69,9 @@ import { supabase } from "@/lib/supabaseClient";
 import {
   getTranscriptsPaginated,
   TranscriptFilters,
+  clearTranscriptPageCache,
 } from "@/lib/supabaseCache";
+import { toast } from "sonner";
 import { ChartAreaInteractive } from "@/components/chart-area-interactive";
 
 // Format duration (stored in minutes) to human readable format
@@ -98,6 +103,9 @@ const TableSkeleton = memo(({ rows = 10 }: { rows?: number }) => (
         </TableCell>
         <TableCell>
           <Skeleton className="h-4 w-[150px]" />
+        </TableCell>
+        <TableCell>
+          <Skeleton className="h-8 w-8 rounded" />
         </TableCell>
       </TableRow>
     ))}
@@ -131,6 +139,11 @@ function CallsDashboard() {
     scoredCalls: 0,
     recentTrend: 0,
   });
+
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [transcriptToDelete, setTranscriptToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Track score range values separately to avoid array reference issues
   const [scoreMin, setScoreMin] = useState(0);
@@ -341,6 +354,68 @@ function CallsDashboard() {
     },
     [router]
   );
+
+  // Handle delete transcript
+  const handleDeleteClick = useCallback((e: React.MouseEvent, transcript: any) => {
+    e.stopPropagation();
+    setTranscriptToDelete(transcript);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!transcriptToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      // First, delete any company_calls records that reference this transcript
+      // This prevents foreign key constraint violation
+      const { error: companyCallsError } = await supabase
+        .from("company_calls")
+        .delete()
+        .eq("transcript_id", transcriptToDelete.id);
+
+      if (companyCallsError) {
+        console.warn("Error deleting company_calls references:", companyCallsError);
+        // Continue anyway - the record might not exist in company_calls
+      }
+
+      // Now delete the transcript
+      const { error } = await supabase
+        .from("transcripts")
+        .delete()
+        .eq("id", transcriptToDelete.id);
+
+      if (error) throw error;
+
+      // Remove from local state immediately for instant feedback
+      setPaginatedTranscripts(prev => prev.filter(t => t.id !== transcriptToDelete.id));
+      setTotalCount(prev => Math.max(0, prev - 1));
+
+      // Clear cache to ensure fresh data on next fetch
+      const token = localStorage.getItem("sb-tuzuwzglmyajuxytaowi-auth-token");
+      if (token) {
+        const parsed = JSON.parse(token);
+        const userId = parsed?.user?.id;
+        if (userId) {
+          clearTranscriptPageCache(userId);
+        }
+      }
+
+      toast.success("Transcript deleted successfully");
+      setDeleteDialogOpen(false);
+      setTranscriptToDelete(null);
+    } catch (error: any) {
+      console.error("Error deleting transcript:", error);
+      toast.error(error.message || "Failed to delete transcript");
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [transcriptToDelete]);
+
+  const handleCancelDelete = useCallback(() => {
+    setDeleteDialogOpen(false);
+    setTranscriptToDelete(null);
+  }, []);
 
   return (
     <SidebarProvider
@@ -621,6 +696,9 @@ function CallsDashboard() {
                                 Date
                               </span>
                             </TableHead>
+                            <TableHead className="font-semibold w-[60px]">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
 
@@ -693,6 +771,17 @@ function CallsDashboard() {
                                         })
                                       : "—"}
                                   </span>
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    onClick={(e) => handleDeleteClick(e, t)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    <span className="sr-only">Delete transcript</span>
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -840,6 +929,78 @@ function CallsDashboard() {
           </div>
         </div>
       </SidebarInset>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" />
+              Delete Transcript
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/20">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Are you sure you want to delete this transcript?</p>
+                <p className="text-sm text-muted-foreground">
+                  This action cannot be undone. All associated data including AI analysis, scores, and insights will be permanently removed.
+                </p>
+              </div>
+            </div>
+
+            {transcriptToDelete && (
+              <div className="p-3 rounded-lg bg-muted/50 border">
+                <p className="font-medium text-sm truncate">
+                  {transcriptToDelete.title || "Untitled Call"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {transcriptToDelete.created_at
+                    ? new Date(transcriptToDelete.created_at).toLocaleDateString(undefined, {
+                        month: "long",
+                        day: "numeric",
+                        year: "numeric",
+                      })
+                    : "Unknown date"}
+                  {transcriptToDelete.ai_overall_score != null && (
+                    <> · Score: {Math.round(transcriptToDelete.ai_overall_score)}</>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={handleCancelDelete}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="gap-2"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  Delete Transcript
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 }

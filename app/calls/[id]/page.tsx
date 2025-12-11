@@ -42,6 +42,8 @@ import {
   IconListCheck,
   IconShieldCheck,
   IconTrendingUp,
+  IconHelp,
+  IconCircleCheck,
 } from "@tabler/icons-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -253,6 +255,104 @@ const CategoryBreakdown = memo(({ categoryEntries }: { categoryEntries: [string,
 });
 CategoryBreakdown.displayName = "CategoryBreakdown";
 
+// Score Explainer Card Component
+const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null; scoreReason: string | null }) => {
+  const getScoreLevel = (s: number) => {
+    if (s >= 80) return { level: "Excellent", color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-900/40" };
+    if (s >= 60) return { level: "Good", color: "text-amber-600", bgColor: "bg-amber-100 dark:bg-amber-900/40" };
+    if (s >= 40) return { level: "Needs Improvement", color: "text-orange-600", bgColor: "bg-orange-100 dark:bg-orange-900/40" };
+    return { level: "Critical", color: "text-rose-600", bgColor: "bg-rose-100 dark:bg-rose-900/40" };
+  };
+
+  const scoreInfo = score !== null ? getScoreLevel(score) : { level: "Pending", color: "text-muted-foreground", bgColor: "bg-muted" };
+
+  const scoringCriteria = [
+    { name: "Call Setup & Control", weight: 15, description: "Opening, agenda setting, time management" },
+    { name: "Discovery & Qualification", weight: 25, description: "Understanding needs, BANT criteria, pain points" },
+    { name: "Active Listening", weight: 15, description: "Engagement, follow-up questions, acknowledgment" },
+    { name: "Value Communication", weight: 20, description: "Solution alignment, benefits articulation, ROI" },
+    { name: "Objection Handling", weight: 15, description: "Addressing concerns, competitive positioning" },
+    { name: "Next Steps & Momentum", weight: 10, description: "Clear action items, timeline, commitment" },
+  ];
+
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <IconHelp className="h-5 w-5 text-indigo-500" />
+          <h2 className="text-lg font-semibold">Call Score Breakdown</h2>
+        </div>
+        <Badge variant="outline" className={`${scoreInfo.color} border-current`}>
+          {scoreInfo.level}
+        </Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Understanding how your call is scored
+      </p>
+
+      {/* Score Display */}
+      <div className="flex items-center gap-4">
+        <div className={`h-20 w-20 rounded-2xl ${scoreInfo.bgColor} flex items-center justify-center`}>
+          <span className={`text-3xl font-bold ${scoreInfo.color}`}>{score ?? "—"}</span>
+        </div>
+        <div className="flex-1">
+          <p className="font-medium">Overall Call Score</p>
+          <p className="text-sm text-muted-foreground">Based on AI analysis of this call</p>
+        </div>
+      </div>
+
+      {/* Score Reason Section */}
+      {scoreReason && (
+        <Card className="bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <IconSparkles className="h-5 w-5 text-indigo-500 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-semibold mb-2">Score Analysis</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {scoreReason}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Scoring Criteria */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
+          Scoring Criteria
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {scoringCriteria.map((criteria, index) => (
+            <div key={index} className="p-3 rounded-lg bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium">{criteria.name}</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                  {criteria.weight}%
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">{criteria.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Footer Note */}
+      <div className="pt-2 border-t border-border/50">
+        <div className="flex items-start gap-2 text-xs text-muted-foreground">
+          <IconCircleCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+          <p>Scores are calculated using AI analysis of call transcripts, evaluating sales methodology adherence, customer engagement, and conversion potential.</p>
+        </div>
+      </div>
+    </div>
+  );
+});
+ScoreExplainerCard.displayName = "ScoreExplainerCard";
+
 // Memoized transcript display
 const TranscriptDisplay = memo(({
   sentences,
@@ -339,6 +439,7 @@ export default function CallDetailPage() {
   const sentences = useMemo(() => (row?.sentences as any[]) ?? [], [row?.sentences]);
 
   const aiOverallScore = useMemo(() => row?.ai_overall_score ?? null, [row?.ai_overall_score]);
+  const aiScoreReason = useMemo(() => row?.ai_score_reason ?? null, [row?.ai_score_reason]);
   const aiSummary = useMemo(() => row?.ai_summary ?? null, [row?.ai_summary]);
   const aiCategoryBreakdown = useMemo(() => row?.ai_category_breakdown ?? {}, [row?.ai_category_breakdown]);
   const aiWhatWorked = useMemo(() => row?.ai_what_worked ?? [], [row?.ai_what_worked]);
@@ -549,6 +650,11 @@ export default function CallDetailPage() {
               CATEGORY BREAKDOWN (Memoized)
           ============================================================ */}
           <CategoryBreakdown categoryEntries={categoryEntries} />
+
+          {/* ============================================================
+              SCORE EXPLAINER CARD
+          ============================================================ */}
+          <ScoreExplainerCard score={aiOverallScore} scoreReason={aiScoreReason} />
 
           {/* ============================================================
               WHAT WORKED

@@ -58,6 +58,7 @@ import {
   Mail,
   UserCircle,
   Loader2,
+  MessageSquareWarning,
 } from "lucide-react";
 import {
   Area,
@@ -240,7 +241,7 @@ export default function CompanyDetailsPage() {
       // Parallel API calls - fetch company and calls simultaneously
       // Include company_contacts, ai_recommendations, risk_summary, and ai_relationship from schema
       const [companyResult, callDataResult] = await Promise.all([
-        supabase.from("companies").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations, risk_summary, ai_relationship").eq("id", id).single(),
+        supabase.from("companies").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations, risk_summary, ai_relationship, pain_points").eq("id", id).single(),
         supabase.from("company_calls")
           .select("id, created_at, transcript_id")
           .eq("company_id", id)
@@ -796,6 +797,49 @@ export default function CompanyDetailsPage() {
                   </CardContent>
                 </Card>
               </div>
+
+              {/* Pain Points & Objections Section */}
+              {company.pain_points && company.pain_points.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="flex items-center gap-2">
+                        <MessageSquareWarning className="h-5 w-5 text-orange-500" />
+                        Pain Points & Objections
+                      </CardTitle>
+                      <Badge variant="outline" className="text-orange-600 border-orange-300 dark:border-orange-700">
+                        {company.pain_points.length} identified
+                      </Badge>
+                    </div>
+                    <CardDescription>
+                      Key concerns and objections raised across all calls with this company
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {company.pain_points.map((painPoint: string, i: number) => (
+                      <div
+                        key={i}
+                        className="p-3 rounded-lg bg-orange-500/5 border border-orange-200/40 dark:border-orange-500/20"
+                      >
+                        <div className="flex gap-3">
+                          <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />
+                          <p className="text-sm text-orange-700 dark:text-orange-300 leading-relaxed">
+                            {painPoint}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Footer Note */}
+                    <div className="pt-2 border-t border-border/50">
+                      <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                        <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                        <p>Pain points are automatically extracted from call transcripts using AI analysis.</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Recent Tasks */}
