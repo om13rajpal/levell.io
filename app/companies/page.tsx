@@ -35,6 +35,9 @@ import {
   Target,
   Globe,
   ExternalLink,
+  Trash2,
+  MessageSquareWarning,
+  CheckCircle,
 } from "lucide-react";
 import {
   Dialog,
@@ -178,6 +181,9 @@ export default function CompaniesPage() {
     newCompanyDomain: "",
     newCompanyUrl: "",
     addingSaving: false,
+    deleteDialogOpen: false,
+    companyToDelete: null as any,
+    isDeleting: false,
   });
 
   // Predict Companies
@@ -412,6 +418,27 @@ export default function CompaniesPage() {
   }, [companyStats, totalCompaniesCount, combinedData]);
 
   // --------------------------------------------------
+  // Aggregate pain points from all companies
+  // --------------------------------------------------
+  const aggregatedPainPoints = useMemo(() => {
+    const painPointsWithCompany: { painPoint: string; companyName: string; companyId: number }[] = [];
+
+    detectedCompanies.forEach((company) => {
+      if (company.pain_points && Array.isArray(company.pain_points)) {
+        company.pain_points.forEach((painPoint: string) => {
+          painPointsWithCompany.push({
+            painPoint,
+            companyName: company.company_name,
+            companyId: company.id,
+          });
+        });
+      }
+    });
+
+    return painPointsWithCompany;
+  }, [detectedCompanies]);
+
+  // --------------------------------------------------
   // Filters with debounced search
   // --------------------------------------------------
   const filtered = useMemo(() => {
@@ -611,6 +638,80 @@ export default function CompaniesPage() {
   }, [modalState.newCompanyName, modalState.newCompanyDomain, myCompany]);
 
   // --------------------------------------------------
+  // Delete Company
+  // --------------------------------------------------
+  const handleDeleteClick = useCallback((e: React.MouseEvent, company: any) => {
+    e.stopPropagation();
+    setModalState((prev) => ({
+      ...prev,
+      companyToDelete: company,
+      deleteDialogOpen: true,
+    }));
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!modalState.companyToDelete) return;
+
+    setModalState((prev) => ({ ...prev, isDeleting: true }));
+
+    try {
+      // First, delete all company_calls records associated with this company
+      const { error: callsError } = await supabase
+        .from("company_calls")
+        .delete()
+        .eq("company_id", modalState.companyToDelete.id);
+
+      if (callsError) {
+        console.warn("Error deleting company_calls:", callsError);
+        // Continue anyway - there might not be any calls
+      }
+
+      // Now delete the company
+      const { error } = await supabase
+        .from("companies")
+        .delete()
+        .eq("id", modalState.companyToDelete.id);
+
+      if (error) throw error;
+
+      // Remove from local state immediately for instant feedback
+      setDetectedCompanies((prev) =>
+        prev.filter((c) => c.id !== modalState.companyToDelete.id)
+      );
+      setTotalCompaniesCount((prev) => Math.max(0, prev - 1));
+
+      // Invalidate cache
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const cacheKey = `companies-data-${user.id}`;
+        localStorage.removeItem(cacheKey);
+      }
+
+      toast.success("Company and all associated calls deleted successfully");
+      setModalState((prev) => ({
+        ...prev,
+        deleteDialogOpen: false,
+        companyToDelete: null,
+        isDeleting: false,
+      }));
+    } catch (err: any) {
+      console.error("Error deleting company:", err);
+      toast.error(err.message || "Failed to delete company");
+      setModalState((prev) => ({ ...prev, isDeleting: false }));
+    }
+  }, [modalState.companyToDelete]);
+
+  const handleCancelDelete = useCallback(() => {
+    setModalState((prev) => ({
+      ...prev,
+      deleteDialogOpen: false,
+      companyToDelete: null,
+    }));
+  }, []);
+
+  // --------------------------------------------------
   // Initial Loading State - only show full page loader on first load
   // --------------------------------------------------
   if (isInitialLoading && detectedCompanies.length === 0) {
@@ -714,6 +815,78 @@ export default function CompaniesPage() {
               valueColor={stats.atRisk > 0 ? "text-red-600" : "text-emerald-600"}
             />
           </div>
+
+          {/* Uncovered Pain Points Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <MessageSquareWarning className="h-5 w-5 text-orange-500" />
+                  Uncovered Pain Points
+                </CardTitle>
+                {aggregatedPainPoints.length > 0 && (
+                  <Badge variant="outline" className="text-orange-600 border-orange-300 dark:border-orange-700">
+                    {aggregatedPainPoints.length} across all companies
+                  </Badge>
+                )}
+              </div>
+              <CardDescription>
+                Customer challenges and concerns identified across all company calls
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {aggregatedPainPoints.length > 0 ? (
+                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                  {aggregatedPainPoints.slice(0, 10).map((item, i) => (
+                    <div
+                      key={i}
+                      className="p-3 rounded-lg bg-orange-500/5 border border-orange-200/40 dark:border-orange-500/20 hover:bg-orange-500/10 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/companies/${item.companyId}`)}
+                    >
+                      <div className="flex gap-3">
+                        <div className="h-6 w-6 rounded-full bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center shrink-0">
+                          <span className="text-xs font-medium text-orange-600 dark:text-orange-400">{i + 1}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-orange-700 dark:text-orange-300 leading-relaxed">
+                            {item.painPoint}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                            <Building2 className="h-3 w-3" />
+                            {item.companyName}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {aggregatedPainPoints.length > 10 && (
+                    <p className="text-xs text-muted-foreground text-center pt-2">
+                      Showing 10 of {aggregatedPainPoints.length} pain points. Click on a company to see all.
+                    </p>
+                  )}
+                  {/* Footer Note */}
+                  <div className="pt-2 border-t border-border/50">
+                    <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                      <p>Pain points are automatically extracted from call transcripts using AI analysis.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-3">
+                    <MessageSquareWarning className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm font-medium text-muted-foreground mb-1">
+                    No pain points identified yet
+                  </p>
+                  <p className="text-xs text-muted-foreground max-w-sm">
+                    Pain points will be automatically extracted as more calls are analyzed. They help you understand customer challenges and tailor your approach.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Header + Actions */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -945,20 +1118,31 @@ export default function CompaniesPage() {
                         <ScoreIndicator score={c.score} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setModalState((prev) => ({
-                              ...prev,
-                              selectedCompany: c,
-                            }));
-                          }}
-                        >
-                          <Target className="h-3.5 w-3.5" />
-                          Add Goal
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setModalState((prev) => ({
+                                ...prev,
+                                selectedCompany: c,
+                              }));
+                            }}
+                          >
+                            <Target className="h-3.5 w-3.5" />
+                            Add Goal
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={(e) => handleDeleteClick(e, c)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span className="sr-only">Delete company</span>
+                          </Button>
+                        </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1198,6 +1382,88 @@ export default function CompaniesPage() {
                 <>
                   <Plus className="h-4 w-4" />
                   Add Company
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE COMPANY CONFIRMATION MODAL */}
+      <Dialog
+        open={modalState.deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) handleCancelDelete();
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" />
+              Delete Company
+            </DialogTitle>
+            <DialogDescription>
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/20">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  Are you sure you want to delete this company?
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  All associated call records linking to this company will also be
+                  permanently removed. The original call transcripts will remain intact.
+                </p>
+              </div>
+            </div>
+
+            {modalState.companyToDelete && (
+              <div className="p-3 rounded-lg bg-muted/50 border">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+                    <Building2 className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">
+                      {modalState.companyToDelete.company_name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {modalState.companyToDelete.domain || "No domain"} ·{" "}
+                      {modalState.companyToDelete.calls || 0} calls
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={handleCancelDelete}
+              disabled={modalState.isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={modalState.isDeleting}
+              className="gap-2"
+            >
+              {modalState.isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  Delete Company
                 </>
               )}
             </Button>

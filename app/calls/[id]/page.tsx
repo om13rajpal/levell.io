@@ -24,6 +24,11 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import {
   IconUsers,
@@ -44,6 +49,10 @@ import {
   IconTrendingUp,
   IconHelp,
   IconCircleCheck,
+  IconSearch,
+  IconHeadphones,
+  IconDiamond,
+  IconRocket,
 } from "@tabler/icons-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -267,12 +276,72 @@ const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null;
   const scoreInfo = score !== null ? getScoreLevel(score) : { level: "Pending", color: "text-muted-foreground", bgColor: "bg-muted" };
 
   const scoringCriteria = [
-    { name: "Call Setup & Control", weight: 15, description: "Opening, agenda setting, time management" },
-    { name: "Discovery & Qualification", weight: 25, description: "Understanding needs, BANT criteria, pain points" },
-    { name: "Active Listening", weight: 15, description: "Engagement, follow-up questions, acknowledgment" },
-    { name: "Value Communication", weight: 20, description: "Solution alignment, benefits articulation, ROI" },
-    { name: "Objection Handling", weight: 15, description: "Addressing concerns, competitive positioning" },
-    { name: "Next Steps & Momentum", weight: 10, description: "Clear action items, timeline, commitment" },
+    {
+      name: "Call Setup & Control",
+      weight: 15,
+      description: "Opening, agenda setting, time management",
+      tooltip: "Measures how well you establish control at the start of the call. Includes: professional greeting, setting a clear agenda, confirming time availability, and maintaining structure throughout the conversation.",
+      icon: IconTarget,
+      color: "from-blue-500/20 to-blue-500/5",
+      borderColor: "border-blue-500/30",
+      iconBg: "bg-blue-500/20",
+      iconColor: "text-blue-600 dark:text-blue-400"
+    },
+    {
+      name: "Discovery & Qualification",
+      weight: 25,
+      description: "Understanding needs, BANT criteria, pain points",
+      tooltip: "Evaluates your ability to uncover customer needs using BANT (Budget, Authority, Need, Timeline). Includes: asking open-ended questions, identifying pain points, understanding decision-making process, and qualifying the opportunity.",
+      icon: IconSearch,
+      color: "from-purple-500/20 to-purple-500/5",
+      borderColor: "border-purple-500/30",
+      iconBg: "bg-purple-500/20",
+      iconColor: "text-purple-600 dark:text-purple-400"
+    },
+    {
+      name: "Active Listening",
+      weight: 15,
+      description: "Engagement, follow-up questions, acknowledgment",
+      tooltip: "Assesses how well you listen and respond to the prospect. Includes: verbal acknowledgments, paraphrasing key points, asking relevant follow-up questions, and avoiding interruptions.",
+      icon: IconHeadphones,
+      color: "from-emerald-500/20 to-emerald-500/5",
+      borderColor: "border-emerald-500/30",
+      iconBg: "bg-emerald-500/20",
+      iconColor: "text-emerald-600 dark:text-emerald-400"
+    },
+    {
+      name: "Value Communication",
+      weight: 20,
+      description: "Solution alignment, benefits articulation, ROI",
+      tooltip: "Measures how effectively you communicate your solution's value. Includes: connecting features to specific customer needs, articulating clear benefits, discussing ROI, and differentiating from competitors.",
+      icon: IconDiamond,
+      color: "from-amber-500/20 to-amber-500/5",
+      borderColor: "border-amber-500/30",
+      iconBg: "bg-amber-500/20",
+      iconColor: "text-amber-600 dark:text-amber-400"
+    },
+    {
+      name: "Objection Handling",
+      weight: 15,
+      description: "Addressing concerns, competitive positioning",
+      tooltip: "Evaluates your ability to handle pushback professionally. Includes: acknowledging concerns, providing evidence-based responses, reframing objections as opportunities, and maintaining composure under pressure.",
+      icon: IconShieldCheck,
+      color: "from-rose-500/20 to-rose-500/5",
+      borderColor: "border-rose-500/30",
+      iconBg: "bg-rose-500/20",
+      iconColor: "text-rose-600 dark:text-rose-400"
+    },
+    {
+      name: "Next Steps & Momentum",
+      weight: 10,
+      description: "Clear action items, timeline, commitment",
+      tooltip: "Assesses how well you close the call with forward progress. Includes: summarizing key points, defining specific next steps, setting concrete follow-up dates, and gaining verbal commitment.",
+      icon: IconRocket,
+      color: "from-indigo-500/20 to-indigo-500/5",
+      borderColor: "border-indigo-500/30",
+      iconBg: "bg-indigo-500/20",
+      iconColor: "text-indigo-600 dark:text-indigo-400"
+    },
   ];
 
 
@@ -325,19 +394,62 @@ const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null;
         <h3 className="text-sm font-semibold flex items-center gap-2">
           <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
           Scoring Criteria
+          <span className="text-xs font-normal text-muted-foreground/70 ml-1">(hover for details)</span>
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {scoringCriteria.map((criteria, index) => (
-            <div key={index} className="p-3 rounded-lg bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium">{criteria.name}</span>
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                  {criteria.weight}%
-                </Badge>
-              </div>
-              <p className="text-xs text-muted-foreground">{criteria.description}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {scoringCriteria.map((criteria, index) => {
+            const IconComponent = criteria.icon;
+            return (
+              <Tooltip key={index} delayDuration={100}>
+                <TooltipTrigger asChild>
+                  <div className={`group relative p-4 rounded-xl bg-gradient-to-br ${criteria.color} border ${criteria.borderColor} hover:shadow-lg hover:scale-[1.02] transition-all duration-200 cursor-help overflow-hidden`}>
+                    {/* Background decoration */}
+                    <div className="absolute top-0 right-0 opacity-[0.08] transform translate-x-2 -translate-y-2">
+                      <IconComponent className="h-16 w-16" />
+                    </div>
+
+                    <div className="relative z-10">
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`flex items-center justify-center w-9 h-9 rounded-lg ${criteria.iconBg}`}>
+                            <IconComponent className={`h-5 w-5 ${criteria.iconColor}`} />
+                          </span>
+                          <span className="text-sm font-semibold leading-tight">{criteria.name}</span>
+                        </div>
+                        <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-bold shrink-0 bg-background/80">
+                          {criteria.weight}%
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed pl-[46px]">{criteria.description}</p>
+                    </div>
+
+                    {/* Hover indicator */}
+                    <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50" />
+                    </div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent
+                  side="top"
+                  className="max-w-sm p-0 bg-popover border shadow-xl rounded-xl overflow-hidden"
+                  sideOffset={8}
+                >
+                  <div className={`px-4 py-2.5 bg-gradient-to-r ${criteria.color} border-b`}>
+                    <div className="flex items-center gap-2">
+                      <IconComponent className={`h-5 w-5 ${criteria.iconColor}`} />
+                      <span className="font-semibold text-sm">{criteria.name}</span>
+                      <Badge variant="outline" className="ml-auto text-[10px] px-1.5 py-0 border-current">
+                        {criteria.weight}% weight
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="px-4 py-3">
+                    <p className="text-sm leading-relaxed text-muted-foreground">{criteria.tooltip}</p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
         </div>
       </div>
 
