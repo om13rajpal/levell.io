@@ -255,7 +255,15 @@ export default function CompanyDetailsPage() {
     setIsDeleting(true);
 
     try {
-      // First, delete all company_calls records associated with this company
+      // First, get all transcript IDs associated with this company
+      const { data: companyCalls } = await supabase
+        .from("company_calls")
+        .select("transcript_id")
+        .eq("company_id", id);
+
+      const transcriptIds = companyCalls?.map((cc) => cc.transcript_id).filter(Boolean) || [];
+
+      // Delete the company_calls records
       const { error: callsError } = await supabase
         .from("company_calls")
         .delete()
@@ -264,6 +272,18 @@ export default function CompanyDetailsPage() {
       if (callsError) {
         console.warn("Error deleting company_calls:", callsError);
         // Continue anyway - there might not be any calls
+      }
+
+      // Delete the transcripts associated with this company
+      if (transcriptIds.length > 0) {
+        const { error: transcriptsError } = await supabase
+          .from("transcripts")
+          .delete()
+          .in("id", transcriptIds);
+
+        if (transcriptsError) {
+          console.warn("Error deleting transcripts:", transcriptsError);
+        }
       }
 
       // Now delete the company
@@ -283,7 +303,7 @@ export default function CompanyDetailsPage() {
         localStorage.removeItem(cacheKey);
       }
 
-      toast.success("Company and all associated calls deleted successfully");
+      toast.success("Company, associated calls, and transcripts deleted successfully");
 
       // Redirect to companies list
       router.push("/companies");

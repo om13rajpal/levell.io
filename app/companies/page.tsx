@@ -37,6 +37,7 @@ import {
   ExternalLink,
   Trash2,
   MessageSquareWarning,
+  ChevronDown,
   CheckCircle,
 } from "lucide-react";
 import {
@@ -438,6 +439,10 @@ export default function CompaniesPage() {
     return painPointsWithCompany;
   }, [detectedCompanies]);
 
+  // Pain points expanded state
+  const [painPointsExpanded, setPainPointsExpanded] = useState(false);
+  const PAIN_POINTS_COLLAPSED_COUNT = 5;
+
   // --------------------------------------------------
   // Filters with debounced search
   // --------------------------------------------------
@@ -655,7 +660,15 @@ export default function CompaniesPage() {
     setModalState((prev) => ({ ...prev, isDeleting: true }));
 
     try {
-      // First, delete all company_calls records associated with this company
+      // First, get all transcript IDs associated with this company
+      const { data: companyCalls } = await supabase
+        .from("company_calls")
+        .select("transcript_id")
+        .eq("company_id", modalState.companyToDelete.id);
+
+      const transcriptIds = companyCalls?.map((cc) => cc.transcript_id).filter(Boolean) || [];
+
+      // Delete the company_calls records
       const { error: callsError } = await supabase
         .from("company_calls")
         .delete()
@@ -664,6 +677,18 @@ export default function CompaniesPage() {
       if (callsError) {
         console.warn("Error deleting company_calls:", callsError);
         // Continue anyway - there might not be any calls
+      }
+
+      // Delete the transcripts associated with this company
+      if (transcriptIds.length > 0) {
+        const { error: transcriptsError } = await supabase
+          .from("transcripts")
+          .delete()
+          .in("id", transcriptIds);
+
+        if (transcriptsError) {
+          console.warn("Error deleting transcripts:", transcriptsError);
+        }
       }
 
       // Now delete the company
@@ -689,7 +714,7 @@ export default function CompaniesPage() {
         localStorage.removeItem(cacheKey);
       }
 
-      toast.success("Company and all associated calls deleted successfully");
+      toast.success("Company, associated calls, and transcripts deleted successfully");
       setModalState((prev) => ({
         ...prev,
         deleteDialogOpen: false,
@@ -836,8 +861,8 @@ export default function CompaniesPage() {
             </CardHeader>
             <CardContent>
               {aggregatedPainPoints.length > 0 ? (
-                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                  {aggregatedPainPoints.slice(0, 10).map((item, i) => (
+                <div className="space-y-3">
+                  {aggregatedPainPoints.slice(0, painPointsExpanded ? aggregatedPainPoints.length : PAIN_POINTS_COLLAPSED_COUNT).map((item, i) => (
                     <div
                       key={i}
                       className="p-3 rounded-lg bg-orange-500/5 border border-orange-200/40 dark:border-orange-500/20 hover:bg-orange-500/10 transition-colors cursor-pointer"
@@ -859,10 +884,18 @@ export default function CompaniesPage() {
                       </div>
                     </div>
                   ))}
-                  {aggregatedPainPoints.length > 10 && (
-                    <p className="text-xs text-muted-foreground text-center pt-2">
-                      Showing 10 of {aggregatedPainPoints.length} pain points. Click on a company to see all.
-                    </p>
+                  {aggregatedPainPoints.length > PAIN_POINTS_COLLAPSED_COUNT && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
+                      onClick={() => setPainPointsExpanded(!painPointsExpanded)}
+                    >
+                      <ChevronDown className={`h-4 w-4 mr-1 transition-transform ${painPointsExpanded ? 'rotate-180' : ''}`} />
+                      {painPointsExpanded
+                        ? 'View Less'
+                        : `View More (${aggregatedPainPoints.length - PAIN_POINTS_COLLAPSED_COUNT} more)`}
+                    </Button>
                   )}
                   {/* Footer Note */}
                   <div className="pt-2 border-t border-border/50">
