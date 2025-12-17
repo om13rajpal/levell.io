@@ -4,17 +4,28 @@ import {
   type UIMessage,
 } from "ai";
 import { getOpenRouterModel } from "@/lib/openrouter";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { trackAgentRequest } from "@/lib/openmeter";
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
 
-// Create admin Supabase client for server-side operations
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy-loaded admin Supabase client for server-side operations
+let supabaseAdminInstance: SupabaseClient | null = null;
+
+function getSupabaseAdmin() {
+  if (!supabaseAdminInstance) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!url || !key) {
+      throw new Error("Supabase environment variables are not configured");
+    }
+
+    supabaseAdminInstance = createClient(url, key);
+  }
+  return supabaseAdminInstance;
+}
 
 // Helper function to format duration
 function formatDuration(minutes: number | null): string {
@@ -30,7 +41,7 @@ function formatDuration(minutes: number | null): string {
 // Fetch call/transcript context
 async function fetchCallContext(callId: string): Promise<string> {
   try {
-    const { data: transcript } = await supabaseAdmin
+    const { data: transcript } = await getSupabaseAdmin()
       .from("transcripts")
       .select("*")
       .eq("id", callId)
@@ -164,7 +175,7 @@ async function fetchCallContext(callId: string): Promise<string> {
 // Fetch company context
 async function fetchCompanyContext(companyId: string): Promise<string> {
   try {
-    const { data: company } = await supabaseAdmin
+    const { data: company } = await getSupabaseAdmin()
       .from("companies")
       .select("*")
       .eq("id", companyId)
@@ -233,7 +244,7 @@ async function fetchCompanyContext(companyId: string): Promise<string> {
     }
 
     // Fetch associated calls
-    const { data: companyCalls } = await supabaseAdmin
+    const { data: companyCalls } = await getSupabaseAdmin()
       .from("company_calls")
       .select("transcript_id, created_at")
       .eq("company_id", companyId)
@@ -243,7 +254,7 @@ async function fetchCompanyContext(companyId: string): Promise<string> {
     if (companyCalls && companyCalls.length > 0) {
       // Fetch transcript details
       const transcriptIds = companyCalls.map((c) => c.transcript_id);
-      const { data: transcripts } = await supabaseAdmin
+      const { data: transcripts } = await getSupabaseAdmin()
         .from("transcripts")
         .select("id, title, duration, ai_overall_score, created_at")
         .in("id", transcriptIds);
