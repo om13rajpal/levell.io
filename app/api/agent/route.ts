@@ -364,14 +364,14 @@ export async function POST(req: Request) {
             await trackAgentRequest({
               userId,
               companyId: contextType === "company" ? contextId : undefined,
-              promptTokens: usage.promptTokens || 0,
-              completionTokens: usage.completionTokens || 0,
+              promptTokens: usage.inputTokens || 0,
+              completionTokens: usage.outputTokens || 0,
               model: modelId,
             });
             console.log("[Agent] Usage tracked:", {
               userId,
-              promptTokens: usage.promptTokens,
-              completionTokens: usage.completionTokens,
+              promptTokens: usage.inputTokens,
+              completionTokens: usage.outputTokens,
             });
           } catch (trackError) {
             console.error("[Agent] Failed to track usage:", trackError);

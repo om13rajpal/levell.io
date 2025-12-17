@@ -3,7 +3,7 @@ import { OpenMeter } from '@openmeter/sdk';
 // Initialize OpenMeter client
 export const openmeter = new OpenMeter({
   baseUrl: process.env.OPENMETER_BASE_URL ?? 'https://openmeter.cloud',
-  token: process.env.OPENMETER_TOKEN,
+  apiKey: process.env.OPENMETER_TOKEN,
 });
 
 // Event types for tracking
@@ -36,9 +36,12 @@ export async function ensureSubject({
   try {
     // OpenMeter SDK uses 'customers' API for subject management
     await openmeter.customers.create({
-      id: subjectId,
+      key: subjectId,
       name: displayName || subjectId,
       metadata: metadata || {},
+      usageAttribution: {
+        subjectKeys: [subjectId],
+      },
     });
     subjectCache.add(subjectId);
     console.log('[OpenMeter] Customer created:', subjectId);
