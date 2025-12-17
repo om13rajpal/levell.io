@@ -11,6 +11,7 @@ import {
   IconUsers,
   IconHelp,
   IconBuilding,
+  IconRobot,
 } from "@tabler/icons-react";
 import Image from "next/image";
 
@@ -99,6 +100,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 
   const navMain = [
     { title: "Dashboard", url: "/dashboard", icon: IconDashboard },
+    { title: "Agent", url: "/agent", icon: IconRobot },
     { title: "Companies", url: "/companies", icon: IconListDetails },
     { title: "Calls", url: "/calls", icon: IconChartBar },
     { title: "Team", url: "/team", icon: IconUsers },

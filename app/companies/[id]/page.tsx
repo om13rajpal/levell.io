@@ -59,7 +59,17 @@ import {
   UserCircle,
   Loader2,
   MessageSquareWarning,
+  Trash2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 import {
   Area,
   AreaChart,
@@ -189,6 +199,10 @@ export default function CompanyDetailsPage() {
   const [totalTranscripts, setTotalTranscripts] = useState(0);
   const [transcriptsLoading, setTranscriptsLoading] = useState(false);
 
+  // Delete state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Stats - loaded separately for performance
   const [stats, setStats] = useState<{
     totalCalls: number;
@@ -233,6 +247,72 @@ export default function CompanyDetailsPage() {
     setCurrentPage(1);
     fetchTranscriptsPage(allTranscriptIds, 1, newSize);
   }, [fetchTranscriptsPage, allTranscriptIds]);
+
+  // Delete company handler
+  const handleDeleteCompany = useCallback(async () => {
+    if (!company) return;
+
+    setIsDeleting(true);
+
+    try {
+      // First, get all transcript IDs associated with this company
+      const { data: companyCalls } = await supabase
+        .from("company_calls")
+        .select("transcript_id")
+        .eq("company_id", id);
+
+      const transcriptIds = companyCalls?.map((cc) => cc.transcript_id).filter(Boolean) || [];
+
+      // Delete the company_calls records
+      const { error: callsError } = await supabase
+        .from("company_calls")
+        .delete()
+        .eq("company_id", id);
+
+      if (callsError) {
+        console.warn("Error deleting company_calls:", callsError);
+        // Continue anyway - there might not be any calls
+      }
+
+      // Delete the transcripts associated with this company
+      if (transcriptIds.length > 0) {
+        const { error: transcriptsError } = await supabase
+          .from("transcripts")
+          .delete()
+          .in("id", transcriptIds);
+
+        if (transcriptsError) {
+          console.warn("Error deleting transcripts:", transcriptsError);
+        }
+      }
+
+      // Now delete the company
+      const { error } = await supabase
+        .from("companies")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      // Invalidate cache
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const cacheKey = `companies-data-${user.id}`;
+        localStorage.removeItem(cacheKey);
+      }
+
+      toast.success("Company, associated calls, and transcripts deleted successfully");
+
+      // Redirect to companies list
+      router.push("/companies");
+    } catch (err: any) {
+      console.error("Error deleting company:", err);
+      toast.error(err.message || "Failed to delete company");
+      setIsDeleting(false);
+    }
+  }, [company, id, router]);
 
   useEffect(() => {
     async function load() {
@@ -485,18 +565,29 @@ export default function CompanyDetailsPage() {
                     </p>
                   </div>
                 </div>
-                <Badge
-                  variant="outline"
-                  className={
-                    stats.avgScore >= 80
-                      ? "border-green-500/50 text-green-700 dark:text-green-400"
-                      : stats.avgScore >= 60
-                      ? "border-yellow-500/50 text-yellow-700 dark:text-yellow-400"
-                      : "border-red-500/50 text-red-700 dark:text-red-400"
-                  }
-                >
-                  Health Score: {stats.avgScore || "—"}
-                </Badge>
+                <div className="flex items-center gap-3">
+                  <Badge
+                    variant="outline"
+                    className={
+                      stats.avgScore >= 80
+                        ? "border-green-500/50 text-green-700 dark:text-green-400"
+                        : stats.avgScore >= 60
+                        ? "border-yellow-500/50 text-yellow-700 dark:text-yellow-400"
+                        : "border-red-500/50 text-red-700 dark:text-red-400"
+                    }
+                  >
+                    Health Score: {stats.avgScore || "—"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                    onClick={() => setDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
+                </div>
               </div>
 
               {/* Stats Cards - 4 cards like dashboard */}
@@ -1150,6 +1241,80 @@ export default function CompanyDetailsPage() {
           </div>
         </div>
       </SidebarInset>
+
+      {/* DELETE COMPANY CONFIRMATION MODAL */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" />
+              Delete Company
+            </DialogTitle>
+            <DialogDescription>
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/20">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  Are you sure you want to delete this company?
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  All associated call records linking to this company will also be
+                  permanently removed. The original call transcripts will remain intact.
+                </p>
+              </div>
+            </div>
+
+            {company && (
+              <div className="p-3 rounded-lg bg-muted/50 border">
+                <div className="flex items-center gap-3">
+                  <CompanyLogo domain={company.domain} companyName={company.company_name} size="sm" />
+                  <div>
+                    <p className="font-medium text-sm">
+                      {company.company_name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {company.domain || "No domain"} · {stats.totalCalls} calls
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCompany}
+              disabled={isDeleting}
+              className="gap-2"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  Delete Company
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 }
