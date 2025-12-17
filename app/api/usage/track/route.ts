@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { trackUsage, METER_TYPES } from '@/lib/openmeter';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let supabaseAdmin: SupabaseClient | null = null;
+
+function getSupabaseAdmin() {
+  if (!supabaseAdmin) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!url || !key) {
+      throw new Error("Supabase environment variables are not configured");
+    }
+
+    supabaseAdmin = createClient(url, key);
+  }
+  return supabaseAdmin;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,7 +27,7 @@ export async function POST(req: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: authError } = await getSupabaseAdmin().auth.getUser(token);
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
