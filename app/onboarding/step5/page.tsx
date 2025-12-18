@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import ReviewBusinessProfile from "@/components/ReviewProfile";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
 import { Loader2 } from "lucide-react";
+import { updateOnboardingStep } from "@/services/onboarding";
 
 export default function Step5() {
   const router = useRouter();
@@ -34,7 +35,10 @@ export default function Step5() {
         </Button>
 
         <Button
-          onClick={() => router.push("/onboarding/step6")}
+          onClick={async () => {
+            await updateOnboardingStep(6);
+            router.push("/onboarding/step6");
+          }}
           className="gap-2"
         >
           Next

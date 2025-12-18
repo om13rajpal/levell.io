@@ -28,17 +28,20 @@ import axiosClient from "@/lib/axiosClient";
 
 interface ConnectToolsProps {
   onFirefliesStatusChange?: (connected: boolean) => void;
+  onOpenAIStatusChange?: (connected: boolean) => void;
   onSavingChange?: (saving: boolean) => void;
 }
 
 export default function ConnectTools({
   onFirefliesStatusChange,
+  onOpenAIStatusChange,
   onSavingChange,
 }: ConnectToolsProps) {
   const [firefliesKey, setFirefliesKey] = useState("");
   const [openAIKey, setOpenAIKey] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isFirefliesDialogOpen, setIsFirefliesDialogOpen] = useState(false);
+  const [isOpenAIDialogOpen, setIsOpenAIDialogOpen] = useState(false);
 
   useEffect(() => {
     const loadKeys = async () => {
@@ -59,11 +62,13 @@ export default function ConnectTools({
 
       if (data?.openapi) {
         setOpenAIKey(data.openapi);
+        localStorage.setItem("onboarding_openai_connected", "true");
+        onOpenAIStatusChange?.(true);
       }
     };
 
     loadKeys();
-  }, [onFirefliesStatusChange]);
+  }, [onFirefliesStatusChange, onOpenAIStatusChange]);
 
   // 🔥 Save key to Supabase
   const saveKeyToSupabase = async (
@@ -131,11 +136,15 @@ export default function ConnectTools({
       if (type === "fireflies") {
         setFirefliesKey(key);
         localStorage.setItem("onboarding_fireflies_connected", "true");
+        localStorage.setItem("fireflies_syncing", "true"); // Track syncing state for animations
         onFirefliesStatusChange?.(true);
         setIsFirefliesDialogOpen(false);
       }
       if (type === "openai") {
         setOpenAIKey(key);
+        localStorage.setItem("onboarding_openai_connected", "true");
+        onOpenAIStatusChange?.(true);
+        setIsOpenAIDialogOpen(false);
       }
 
       toast.success(
@@ -238,7 +247,7 @@ export default function ConnectTools({
             </Card>
 
             {/* OpenAI Card */}
-            <Card className="border border-dashed border-border bg-muted/30 rounded-xl shadow-xs">
+            <Card className="border border-border rounded-xl shadow-xs">
               <CardHeader className="flex flex-row items-start justify-between pb-2">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2 text-base font-medium">
@@ -249,18 +258,18 @@ export default function ConnectTools({
                   </CardTitle>
                   <CardDescription className="text-sm text-muted-foreground">
                     Use your own API key to enable AI features like smart
-                    summaries and automations. Optional but recommended.
+                    summaries and automations.
                   </CardDescription>
                 </div>
                 <Badge
-                  variant={openAIKey ? "default" : "outline"}
+                  variant={openAIKey ? "default" : "secondary"}
                   className="text-xs"
                 >
-                  {openAIKey ? "Connected" : "Optional"}
+                  {openAIKey ? "Connected" : "Not connected"}
                 </Badge>
               </CardHeader>
               <CardContent className="flex gap-3">
-                <Dialog>
+                <Dialog open={isOpenAIDialogOpen} onOpenChange={setIsOpenAIDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm">
                       <Plug className="h-4 w-4" />

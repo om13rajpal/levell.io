@@ -4,8 +4,7 @@ import { useState } from "react";
 import ConfigureSalesProcessStep from "@/components/Sales";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { updateSalesProcess } from "@/services/onboarding";
-import { supabase } from "@/lib/supabaseClient";
+import { updateSalesProcess, completeOnboarding } from "@/services/onboarding";
 import { toast } from "sonner";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
 import { Loader2 } from "lucide-react";
@@ -27,26 +26,13 @@ export default function Step6() {
       await updateSalesProcess(sales.sales_motion, sales.framework);
 
       // Mark onboarding as complete in Supabase
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const success = await completeOnboarding();
 
-      if (user) {
-        const { error } = await supabase
-          .from("users")
-          .update({ is_onboarding_done: true })
-          .eq("id", user.id);
-
-        if (error) {
-          console.error("Error updating onboarding status:", error);
-          toast.error("Failed to complete onboarding. Please try again.");
-          setSaving(false);
-          return;
-        }
+      if (!success) {
+        toast.error("Failed to complete onboarding. Please try again.");
+        setSaving(false);
+        return;
       }
-
-      // Update localStorage
-      localStorage.setItem("onboarding_current_step", "completed");
 
       // Redirect to dashboard
       router.replace("/dashboard");

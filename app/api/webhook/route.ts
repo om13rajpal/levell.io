@@ -8,32 +8,44 @@ export async function POST(req: Request) {
     const company_id = data?.company_id ?? null;
 
     // Extract markdown safely
+    // Response structure from n8n: { data: { markdown, analysis } }
     const markdown =
+      data?.data?.markdown ||
       data?.markdown ||
-      data?.data ||
       data?.payload?.markdown ||
-      data?.payload?.data ||
+      data?.payload?.data?.markdown ||
       "";
 
-    // Extract json_val safely
+    // Extract analysis/json_val safely
+    // The analysis data comes as "analysis" from n8n webhook
     let json_val =
+      data?.data?.analysis ||
+      data?.analysis ||
       data?.json_val ||
+      data?.data?.json_val ||
       data?.payload?.json_val ||
-      data?.payload?.data?.json_val ||
+      data?.payload?.data?.analysis ||
       "";
 
-    // Remove ```json fences if present
-    if (typeof json_val === "string") {
-      json_val = json_val.replace(/```json/g, "").replace(/```/g, "").trim();
-    }
-
-    // Validate JSON – do not crash API
+    // Handle json_val - it might already be an object or a string
     let parsedJson = null;
-    try {
-      parsedJson = json_val ? JSON.parse(json_val) : null;
-    } catch (e) {
-      console.error("❌ Invalid json_val; storing raw string instead");
-      parsedJson = json_val;
+
+    if (json_val) {
+      if (typeof json_val === "object") {
+        // Already an object, use directly
+        parsedJson = json_val;
+      } else if (typeof json_val === "string") {
+        // Remove ```json fences if present
+        const cleanedJson = json_val.replace(/```json/g, "").replace(/```/g, "").trim();
+
+        // Try to parse as JSON
+        try {
+          parsedJson = JSON.parse(cleanedJson);
+        } catch (e) {
+          console.error("❌ Invalid json_val; storing raw string instead");
+          parsedJson = cleanedJson;
+        }
+      }
     }
 
     // INSERT if no company_id

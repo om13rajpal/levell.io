@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/toggle-group"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserIdFromCache } from "@/lib/supabaseCache"
+import { RefreshCw } from "lucide-react"
 
 const chartConfig = {
   score: {
@@ -213,7 +214,28 @@ export function ChartAreaInteractive() {
                 </div>
               </>
             ) : (
-              <p className="text-muted-foreground">No scored calls available yet</p>
+              <>
+                {/* Syncing animation - waiting for Fireflies */}
+                <div className="relative mb-6">
+                  <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: "2.5s" }} />
+                  <div className="absolute inset-3 rounded-full bg-primary/10 animate-ping" style={{ animationDuration: "2.5s", animationDelay: "0.3s" }} />
+                  <div className="relative h-16 w-16 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                    <RefreshCw className="h-8 w-8 text-primary animate-spin" style={{ animationDuration: "2s" }} />
+                  </div>
+                </div>
+                <p className="font-semibold text-foreground mb-1">Syncing your calls</p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Connecting to Fireflies to fetch your recorded conversations...
+                </p>
+                {/* Sync wave animation */}
+                <div className="flex items-center gap-1 mt-4">
+                  <div className="h-3 w-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: "0ms" }} />
+                  <div className="h-4 w-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: "100ms" }} />
+                  <div className="h-5 w-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: "200ms" }} />
+                  <div className="h-4 w-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: "300ms" }} />
+                  <div className="h-3 w-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: "400ms" }} />
+                </div>
+              </>
             )}
           </div>
         ) : (

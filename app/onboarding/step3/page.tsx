@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { sendWebsiteToWebhook } from "@/services/onboarding";
+import { sendWebsiteToWebhook, updateOnboardingStep } from "@/services/onboarding";
 import { useRouter } from "next/navigation";
 import { Info, Loader2, Sparkles } from "lucide-react";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
@@ -59,7 +59,8 @@ export default function Step3() {
         localStorage.setItem("company_json_data", jsonString);
       }
 
-      localStorage.setItem("onboarding_current_step", "4");
+      // Update step in Supabase and localStorage
+      await updateOnboardingStep(4);
       router.push("/onboarding/step4");
     } catch (err) {
       setIsAnalyzing(false);

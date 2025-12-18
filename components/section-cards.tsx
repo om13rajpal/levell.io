@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { IconTrendingDown, IconTrendingUp } from "@tabler/icons-react"
+import { RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -16,10 +17,12 @@ import { supabase } from "@/lib/supabaseClient"
 import { getTranscriptStats, getUserIdFromCache } from "@/lib/supabaseCache"
 
 export function SectionCards() {
-  const [totalCalls, setTotalCalls] = useState(0)
+  const [totalCalls, setTotalCalls] = useState<number | null>(null) // null means loading
   const [avgScore, setAvgScore] = useState(0)
   const [scoredCount, setScoredCount] = useState(0)
   const [isScoring, setIsScoring] = useState(false)
+  const [companiesCount, setCompaniesCount] = useState(0)
+  const [isSyncing, setIsSyncing] = useState(false)
 
   // Fetch stats directly from server without loading all transcripts
   useEffect(() => {
@@ -36,13 +39,31 @@ export function SectionCards() {
         setScoredCount(stats.scoredCount)
         setAvgScore(stats.avgScore)
         setIsScoring(stats.isScoring)
+        // Show syncing animation when there are 0 calls (waiting for Fireflies sync)
+        setIsSyncing(stats.totalCount === 0)
+      }
+
+      // Fetch companies count
+      const { count } = await supabase
+        .from("company")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+
+      if (isMounted && count !== null) {
+        setCompaniesCount(count)
       }
     }
 
     fetchStats()
 
+    // Poll for updates every 30 seconds to check for new calls
+    const interval = setInterval(() => {
+      fetchStats()
+    }, 30000)
+
     return () => {
       isMounted = false
+      clearInterval(interval)
     }
   }, [])
 
@@ -54,22 +75,60 @@ export function SectionCards() {
         <CardHeader>
           <CardDescription>Total Calls</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {totalCalls.toLocaleString()}
+            {totalCalls === null ? (
+              // Loading state
+              <div className="flex items-center gap-2">
+                <div className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+                </div>
+                <span className="text-lg text-muted-foreground">Loading...</span>
+              </div>
+            ) : totalCalls === 0 ? (
+              // Syncing state - show when 0 calls
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-primary animate-spin" />
+                <span className="text-lg text-muted-foreground">Syncing...</span>
+              </div>
+            ) : (
+              totalCalls.toLocaleString()
+            )}
           </CardTitle>
           <CardAction>
-            <Badge variant="outline">
-              <IconTrendingUp />
-              Live Data
-            </Badge>
+            {isSyncing ? (
+              <Badge variant="outline" className="border-primary/30 text-primary">
+                <div className="h-2 w-2 rounded-full bg-primary animate-pulse mr-1" />
+                Syncing
+              </Badge>
+            ) : (
+              <Badge variant="outline">
+                <IconTrendingUp />
+                Live Data
+              </Badge>
+            )}
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
-          <div className="line-clamp-1 flex gap-2 font-medium">
-            Total recorded calls <IconTrendingUp className="size-4" />
-          </div>
-          <div className="text-muted-foreground">
-            Updated from your transcripts
-          </div>
+          {isSyncing ? (
+            <>
+              <div className="line-clamp-1 flex gap-2 font-medium text-primary">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Fetching from Fireflies
+              </div>
+              <div className="text-muted-foreground">
+                Your calls are being synced...
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="line-clamp-1 flex gap-2 font-medium">
+                Total recorded calls <IconTrendingUp className="size-4" />
+              </div>
+              <div className="text-muted-foreground">
+                Updated from your transcripts
+              </div>
+            </>
+          )}
         </CardFooter>
       </Card>
 
@@ -166,26 +225,26 @@ export function SectionCards() {
         </CardFooter>
       </Card>
 
-      {/* Pending Tasks */}
+      {/* Companies */}
       <Card className="@container/card">
         <CardHeader>
-          <CardDescription>Pending Tasks</CardDescription>
+          <CardDescription>Companies</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            12
+            {companiesCount}
           </CardTitle>
           <CardAction>
             <Badge variant="outline">
               <IconTrendingUp />
-              +4
+              Live Data
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            Tasks accumulating <IconTrendingUp className="size-4" />
+            Total companies tracked
           </div>
           <div className="text-muted-foreground">
-            Needs review & completion
+            Manage your prospects
           </div>
         </CardFooter>
       </Card>

@@ -6,7 +6,7 @@ import Tiptap from "@/components/AiAnalysis";
 import { useRouter } from "next/navigation";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
 import { Loader2 } from "lucide-react";
-import { fetchWebhookData } from "@/services/onboarding";
+import { fetchWebhookData, updateOnboardingStep } from "@/services/onboarding";
 
 export default function Step4() {
   const router = useRouter();
@@ -76,7 +76,10 @@ export default function Step4() {
           Back
         </Button>
 
-        <Button disabled={!hasData} onClick={() => router.push("/onboarding/step5")}>
+        <Button disabled={!hasData} onClick={async () => {
+          await updateOnboardingStep(5);
+          router.push("/onboarding/step5");
+        }}>
           Next
         </Button>
       </div>

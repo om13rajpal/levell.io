@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -10,16 +10,106 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Slider } from "@/components/ui/slider";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+
+// Scoring configuration based on sales motion and framework
+const SCORING_CONFIG = {
+  smb: {
+    spiced: {
+      fit: 75,
+      painImpact: 70,
+      timelineUrgency: 80,
+      engagement: 85,
+      championStrength: 65,
+      dealEconomics: 70,
+    },
+    meddic: {
+      fit: 80,
+      painImpact: 75,
+      timelineUrgency: 70,
+      engagement: 85,
+      championStrength: 70,
+      dealEconomics: 80,
+    },
+    bant: {
+      fit: 85,
+      painImpact: 65,
+      timelineUrgency: 75,
+      engagement: 80,
+      championStrength: 60,
+      dealEconomics: 85,
+    },
+  },
+  "mid-market": {
+    spiced: {
+      fit: 80,
+      painImpact: 70,
+      timelineUrgency: 75,
+      engagement: 85,
+      championStrength: 75,
+      dealEconomics: 75,
+    },
+    meddic: {
+      fit: 80,
+      painImpact: 65,
+      timelineUrgency: 70,
+      engagement: 90,
+      championStrength: 85,
+      dealEconomics: 75,
+    },
+    bant: {
+      fit: 85,
+      painImpact: 70,
+      timelineUrgency: 80,
+      engagement: 85,
+      championStrength: 70,
+      dealEconomics: 80,
+    },
+  },
+  enterprise: {
+    spiced: {
+      fit: 85,
+      painImpact: 80,
+      timelineUrgency: 70,
+      engagement: 90,
+      championStrength: 80,
+      dealEconomics: 85,
+    },
+    meddic: {
+      fit: 85,
+      painImpact: 80,
+      timelineUrgency: 75,
+      engagement: 90,
+      championStrength: 90,
+      dealEconomics: 85,
+    },
+    bant: {
+      fit: 80,
+      painImpact: 70,
+      timelineUrgency: 65,
+      engagement: 85,
+      championStrength: 75,
+      dealEconomics: 80,
+    },
+  },
+};
+
+type SalesMotion = keyof typeof SCORING_CONFIG;
+type Framework = "spiced" | "meddic" | "bant";
 
 export default function ConfigureSalesProcessStep({
   onChange,
 }: {
   onChange: (values: { sales_motion: string; framework: string }) => void;
 }) {
-  const [salesMotion, setSalesMotion] = useState("mid-market");
-  const [framework, setFramework] = useState("meddic");
+  const [salesMotion, setSalesMotion] = useState<SalesMotion>("mid-market");
+  const [framework, setFramework] = useState<Framework>("meddic");
+
+  // Get current scores based on selection
+  const scores = useMemo(() => {
+    return SCORING_CONFIG[salesMotion][framework];
+  }, [salesMotion, framework]);
 
   // Notify parent on every change
   useEffect(() => {
@@ -49,7 +139,7 @@ export default function ConfigureSalesProcessStep({
               <RadioGroup
                 className="grid grid-cols-1 sm:grid-cols-3 gap-3"
                 value={salesMotion}
-                onValueChange={setSalesMotion}
+                onValueChange={(value) => setSalesMotion(value as SalesMotion)}
               >
                 <OptionCard
                   id="smb"
@@ -82,7 +172,7 @@ export default function ConfigureSalesProcessStep({
               <RadioGroup
                 className="grid grid-cols-1 sm:grid-cols-3 gap-3"
                 value={framework}
-                onValueChange={setFramework}
+                onValueChange={(value) => setFramework(value as Framework)}
               >
                 <OptionCard
                   id="spiced"
@@ -119,15 +209,15 @@ export default function ConfigureSalesProcessStep({
           </CardHeader>
 
           <CardContent className="space-y-4">
-            <SliderGroup label="Fit (ICP Match)" value={80} />
-            <SliderGroup label="Pain/Impact Evidence" value={65} />
-            <SliderGroup label="Timeline/Urgency" value={70} />
-            <SliderGroup label="Engagement" value={90} />
-            <SliderGroup label="Champion Strength" value={85} />
-            <SliderGroup label="Deal Economics" value={75} />
+            <SliderGroup label="Fit (ICP Match)" value={scores.fit} />
+            <SliderGroup label="Pain/Impact Evidence" value={scores.painImpact} />
+            <SliderGroup label="Timeline/Urgency" value={scores.timelineUrgency} />
+            <SliderGroup label="Engagement" value={scores.engagement} />
+            <SliderGroup label="Champion Strength" value={scores.championStrength} />
+            <SliderGroup label="Deal Economics" value={scores.dealEconomics} />
 
             <p className="text-xs text-muted-foreground mt-4">
-              Based on <strong>{salesMotion} + {framework}</strong> defaults.
+              Based on <strong>{salesMotion} + {framework.toUpperCase()}</strong> defaults.
             </p>
           </CardContent>
         </Card>
@@ -176,7 +266,7 @@ function SliderGroup({ label, value }: { label: string; value: number }) {
         <span>{label}</span>
         <span>{value}%</span>
       </div>
-      <Slider defaultValue={[value]} max={100} step={1} disabled />
+      <Progress value={value} className="h-2" />
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { SignupForm } from "@/components/signup-form";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { getAuthUserData, updateUserInSupabase } from "@/services/onboarding";
+import { getAuthUserData, updateUserInSupabase, updateOnboardingStep } from "@/services/onboarding";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
 import { Loader2 } from "lucide-react";
 
@@ -49,7 +49,8 @@ export default function Step1() {
     localStorage.setItem("onboarding_signup", JSON.stringify(form));
     await updateUserInSupabase(form.fullname, form.email);
 
-    localStorage.setItem("onboarding_current_step", "2");
+    // Update step in Supabase and localStorage
+    await updateOnboardingStep(2);
     router.push("/onboarding/step2");
   };
 

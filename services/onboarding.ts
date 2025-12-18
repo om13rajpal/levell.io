@@ -153,6 +153,11 @@ export async function validateConnectedTools() {
       return false;
     }
 
+    if (!data.openapi) {
+      toast.error("Please connect OpenAI before continuing.");
+      return false;
+    }
+
     setCachedData(cacheKey, true);
     return true;
   } catch {
@@ -229,9 +234,23 @@ export async function sendWebsiteToWebhook(website: string, companyName: string)
 
     console.log("Webhook response data:", data);
 
-    // Extract markdown and json_val from response
-    const markdown = data?.markdown || data?.payload?.markdown || data?.payload?.data || data?.data || "";
-    const json_val = data?.json_val || data?.payload?.json_val || null;
+    // Extract markdown and analysis from response
+    // Response structure: { success, data: { markdown, analysis } }
+    const markdown =
+      data?.data?.markdown ||
+      data?.markdown ||
+      data?.payload?.markdown ||
+      data?.payload?.data?.markdown ||
+      "";
+
+    // The analysis data is what we store as json_val
+    const json_val =
+      data?.data?.analysis ||
+      data?.analysis ||
+      data?.json_val ||
+      data?.data?.json_val ||
+      data?.payload?.json_val ||
+      null;
 
     return {
       success: true,
@@ -661,5 +680,120 @@ export async function createOrUpdateWebhookData(
   } catch (err) {
     console.error("createOrUpdateWebhookData error:", err);
     return { success: false, error: "Failed to save webhook data" };
+  }
+}
+
+/* ================================================================= */
+/* ONBOARDING STEP TRACKING */
+/* ================================================================= */
+
+/**
+ * Get the current onboarding step for a user from Supabase
+ */
+export async function getOnboardingStep(userId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .select("onboarding_step, is_onboarding_done")
+      .eq("id", userId)
+      .single();
+
+    if (error) {
+      console.error("Error fetching onboarding step:", error);
+      return null;
+    }
+
+    // If onboarding is done, return null (completed)
+    if (data?.is_onboarding_done) {
+      return null;
+    }
+
+    return data?.onboarding_step || 1;
+  } catch (err) {
+    console.error("getOnboardingStep error:", err);
+    return null;
+  }
+}
+
+/**
+ * Update the current onboarding step for a user in Supabase
+ */
+export async function updateOnboardingStep(step: number): Promise<boolean> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from("users")
+      .update({ onboarding_step: step })
+      .eq("id", user.id);
+
+    if (error) {
+      console.error("Error updating onboarding step:", error);
+      return false;
+    }
+
+    // Also update localStorage for quick access
+    localStorage.setItem("onboarding_current_step", String(step));
+
+    return true;
+  } catch (err) {
+    console.error("updateOnboardingStep error:", err);
+    return false;
+  }
+}
+
+/**
+ * Initialize onboarding step for a new user (sets to step 1)
+ */
+export async function initializeOnboardingStep(userId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("users")
+      .update({ onboarding_step: 1, is_onboarding_done: false })
+      .eq("id", userId);
+
+    if (error) {
+      console.error("Error initializing onboarding step:", error);
+      return false;
+    }
+
+    localStorage.setItem("onboarding_current_step", "1");
+    return true;
+  } catch (err) {
+    console.error("initializeOnboardingStep error:", err);
+    return false;
+  }
+}
+
+/**
+ * Mark onboarding as complete
+ */
+export async function completeOnboarding(): Promise<boolean> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from("users")
+      .update({ is_onboarding_done: true, onboarding_step: null })
+      .eq("id", user.id);
+
+    if (error) {
+      console.error("Error completing onboarding:", error);
+      return false;
+    }
+
+    localStorage.setItem("onboarding_current_step", "completed");
+    return true;
+  } catch (err) {
+    console.error("completeOnboarding error:", err);
+    return false;
   }
 }

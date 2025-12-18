@@ -10,6 +10,8 @@ import {
   getPendingInviteTeamId,
   completeInviteOnboarding,
   clearInviteData,
+  updateOnboardingStep,
+  completeOnboarding,
 } from "@/services/onboarding";
 import { useRouter } from "next/navigation";
 import { useOnboardingGuard } from "@/hooks/useOnboardingGuard";
@@ -21,6 +23,7 @@ export default function Step2() {
   const router = useRouter();
   const { checking } = useOnboardingGuard();
   const [firefliesConnected, setFirefliesConnected] = useState(false);
+  const [openaiConnected, setOpenaiConnected] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isInviteFlow, setIsInviteFlow] = useState(false);
   const [inviteTeamId, setInviteTeamId] = useState<number | null>(null);
@@ -72,7 +75,9 @@ export default function Step2() {
 
       // Clear invite data from localStorage
       clearInviteData();
-      localStorage.setItem("onboarding_current_step", "completed");
+
+      // Mark onboarding as complete
+      await completeOnboarding();
 
       toast.success("Welcome to the team! Setup complete.");
 
@@ -80,7 +85,7 @@ export default function Step2() {
       router.replace("/dashboard");
     } else {
       // Standard onboarding flow - continue to step 3
-      localStorage.setItem("onboarding_current_step", "3");
+      await updateOnboardingStep(3);
       router.push("/onboarding/step3");
     }
 
@@ -116,6 +121,7 @@ export default function Step2() {
 
       <ConnectTools
         onFirefliesStatusChange={setFirefliesConnected}
+        onOpenAIStatusChange={setOpenaiConnected}
         onSavingChange={setSaving}
       />
 
@@ -124,7 +130,7 @@ export default function Step2() {
           Back
         </Button>
 
-        <Button disabled={!firefliesConnected || saving} onClick={handleNext}>
+        <Button disabled={!firefliesConnected || !openaiConnected || saving} onClick={handleNext}>
           {saving ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
