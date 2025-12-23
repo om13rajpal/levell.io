@@ -66,37 +66,27 @@ const ReactMarkdown = dynamic(
   { ssr: false, loading: () => <div className="animate-pulse h-4 bg-muted rounded" /> }
 );
 
-// Available AI models
+// Available AI models (OpenAI only)
 const models = [
   {
-    name: "Claude Sonnet 4.5",
-    value: "anthropic/claude-sonnet-4.5",
+    name: "GPT-4o",
+    value: "gpt-4o",
     description: "Most capable",
   },
   {
-    name: "GPT-4o",
-    value: "openai/gpt-4o",
-    description: "Advanced",
-  },
-  {
     name: "GPT-4o Mini",
-    value: "openai/gpt-4o-mini",
+    value: "gpt-4o-mini",
     description: "Fast & efficient",
   },
   {
-    name: "Claude Sonnet 3.5",
-    value: "anthropic/claude-3-5-sonnet-latest",
-    description: "Balanced",
+    name: "GPT-4 Turbo",
+    value: "gpt-4-turbo",
+    description: "Advanced reasoning",
   },
   {
-    name: "Claude Haiku",
-    value: "anthropic/claude-3-5-haiku-latest",
-    description: "Lightning fast",
-  },
-  {
-    name: "Gemini Flash",
-    value: "google/gemini-2.0-flash-exp",
-    description: "Latest Google",
+    name: "GPT-3.5 Turbo",
+    value: "gpt-3.5-turbo",
+    description: "Quick & affordable",
   },
 ];
 

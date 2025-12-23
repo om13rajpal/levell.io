@@ -3,7 +3,7 @@ import {
   streamText,
   type UIMessage,
 } from "ai";
-import { getOpenRouterModel } from "@/lib/openrouter";
+import { getOpenAIModel } from "@/lib/openai";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { trackAgentRequest } from "@/lib/openmeter";
 
@@ -326,7 +326,7 @@ export async function POST(req: Request) {
 
     const {
       messages,
-      model: modelId = "anthropic/claude-sonnet-4.5",
+      model: modelId = "gpt-4o",
       contextType,
       contextId,
       userId,
@@ -361,7 +361,7 @@ export async function POST(req: Request) {
     const systemPrompt = buildSystemPrompt(contextData, contextType || "call");
 
     // Get the model
-    const model = getOpenRouterModel(modelId);
+    const model = getOpenAIModel(modelId);
     console.log("[Agent] Using model:", modelId);
 
     const result = streamText({
