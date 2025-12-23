@@ -41,15 +41,24 @@ function formatDuration(minutes: number | null): string {
 // Fetch call/transcript context
 async function fetchCallContext(callId: string): Promise<string> {
   try {
-    const { data: transcript } = await getSupabaseAdmin()
+    console.log("[Agent] Fetching call context for ID:", callId);
+    const { data: transcript, error } = await getSupabaseAdmin()
       .from("transcripts")
       .select("*")
       .eq("id", callId)
       .single();
 
-    if (!transcript) {
-      return "No call data found for the selected call.";
+    if (error) {
+      console.error("[Agent] Supabase error fetching transcript:", error);
+      return `Error fetching call data: ${error.message}. Call ID: ${callId}`;
     }
+
+    if (!transcript) {
+      console.log("[Agent] No transcript found for ID:", callId);
+      return `No call data found for the selected call (ID: ${callId}).`;
+    }
+
+    console.log("[Agent] Successfully fetched transcript:", transcript.title);
 
     let context = `
 ## CALL TRANSCRIPT DATA
@@ -175,15 +184,25 @@ async function fetchCallContext(callId: string): Promise<string> {
 // Fetch company context
 async function fetchCompanyContext(companyId: string): Promise<string> {
   try {
-    const { data: company } = await getSupabaseAdmin()
+    console.log("[Agent] Fetching company context for ID:", companyId);
+
+    const { data: company, error } = await getSupabaseAdmin()
       .from("companies")
       .select("*")
       .eq("id", companyId)
       .single();
 
-    if (!company) {
-      return "No company data found for the selected company.";
+    if (error) {
+      console.error("[Agent] Supabase error fetching company:", error);
+      return `Error fetching company data: ${error.message}. Company ID: ${companyId}`;
     }
+
+    if (!company) {
+      console.log("[Agent] No company found for ID:", companyId);
+      return `No company data found for the selected company (ID: ${companyId}).`;
+    }
+
+    console.log("[Agent] Successfully fetched company:", company.company_name);
 
     let context = `
 ## COMPANY DATA
@@ -343,18 +362,22 @@ export async function POST(req: Request) {
       contextType,
       contextId,
       messageCount: messages?.length,
+      bodyKeys: Object.keys(body),
     });
 
     // Fetch context based on selection
     let contextData = "";
     if (contextType && contextId) {
+      console.log("[Agent] Fetching context for:", contextType, contextId);
       if (contextType === "call") {
         contextData = await fetchCallContext(contextId);
       } else if (contextType === "company") {
         contextData = await fetchCompanyContext(contextId);
       }
+      console.log("[Agent] Context data length:", contextData.length);
     } else {
-      contextData = "No context selected. Please select a call or company to analyze.";
+      console.log("[Agent] No context provided - contextType:", contextType, "contextId:", contextId);
+      contextData = `No context selected. Please select a call or company to analyze. (Debug: contextType=${contextType}, contextId=${contextId})`;
     }
 
     // Build system prompt
