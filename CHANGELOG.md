@@ -14,15 +14,15 @@ Phase 2 implements a multi-agent architecture for deeper, simpler, more actionab
 ### Added
 
 #### WS1: Context Loader
-- [ ] `lib/context-loader.ts` - Loads historical context for AI agents
-- [ ] Previous call summaries by company
-- [ ] Company profile loading
-- [ ] User business profile (ICP, products, personas)
-- [ ] Standardized `ContextObject` interface
+- [x] `lib/context-loader.ts` - Loads historical context for AI agents
+- [x] Previous call summaries by company
+- [x] Company profile loading
+- [x] User business profile (ICP, products, personas)
+- [x] Standardized `ContextObject` interface
 
 #### WS2: Extraction Agents
-- [ ] `types/extraction-outputs.ts` - TypeScript types and Zod schemas
-- [ ] `lib/extraction-agents.ts` - 6 parallel extraction agents:
+- [x] `types/extraction-outputs.ts` - TypeScript types and Zod schemas
+- [x] `lib/extraction-agents.ts` - 6 parallel extraction agents:
   1. Pain Points Extractor
   2. Objections Extractor
   3. Engagement Scorer
@@ -31,8 +31,8 @@ Phase 2 implements a multi-agent architecture for deeper, simpler, more actionab
   6. Rep Technique Analyzer
 
 #### WS3: Synthesis Agent
-- [ ] `lib/synthesis-agent.ts` - Combines extraction outputs
-- [ ] Generates coaching report with new sections:
+- [x] `lib/synthesis-agent.ts` - Combines extraction outputs
+- [x] Generates coaching report with new sections:
   - What Worked
   - Missed Opportunities
   - Deal Risk Alerts
@@ -42,18 +42,24 @@ Phase 2 implements a multi-agent architecture for deeper, simpler, more actionab
   - Deal Signal
 
 #### WS4: Database
-- [ ] `call_summary` column for AI-generated summaries
-- [ ] `deal_signal` column (healthy/at_risk/critical)
-- [ ] `extraction_outputs` JSONB for raw agent data
+- [x] `migrations/001_v2_multi_agent_schema.sql` - Migration script
+- [x] `call_summary` column for AI-generated summaries
+- [x] `deal_signal` column (healthy/at_risk/critical)
+- [x] `call_type` column (discovery/followup/demo/closing)
+- [x] `extraction_outputs` JSONB for raw agent data
 
 #### WS5: API Integration
-- [ ] `app/api/analyze-v2/route.ts` - V2 analysis pipeline API
-- [ ] Updated webhook handler with v2 support
+- [x] `app/api/analyze-v2/route.ts` - V2 analysis pipeline API
+- [x] `lib/analysis-pipeline.ts` - Full pipeline orchestrator
+- [ ] Updated webhook handler with v2 support (pending)
 
 #### WS6: Frontend
-- [ ] Updated Call Detail page with new coaching UI
-- [ ] Deal Signal badges
-- [ ] New scoring breakdown visualization
+- [x] Updated Call Detail page with new coaching UI
+- [x] Deal Signal badges (healthy/at_risk/critical)
+- [x] Patterns to Watch section
+- [x] Priority badges on Next Call Game Plan
+- [x] V2 data with V1 backward compatibility
+- [x] New 6-category scoring breakdown visualization
 
 ### Changed
 - AI language now sounds like a sales manager giving feedback

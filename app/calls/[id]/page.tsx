@@ -53,6 +53,8 @@ import {
   IconHeadphones,
   IconDiamond,
   IconRocket,
+  IconEye,
+  IconRepeat,
 } from "@tabler/icons-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -95,6 +97,7 @@ function formatDurationSeconds(seconds?: number | string | null): string {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
+  // V1 categories
   call_setup_and_control: "Call Setup & Control",
   call_setup_control: "Call Setup & Control",
   discovery_and_qualification: "Discovery & Qualification",
@@ -104,6 +107,31 @@ const CATEGORY_LABELS: Record<string, string> = {
   next_steps_and_momentum: "Next Steps & Momentum",
   next_steps_momentum: "Next Steps & Momentum",
   objection_handling: "Objection Handling",
+  // V2 categories
+  pain_points: "Pain Points",
+  objections: "Objections",
+  engagement: "Engagement",
+  next_steps: "Next Steps",
+  call_structure: "Call Structure",
+  rep_technique: "Rep Technique",
+};
+
+const DEAL_SIGNAL_CONFIG = {
+  healthy: {
+    label: "Healthy",
+    color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400 border-emerald-300",
+    icon: IconCheck,
+  },
+  at_risk: {
+    label: "At Risk",
+    color: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 border-amber-300",
+    icon: IconAlertTriangle,
+  },
+  critical: {
+    label: "Critical",
+    color: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400 border-rose-300",
+    icon: IconAlertTriangle,
+  },
 };
 
 function formatCategoryLabel(key: string) {
@@ -133,69 +161,87 @@ function getScoreRingColor(score: number) {
 /* Memoized Components for Performance */
 /* ------------------------------------------------------------- */
 
-// Memoized header with score
+// Memoized header with score and deal signal
 const CallHeader = memo(({
   title,
   createdAt,
   duration,
   firefliesId,
-  aiOverallScore
+  aiOverallScore,
+  dealSignal,
 }: {
   title: string;
   createdAt: string;
   duration: string;
   firefliesId?: string;
   aiOverallScore: number | null;
-}) => (
-  <div className="flex items-start justify-between flex-wrap gap-6">
-    <div className="space-y-2">
-      <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
-      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-        <span>{createdAt}</span>
-        <span>·</span>
-        <span>{duration}</span>
-      </div>
-      {firefliesId && (
-        <p className="text-xs text-muted-foreground/60">
-          ID: {firefliesId}
-        </p>
-      )}
-    </div>
+  dealSignal?: "healthy" | "at_risk" | "critical" | null;
+}) => {
+  const signalConfig = dealSignal ? DEAL_SIGNAL_CONFIG[dealSignal] : null;
+  const SignalIcon = signalConfig?.icon;
 
-    {aiOverallScore !== null ? (
-      <div className="flex flex-col items-center">
-        <div className="relative h-24 w-24">
-          <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100">
-            <circle
-              cx="50"
-              cy="50"
-              r="40"
-              fill="none"
-              className="stroke-muted"
-              strokeWidth="8"
-            />
-            <circle
-              cx="50"
-              cy="50"
-              r="40"
-              fill="none"
-              className={getScoreRingColor(aiOverallScore)}
-              strokeWidth="8"
-              strokeDasharray={`${(aiOverallScore / 100) * 251.2} 251.2`}
-              strokeLinecap="round"
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className={`text-3xl font-bold ${getScoreColor(aiOverallScore)}`}>
-              {aiOverallScore}
-            </span>
-          </div>
+  return (
+    <div className="flex items-start justify-between flex-wrap gap-6">
+      <div className="space-y-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+          {signalConfig && SignalIcon && (
+            <Badge
+              variant="outline"
+              className={`${signalConfig.color} border flex items-center gap-1.5 px-2.5 py-1`}
+            >
+              <SignalIcon className="h-3.5 w-3.5" />
+              {signalConfig.label}
+            </Badge>
+          )}
         </div>
-        <span className="text-xs text-muted-foreground mt-1">Overall Score</span>
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <span>{createdAt}</span>
+          <span>·</span>
+          <span>{duration}</span>
+        </div>
+        {firefliesId && (
+          <p className="text-xs text-muted-foreground/60">
+            ID: {firefliesId}
+          </p>
+        )}
       </div>
-    ) : null}
-  </div>
-));
+
+      {aiOverallScore !== null ? (
+        <div className="flex flex-col items-center">
+          <div className="relative h-24 w-24">
+            <svg className="h-24 w-24 -rotate-90" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                fill="none"
+                className="stroke-muted"
+                strokeWidth="8"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                fill="none"
+                className={getScoreRingColor(aiOverallScore)}
+                strokeWidth="8"
+                strokeDasharray={`${(aiOverallScore / 100) * 251.2} 251.2`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className={`text-3xl font-bold ${getScoreColor(aiOverallScore)}`}>
+                {aiOverallScore}
+              </span>
+            </div>
+          </div>
+          <span className="text-xs text-muted-foreground mt-1">Overall Score</span>
+        </div>
+      ) : null}
+    </div>
+  );
+});
 CallHeader.displayName = "CallHeader";
 
 // Memoized category breakdown with accordion
@@ -562,7 +608,44 @@ export default function CallDetailPage() {
   const aiNextPlan = useMemo(() => row?.ai_next_call_game_plan ?? [], [row?.ai_next_call_game_plan]);
   const aiRisks = useMemo(() => row?.ai_deal_risk_alerts ?? [], [row?.ai_deal_risk_alerts]);
 
-  const categoryEntries = useMemo(() => Object.entries(aiCategoryBreakdown), [aiCategoryBreakdown]);
+  // V2 fields (with V1 fallbacks for backward compatibility)
+  const dealSignal = useMemo(() => row?.deal_signal ?? null, [row?.deal_signal]);
+  const aiAnalysis = useMemo(() => row?.ai_analysis ?? null, [row?.ai_analysis]);
+  const aiCategoryScores = useMemo(() => row?.ai_category_scores ?? null, [row?.ai_category_scores]);
+
+  // V2 coaching sections from ai_analysis (with V1 fallbacks)
+  const patternsToWatch = useMemo(() => aiAnalysis?.patterns_to_watch ?? [], [aiAnalysis]);
+  const v2WhatWorked = useMemo(() => aiAnalysis?.what_worked ?? [], [aiAnalysis]);
+  const v2MissedOpportunities = useMemo(() => aiAnalysis?.missed_opportunities ?? [], [aiAnalysis]);
+  const v2DealRisks = useMemo(() => aiAnalysis?.deal_risk_alerts ?? [], [aiAnalysis]);
+  const v2NextCallPlan = useMemo(() => aiAnalysis?.next_call_game_plan ?? [], [aiAnalysis]);
+
+  // Use V2 data if available, otherwise fall back to V1
+  const effectiveWhatWorked = useMemo(() =>
+    v2WhatWorked.length > 0 ? v2WhatWorked : aiWhatWorked,
+    [v2WhatWorked, aiWhatWorked]
+  );
+  const effectiveMissed = useMemo(() =>
+    v2MissedOpportunities.length > 0 ? v2MissedOpportunities : aiMissed,
+    [v2MissedOpportunities, aiMissed]
+  );
+  const effectiveRisks = useMemo(() =>
+    v2DealRisks.length > 0 ? v2DealRisks : aiRisks,
+    [v2DealRisks, aiRisks]
+  );
+  const effectiveNextPlan = useMemo(() =>
+    v2NextCallPlan.length > 0 ? v2NextCallPlan : aiNextPlan,
+    [v2NextCallPlan, aiNextPlan]
+  );
+
+  // Category entries: prefer V2 6-category scores, fall back to V1 breakdown
+  const categoryEntries = useMemo((): [string, any][] => {
+    if (aiCategoryScores) {
+      // V2 format: just scores, no reason text
+      return Object.entries(aiCategoryScores).map(([key, score]): [string, any] => [key, { score, reason: null }]);
+    }
+    return Object.entries(aiCategoryBreakdown);
+  }, [aiCategoryScores, aiCategoryBreakdown]);
 
   /* ------------------------------------------------------------- */
   /* Data loading - always fetch live to avoid localStorage quota issues */
@@ -690,6 +773,7 @@ export default function CallDetailPage() {
             duration={duration}
             firefliesId={row.fireflies_id}
             aiOverallScore={aiOverallScore}
+            dealSignal={dealSignal}
           />
 
           {/* ============================================================
@@ -771,7 +855,7 @@ export default function CallDetailPage() {
           {/* ============================================================
               WHAT WORKED
           ============================================================ */}
-          {aiWhatWorked.length > 0 && (
+          {effectiveWhatWorked.length > 0 && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <IconCheck className="text-emerald-500 h-5 w-5" />
@@ -779,11 +863,11 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="space-y-3">
-                {aiWhatWorked.map((item: any, i: number) => {
-                  // Handle both string format and object format
+                {effectiveWhatWorked.map((item: any, i: number) => {
+                  // Handle V1 (string or object) and V2 (moment/quote/why_effective) formats
                   const isString = typeof item === "string";
-                  const content = isString ? item : item.behavior_skill || item.text || "";
-                  const explanation = isString ? null : item.explanation;
+                  const content = isString ? item : item.moment || item.behavior_skill || item.text || "";
+                  const explanation = isString ? null : item.why_effective || item.explanation;
                   const quote = isString ? null : item.quote;
 
                   return (
@@ -876,7 +960,7 @@ export default function CallDetailPage() {
           {/* ============================================================
               MISSED OPPORTUNITIES
           ============================================================ */}
-          {aiMissed.length > 0 && (
+          {effectiveMissed.length > 0 && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <IconTarget className="h-5 w-5 text-purple-500" />
@@ -884,7 +968,7 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="space-y-4">
-                {aiMissed.map((item: any, i: number) => (
+                {effectiveMissed.map((item: any, i: number) => (
                   <Card
                     key={i}
                     className="border-purple-200/50 dark:border-purple-500/20 bg-purple-50/30 dark:bg-purple-950/10"
@@ -903,13 +987,13 @@ export default function CallDetailPage() {
                           <p>{item.why_it_matters}</p>
                         </div>
                       )}
-                      {(item.what_you_should_have_done || item.what_you_could_have_done) && (
+                      {(item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done) && (
                         <div>
                           <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            What You Should Have Done
+                            What You Should Have Said
                           </p>
-                          <p className="text-purple-800 dark:text-purple-200">
-                            {item.what_you_should_have_done || item.what_you_could_have_done}
+                          <p className="text-purple-800 dark:text-purple-200 italic">
+                            "{item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done}"
                           </p>
                         </div>
                       )}
@@ -1007,7 +1091,7 @@ export default function CallDetailPage() {
           {/* ============================================================
               NEXT CALL GAME PLAN
           ============================================================ */}
-          {aiNextPlan.length > 0 && (
+          {effectiveNextPlan.length > 0 && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <IconShieldCheck className="h-5 w-5 text-emerald-500" />
@@ -1015,23 +1099,99 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="space-y-3">
-                {aiNextPlan.map((item: any, i: number) => (
+                {effectiveNextPlan.map((item: any, i: number) => {
+                  // V2 format has priority field
+                  const priorityColors: Record<string, string> = {
+                    high: "border-rose-300 bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400",
+                    medium: "border-amber-300 bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400",
+                    low: "border-slate-300 bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-400",
+                  };
+
+                  return (
+                    <Card
+                      key={i}
+                      className="border-emerald-200/50 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
+                    >
+                      <CardContent className="pt-4">
+                        <div className="flex gap-3">
+                          <div className="h-6 w-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                            {i + 1}
+                          </div>
+                          <div className="space-y-2 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium">{item.action}</p>
+                              {item.priority && (
+                                <Badge
+                                  variant="outline"
+                                  className={`shrink-0 text-xs ${priorityColors[item.priority] || ""}`}
+                                >
+                                  {item.priority}
+                                </Badge>
+                              )}
+                            </div>
+                            {item.why && (
+                              <p className="text-sm text-muted-foreground">{item.why}</p>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================
+              PATTERNS TO WATCH (V2)
+          ============================================================ */}
+          {patternsToWatch.length > 0 && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <IconRepeat className="h-5 w-5 text-orange-500" />
+                Patterns to Watch
+              </h2>
+
+              <div className="space-y-4">
+                {patternsToWatch.map((item: any, i: number) => (
                   <Card
                     key={i}
-                    className="border-emerald-200/50 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
+                    className="border-orange-200/50 dark:border-orange-500/20 bg-orange-50/30 dark:bg-orange-950/10"
                   >
-                    <CardContent className="pt-4">
-                      <div className="flex gap-3">
-                        <div className="h-6 w-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                          {i + 1}
-                        </div>
-                        <div className="space-y-1">
-                          <p className="font-medium">{item.action}</p>
-                          {item.why && (
-                            <p className="text-sm text-muted-foreground">{item.why}</p>
-                          )}
-                        </div>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-base text-orange-700 dark:text-orange-300">
+                          {item.pattern}
+                        </CardTitle>
+                        {item.occurrences && (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 text-xs border-orange-300 text-orange-700 dark:text-orange-400"
+                          >
+                            {item.occurrences}x
+                          </Badge>
+                        )}
                       </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      {item.impact && (
+                        <div>
+                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                            Impact
+                          </p>
+                          <p>{item.impact}</p>
+                        </div>
+                      )}
+                      {item.recommendation && (
+                        <div>
+                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                            Recommendation
+                          </p>
+                          <p className="text-orange-800 dark:text-orange-200">
+                            {item.recommendation}
+                          </p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -1042,7 +1202,7 @@ export default function CallDetailPage() {
           {/* ============================================================
               DEAL RISK ALERTS
           ============================================================ */}
-          {aiRisks.length > 0 && (
+          {effectiveRisks.length > 0 && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <IconAlertTriangle className="h-5 w-5 text-rose-500" />
@@ -1050,7 +1210,7 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="space-y-4">
-                {aiRisks.map((item: any, i: number) => (
+                {effectiveRisks.map((item: any, i: number) => (
                   <Card
                     key={i}
                     className="border-rose-200/50 dark:border-rose-500/20 bg-rose-50/30 dark:bg-rose-950/10"
@@ -1070,21 +1230,21 @@ export default function CallDetailPage() {
                           <p>{item.what_happened}</p>
                         </div>
                       )}
-                      {(item.why_it_is_a_risk || item.what_this_means) && (
+                      {(item.why_risky || item.why_it_is_a_risk || item.what_this_means) && (
                         <div>
                           <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
                             Why It's a Risk
                           </p>
-                          <p>{item.why_it_is_a_risk || item.what_this_means}</p>
+                          <p>{item.why_risky || item.why_it_is_a_risk || item.what_this_means}</p>
                         </div>
                       )}
-                      {(item.how_to_fix_it || item.how_to_address_it) && (
+                      {(item.question_to_ask || item.how_to_fix_it || item.how_to_address_it) && (
                         <div>
                           <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
                             How to Address
                           </p>
                           <p className="text-rose-800 dark:text-rose-200">
-                            {item.how_to_fix_it || item.how_to_address_it}
+                            {item.question_to_ask || item.how_to_fix_it || item.how_to_address_it}
                           </p>
                         </div>
                       )}
