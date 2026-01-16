@@ -643,3 +643,407 @@ export async function createTeam(
     return { success: false, error: "An unexpected error occurred." };
   }
 }
+
+// ============================================================================
+// Tag/Department Management Types
+// ============================================================================
+
+export type TagType = "role" | "department";
+
+export interface TeamTag {
+  id: number;
+  team_id: number;
+  tag_name: string;
+  tag_color: string;
+  tag_type: TagType;
+  description: string | null;
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamMemberTag {
+  id: number;
+  team_id: number;
+  user_id: string;
+  tag_id: number;
+  created_at: string;
+}
+
+export interface TagUpdatePayload {
+  tag_name?: string;
+  tag_color?: string;
+  description?: string;
+}
+
+export const DEPARTMENT_TYPE_OPTIONS = [
+  "HR",
+  "Engineering",
+  "Sales",
+  "Marketing",
+  "Finance",
+  "Operations",
+  "Customer Support",
+  "Other",
+] as const;
+
+export type DepartmentType = (typeof DEPARTMENT_TYPE_OPTIONS)[number];
+
+// ============================================================================
+// Tag/Department Management Functions
+// ============================================================================
+
+/**
+ * Get all tags for a team, ordered by type then name
+ */
+export async function getTeamTags(
+  teamId: number
+): Promise<{ success: boolean; tags?: TeamTag[]; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from("team_tags")
+      .select("*")
+      .eq("team_id", teamId)
+      .order("tag_type", { ascending: true })
+      .order("tag_name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching team tags:", error);
+      return { success: false, error: "Failed to fetch team tags." };
+    }
+
+    return { success: true, tags: data || [] };
+  } catch (err) {
+    console.error("Get team tags error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Create a new custom tag for a team
+ */
+export async function createTeamTag(
+  teamId: number,
+  tagName: string,
+  tagColor: string,
+  tagType: TagType,
+  description?: string
+): Promise<{ success: boolean; tag?: TeamTag; error?: string }> {
+  try {
+    // Validate inputs
+    if (!tagName || tagName.trim().length === 0) {
+      return { success: false, error: "Tag name is required." };
+    }
+
+    if (!tagColor || !/^#[0-9A-Fa-f]{6}$/.test(tagColor)) {
+      return { success: false, error: "Invalid tag color. Must be a valid hex color (e.g., #FF0000)." };
+    }
+
+    if (!["role", "department"].includes(tagType)) {
+      return { success: false, error: "Invalid tag type. Must be 'role' or 'department'." };
+    }
+
+    // Check for duplicate tag name in the same team
+    const { data: existingTag } = await supabase
+      .from("team_tags")
+      .select("id")
+      .eq("team_id", teamId)
+      .ilike("tag_name", tagName.trim())
+      .maybeSingle();
+
+    if (existingTag) {
+      return { success: false, error: "A tag with this name already exists in the team." };
+    }
+
+    // Create the tag
+    const { data: newTag, error } = await supabase
+      .from("team_tags")
+      .insert({
+        team_id: teamId,
+        tag_name: tagName.trim(),
+        tag_color: tagColor,
+        tag_type: tagType,
+        description: description?.trim() || null,
+        is_system: false,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating team tag:", error);
+      return { success: false, error: "Failed to create tag." };
+    }
+
+    return { success: true, tag: newTag };
+  } catch (err) {
+    console.error("Create team tag error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Update an existing tag
+ */
+export async function updateTeamTag(
+  tagId: number,
+  updates: TagUpdatePayload
+): Promise<{ success: boolean; tag?: TeamTag; error?: string }> {
+  try {
+    // Fetch the existing tag to check if it's a system tag
+    const { data: existingTag, error: fetchError } = await supabase
+      .from("team_tags")
+      .select("*")
+      .eq("id", tagId)
+      .single();
+
+    if (fetchError || !existingTag) {
+      return { success: false, error: "Tag not found." };
+    }
+
+    // System tags can only have their color updated
+    if (existingTag.is_system && (updates.tag_name || updates.description)) {
+      return { success: false, error: "System tags can only have their color updated." };
+    }
+
+    // Validate tag name if provided
+    if (updates.tag_name !== undefined) {
+      if (!updates.tag_name || updates.tag_name.trim().length === 0) {
+        return { success: false, error: "Tag name cannot be empty." };
+      }
+
+      // Check for duplicate tag name in the same team (excluding current tag)
+      const { data: duplicateTag } = await supabase
+        .from("team_tags")
+        .select("id")
+        .eq("team_id", existingTag.team_id)
+        .ilike("tag_name", updates.tag_name.trim())
+        .neq("id", tagId)
+        .maybeSingle();
+
+      if (duplicateTag) {
+        return { success: false, error: "A tag with this name already exists in the team." };
+      }
+    }
+
+    // Validate color if provided
+    if (updates.tag_color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(updates.tag_color)) {
+      return { success: false, error: "Invalid tag color. Must be a valid hex color (e.g., #FF0000)." };
+    }
+
+    // Build update payload
+    const updatePayload: Record<string, unknown> = {};
+    if (updates.tag_name !== undefined) {
+      updatePayload.tag_name = updates.tag_name.trim();
+    }
+    if (updates.tag_color !== undefined) {
+      updatePayload.tag_color = updates.tag_color;
+    }
+    if (updates.description !== undefined) {
+      updatePayload.description = updates.description?.trim() || null;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { success: false, error: "No valid updates provided." };
+    }
+
+    // Update the tag
+    const { data: updatedTag, error } = await supabase
+      .from("team_tags")
+      .update(updatePayload)
+      .eq("id", tagId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error updating team tag:", error);
+      return { success: false, error: "Failed to update tag." };
+    }
+
+    return { success: true, tag: updatedTag };
+  } catch (err) {
+    console.error("Update team tag error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Delete a tag (with validation it's not a system tag)
+ */
+export async function deleteTeamTag(
+  tagId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Fetch the existing tag to check if it's a system tag
+    const { data: existingTag, error: fetchError } = await supabase
+      .from("team_tags")
+      .select("id, is_system")
+      .eq("id", tagId)
+      .single();
+
+    if (fetchError || !existingTag) {
+      return { success: false, error: "Tag not found." };
+    }
+
+    if (existingTag.is_system) {
+      return { success: false, error: "System tags cannot be deleted." };
+    }
+
+    // Delete all member associations for this tag first
+    const { error: memberTagError } = await supabase
+      .from("team_member_tags")
+      .delete()
+      .eq("tag_id", tagId);
+
+    if (memberTagError) {
+      console.error("Error deleting member tag associations:", memberTagError);
+      return { success: false, error: "Failed to delete tag associations." };
+    }
+
+    // Delete the tag
+    const { error } = await supabase
+      .from("team_tags")
+      .delete()
+      .eq("id", tagId);
+
+    if (error) {
+      console.error("Error deleting team tag:", error);
+      return { success: false, error: "Failed to delete tag." };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Delete team tag error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Assign multiple tags to a member (replaces existing non-role tags)
+ */
+export async function assignTagsToMember(
+  teamId: number,
+  userId: string,
+  tagIds: number[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Validate that all provided tag IDs belong to this team
+    if (tagIds.length > 0) {
+      const { data: validTags, error: validateError } = await supabase
+        .from("team_tags")
+        .select("id, tag_type")
+        .eq("team_id", teamId)
+        .in("id", tagIds);
+
+      if (validateError) {
+        console.error("Error validating tags:", validateError);
+        return { success: false, error: "Failed to validate tags." };
+      }
+
+      if (!validTags || validTags.length !== tagIds.length) {
+        return { success: false, error: "One or more tags do not belong to this team." };
+      }
+    }
+
+    // Get existing role tags for the user (we'll preserve these)
+    const { data: existingRoleTags, error: fetchRoleError } = await supabase
+      .from("team_member_tags")
+      .select("tag_id, team_tags!inner(tag_type)")
+      .eq("team_id", teamId)
+      .eq("user_id", userId);
+
+    if (fetchRoleError) {
+      console.error("Error fetching existing role tags:", fetchRoleError);
+      return { success: false, error: "Failed to fetch existing tags." };
+    }
+
+    // Filter to get only role tag IDs that should be preserved
+    const roleTagIds = (existingRoleTags || [])
+      .filter((t: any) => t.team_tags?.tag_type === "role")
+      .map((t: any) => t.tag_id);
+
+    // Delete all existing non-role tags for this member
+    const { error: deleteError } = await supabase
+      .from("team_member_tags")
+      .delete()
+      .eq("team_id", teamId)
+      .eq("user_id", userId)
+      .not("tag_id", "in", `(${roleTagIds.length > 0 ? roleTagIds.join(",") : "0"})`);
+
+    if (deleteError) {
+      console.error("Error deleting existing member tags:", deleteError);
+      return { success: false, error: "Failed to update member tags." };
+    }
+
+    // Filter out role tags from the new tag IDs (we already have them preserved)
+    const nonRoleTagIds = tagIds.filter((id) => !roleTagIds.includes(id));
+
+    // Insert new non-role tags
+    if (nonRoleTagIds.length > 0) {
+      const insertPayload = nonRoleTagIds.map((tagId) => ({
+        team_id: teamId,
+        user_id: userId,
+        tag_id: tagId,
+      }));
+
+      const { error: insertError } = await supabase
+        .from("team_member_tags")
+        .insert(insertPayload);
+
+      if (insertError) {
+        console.error("Error inserting member tags:", insertError);
+        return { success: false, error: "Failed to assign tags to member." };
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Assign tags to member error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Get all tags assigned to a specific member
+ */
+export async function getMemberTags(
+  teamId: number,
+  userId: string
+): Promise<{ success: boolean; tags?: TeamTag[]; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from("team_member_tags")
+      .select("tag_id, team_tags(*)")
+      .eq("team_id", teamId)
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Error fetching member tags:", error);
+      return { success: false, error: "Failed to fetch member tags." };
+    }
+
+    // Extract the tag objects from the join result
+    const tags = (data || [])
+      .map((item: any) => item.team_tags)
+      .filter((tag: TeamTag | null) => tag !== null) as TeamTag[];
+
+    // Sort by type then name
+    tags.sort((a, b) => {
+      if (a.tag_type !== b.tag_type) {
+        return a.tag_type.localeCompare(b.tag_type);
+      }
+      return a.tag_name.localeCompare(b.tag_name);
+    });
+
+    return { success: true, tags };
+  } catch (err) {
+    console.error("Get member tags error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Returns predefined department type options
+ */
+export function getTagTypeOptions(): DepartmentType[] {
+  return [...DEPARTMENT_TYPE_OPTIONS];
+}

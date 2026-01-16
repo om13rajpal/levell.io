@@ -65,6 +65,9 @@ import {
   History,
   Trash2,
   Loader2,
+  Shield,
+  Crown,
+  Building2,
 } from "lucide-react";
 import {
   Bar,
@@ -159,6 +162,12 @@ export default function TeamMemberProfilePage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // Member tags and team info
+  const [memberTags, setMemberTags] = useState<any[]>([]);
+  const [teamTags, setTeamTags] = useState<any[]>([]);
+  const [isTeamOwner, setIsTeamOwner] = useState(false);
+  const [memberRole, setMemberRole] = useState<"admin" | "member" | null>(null);
+
   // Server-side pagination for transcripts
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -199,40 +208,79 @@ export default function TeamMemberProfilePage() {
         .eq("id", memberId)
         .single();
 
-      // Get member's team to check admin status
-      if (memberData?.team_id && currentUid) {
+      // Get member's team to check admin status and fetch member tags
+      if (memberData?.team_id) {
         // Fetch team tags
         const { data: tagsData } = await supabase
           .from("team_tags")
           .select("*")
           .eq("team_id", memberData.team_id);
 
-        // Fetch member tags for current user
-        const { data: memberTagsData } = await supabase
+        if (tagsData) {
+          setTeamTags(tagsData);
+        }
+
+        // Fetch member tags for the profile member (not current user)
+        const { data: profileMemberTags } = await supabase
           .from("team_member_tags")
           .select("*")
           .eq("team_id", memberData.team_id)
-          .eq("user_id", currentUid);
+          .eq("user_id", memberId);
 
-        // Check if current user has admin tag
-        if (tagsData && memberTagsData) {
-          const adminTag = tagsData.find(
-            (t) => t.tag_name.toLowerCase() === "admin"
-          );
-          if (adminTag && memberTagsData.some((mt) => mt.tag_id === adminTag.id)) {
-            setIsAdmin(true);
+        if (profileMemberTags) {
+          setMemberTags(profileMemberTags);
+
+          // Determine member's role
+          if (tagsData) {
+            const adminTag = tagsData.find(
+              (t: any) => t.tag_name.toLowerCase() === "admin"
+            );
+            const memberTag = tagsData.find(
+              (t: any) => t.tag_name.toLowerCase() === "member"
+            );
+
+            if (adminTag && profileMemberTags.some((mt: any) => mt.tag_id === adminTag.id)) {
+              setMemberRole("admin");
+            } else if (memberTag && profileMemberTags.some((mt: any) => mt.tag_id === memberTag.id)) {
+              setMemberRole("member");
+            }
           }
         }
 
-        // Also check if current user is team owner
+        // Also check if current user is team owner (for admin access)
         const { data: teamData } = await supabase
           .from("teams")
           .select("owner")
           .eq("id", memberData.team_id)
           .single();
 
-        if (teamData?.owner === currentUid) {
-          setIsAdmin(true);
+        // Check if profile member is team owner
+        if (teamData?.owner === memberId) {
+          setIsTeamOwner(true);
+        }
+
+        if (currentUid) {
+          // Fetch member tags for current user to check admin status
+          const { data: currentUserTags } = await supabase
+            .from("team_member_tags")
+            .select("*")
+            .eq("team_id", memberData.team_id)
+            .eq("user_id", currentUid);
+
+          // Check if current user has admin tag
+          if (tagsData && currentUserTags) {
+            const adminTag = tagsData.find(
+              (t: any) => t.tag_name.toLowerCase() === "admin"
+            );
+            if (adminTag && currentUserTags.some((mt: any) => mt.tag_id === adminTag.id)) {
+              setIsAdmin(true);
+            }
+          }
+
+          // Check if current user is team owner
+          if (teamData?.owner === currentUid) {
+            setIsAdmin(true);
+          }
         }
       }
 
@@ -521,6 +569,14 @@ export default function TeamMemberProfilePage() {
       .slice(-20);
   }, [chartData]);
 
+  // Get department tags for display
+  const departmentTags = useMemo(() => {
+    if (!teamTags.length || !memberTags.length) return [];
+    return teamTags.filter(
+      (t) => t.tag_type === "department" && memberTags.some((mt) => mt.tag_id === t.id)
+    );
+  }, [teamTags, memberTags]);
+
   // Server-side pagination calculations
   const totalPages = Math.ceil(totalTranscripts / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
@@ -645,14 +701,65 @@ export default function TeamMemberProfilePage() {
                     <ArrowLeft className="h-4 w-4 mr-2" /> Back
                   </Button>
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-12 w-12">
-                      <AvatarFallback className="bg-primary/10 text-primary text-lg">
-                        {member.name?.[0]?.toUpperCase() || member.email?.[0]?.toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <h1 className="text-2xl font-bold">{member.name || "No Name"}</h1>
+                    <div className="relative">
+                      <Avatar className="h-12 w-12">
+                        <AvatarFallback className={`text-lg ${
+                          isTeamOwner
+                            ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                            : memberRole === 'admin'
+                            ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400'
+                            : 'bg-primary/10 text-primary'
+                        }`}>
+                          {member.name?.[0]?.toUpperCase() || member.email?.[0]?.toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      {isTeamOwner && (
+                        <div className="absolute -top-0.5 -right-0.5 h-5 w-5 rounded-full bg-amber-500 flex items-center justify-center ring-2 ring-background">
+                          <Crown className="h-2.5 w-2.5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h1 className="text-2xl font-bold">{member.name || "No Name"}</h1>
+                        {/* Role Badge */}
+                        {isTeamOwner ? (
+                          <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 gap-1 text-xs">
+                            <Crown className="h-3 w-3" />
+                            Owner
+                          </Badge>
+                        ) : memberRole === "admin" ? (
+                          <Badge variant="outline" className="bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30 gap-1 text-xs">
+                            <Shield className="h-3 w-3" />
+                            Admin
+                          </Badge>
+                        ) : memberRole === "member" ? (
+                          <Badge variant="outline" className="text-muted-foreground gap-1 text-xs">
+                            Member
+                          </Badge>
+                        ) : null}
+                      </div>
                       <p className="text-sm text-muted-foreground">{member.email}</p>
+                      {/* Department Tags */}
+                      {departmentTags.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                          <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          {departmentTags.map((tag: any) => (
+                            <Badge
+                              key={tag.id}
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0"
+                              style={{
+                                backgroundColor: tag.tag_color ? `${tag.tag_color}15` : undefined,
+                                borderColor: tag.tag_color || undefined,
+                                color: tag.tag_color || undefined,
+                              }}
+                            >
+                              {tag.tag_name}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -77,7 +77,12 @@ import {
   MessageSquare,
   Phone,
   TrendingUp,
+  Tag,
+  Building2,
 } from "lucide-react";
+
+import TagManagement from "@/components/TagManagement";
+import { MemberTagAssignment } from "@/components/MemberTagAssignment";
 
 type Team = {
   id: number;
@@ -98,6 +103,7 @@ type TeamTag = {
   team_id: number;
   tag_name: string;
   tag_color: string | null;
+  tag_type?: "role" | "department";
   created_at: string;
 };
 
@@ -144,6 +150,10 @@ export default function TeamPage() {
   const [selectedMember, setSelectedMember] = useState<UserRow | null>(null);
   const [selectedRole, setSelectedRole] = useState<"admin" | "member">("member");
   const [roleSaving, setRoleSaving] = useState(false);
+
+  // Tag assignment dialog state
+  const [tagAssignmentOpen, setTagAssignmentOpen] = useState(false);
+  const [tagAssignmentMember, setTagAssignmentMember] = useState<UserRow | null>(null);
 
   const [loading, setLoading] = useState(true);
 
@@ -762,6 +772,35 @@ export default function TeamPage() {
     const currentRole = getRoleForUser(member.id);
     setSelectedRole(currentRole === "admin" ? "admin" : "member");
     setRoleDialogOpen(true);
+  };
+
+  const openTagAssignment = (member: UserRow) => {
+    if (!team || !isAdmin) return;
+    setTagAssignmentMember(member);
+    setTagAssignmentOpen(true);
+  };
+
+  const handleTagsChange = async () => {
+    if (!team) return;
+    // Refresh tags and member tags
+    const [tagsResult, memberTagsResult] = await Promise.all([
+      supabase.from("team_tags").select("*").eq("team_id", team.id),
+      supabase.from("team_member_tags").select("*").eq("team_id", team.id)
+    ]);
+    setTags(tagsResult.data || []);
+    setMemberTags(memberTagsResult.data || []);
+  };
+
+  // Get department tags for a member
+  const getMemberDepartmentTags = (memberId: string) => {
+    if (!team) return [];
+    const userMemberTags = memberTags.filter(
+      (mt) => mt.user_id === memberId && mt.team_id === team.id
+    );
+    const departmentTags = tags.filter(
+      (t) => t.tag_type === "department" && userMemberTags.some((mt) => mt.tag_id === t.id)
+    );
+    return departmentTags;
   };
 
   const saveMemberRole = async () => {
@@ -1443,7 +1482,23 @@ export default function TeamPage() {
                               </TableCell>
 
                               <TableCell className="py-3">
-                                {renderRoleBadge(role, isMemberOwner)}
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {renderRoleBadge(role, isMemberOwner)}
+                                  {getMemberDepartmentTags(m.id).map((tag) => (
+                                    <Badge
+                                      key={tag.id}
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 py-0"
+                                      style={{
+                                        backgroundColor: tag.tag_color ? `${tag.tag_color}15` : undefined,
+                                        borderColor: tag.tag_color || undefined,
+                                        color: tag.tag_color || undefined,
+                                      }}
+                                    >
+                                      {tag.tag_name}
+                                    </Badge>
+                                  ))}
+                                </div>
                               </TableCell>
 
                               {isAdmin && (
@@ -1471,8 +1526,22 @@ export default function TeamPage() {
                                             e.stopPropagation();
                                             openRoleDialog(m);
                                           }}
+                                          title="Change role"
                                         >
                                           <Shield className="h-3.5 w-3.5" />
+                                        </Button>
+
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openTagAssignment(m);
+                                          }}
+                                          title="Assign tags"
+                                        >
+                                          <Tag className="h-3.5 w-3.5" />
                                         </Button>
 
                                         <Button
@@ -1499,6 +1568,16 @@ export default function TeamPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Tag Management - Only for Admins */}
+              {isAdmin && (
+                <TagManagement
+                  teamId={team.id}
+                  tags={tags}
+                  isAdmin={isAdmin}
+                  onTagsChange={handleTagsChange}
+                />
+              )}
 
               {/* My Stats and Coaching Notes - Side by Side Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1698,6 +1777,22 @@ export default function TeamPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Tag Assignment Dialog */}
+      {team && tagAssignmentMember && (
+        <MemberTagAssignment
+          open={tagAssignmentOpen}
+          onOpenChange={setTagAssignmentOpen}
+          teamId={team.id}
+          member={tagAssignmentMember}
+          allTags={tags}
+          currentMemberTags={memberTags.filter(
+            (mt) => mt.user_id === tagAssignmentMember.id && mt.team_id === team.id
+          )}
+          onSave={handleTagsChange}
+          isOwner={team.owner === tagAssignmentMember.id}
+        />
+      )}
     </SidebarProvider>
   );
 }

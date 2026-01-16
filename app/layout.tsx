@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "sonner";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -15,8 +16,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Levvl.io",
-  description: "Made with <3 by agiready.io",
+  title: "levvl.io | AI-Powered Sales Call Coaching",
+  description: "Turn every sales call into a coaching opportunity. AI-powered call analysis that surfaces insights, identifies risks, and syncs to HubSpot.",
+  keywords: ["sales coaching", "call analysis", "AI", "HubSpot", "Fireflies", "sales intelligence"],
+  openGraph: {
+    title: "levvl.io | AI-Powered Sales Call Coaching",
+    description: "Turn every sales call into a coaching opportunity with AI-powered analysis.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -27,18 +34,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem={true}
           disableTransitionOnChange
         >
           {children}
         </ThemeProvider>
 
-        <Toaster theme="dark" />
+        <Toaster richColors position="top-right" />
       </body>
     </html>
   );
