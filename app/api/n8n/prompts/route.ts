@@ -116,6 +116,9 @@ export async function POST(request: NextRequest) {
       is_test_run = false,
       test_transcript_id,
       metadata = {},
+      prompt_sent,
+      system_prompt,
+      user_message,
     } = body;
 
     if (!agent_type || !output) {
@@ -129,6 +132,9 @@ export async function POST(request: NextRequest) {
     const cleanedPromptId = cleanUuid(prompt_id);
     const cleanedTranscriptId = cleanUuid(transcript_id);
     const cleanedTestTranscriptId = cleanUuid(test_transcript_id);
+
+    // Generate default prompt_sent if not provided
+    const defaultPromptSent = `[n8n workflow] Agent: ${agent_type}`;
 
     // Save the run
     const { data, error } = await supabase
@@ -147,6 +153,9 @@ export async function POST(request: NextRequest) {
         is_test_run: Boolean(is_test_run),
         test_transcript_id: cleanedTestTranscriptId,
         metadata: metadata || {},
+        prompt_sent: prompt_sent || defaultPromptSent,
+        system_prompt: system_prompt || null,
+        user_message: user_message || null,
       })
       .select("id, created_at")
       .single();
