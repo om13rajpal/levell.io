@@ -243,6 +243,11 @@ export async function POST(request: NextRequest) {
           .replace(/\{\{talk_ratio\}\}/g, JSON.stringify(talkRatio))
           .replace(/\{\{prospects\}\}/g, JSON.stringify(testTranscript.prospects || []));
 
+        // Ensure JSON keyword is present for response_format
+        const finalUserPrompt = userPrompt.toLowerCase().includes("json")
+          ? userPrompt
+          : userPrompt + "\n\nRespond in JSON format.";
+
         // Call OpenAI
         const completion = await openai.chat.completions.create({
           model: model,
@@ -250,7 +255,7 @@ export async function POST(request: NextRequest) {
           temperature: 0.3,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            { role: "user", content: finalUserPrompt },
           ],
         });
 
