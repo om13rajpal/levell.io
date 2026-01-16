@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import {
   ActivityIcon,
   FilterIcon,
@@ -22,7 +22,12 @@ import {
   CheckIcon,
   BarChart3Icon,
   TrendingUpIcon,
+  SparklesIcon,
+  FlaskConicalIcon,
+  ExternalLinkIcon,
 } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +92,8 @@ interface AgentRun {
   status: string;
   error_message: string | null;
   is_best: boolean;
+  is_test_run: boolean;
+  test_transcript_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   agent_prompts?: { id: string; name: string; version: number } | null;
@@ -121,24 +128,39 @@ const MODELS = [
 
 const AGENT_TYPES = [
   { value: "sales_intelligence", label: "Sales Intelligence" },
+  { value: "pain_points", label: "Pain Points" },
+  { value: "objections", label: "Objections" },
+  { value: "engagement", label: "Engagement" },
+  { value: "next_steps", label: "Next Steps" },
+  { value: "call_structure", label: "Call Structure" },
+  { value: "rep_technique", label: "Rep Technique" },
+  { value: "synthesis", label: "Synthesis" },
   { value: "call_analyzer", label: "Call Analyzer" },
   { value: "deal_risk", label: "Deal Risk" },
   { value: "coaching", label: "Coaching" },
   { value: "summary", label: "Summary" },
 ];
 
-export default function AgentRunsPage() {
+function AgentRunsPageContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState<AgentRun | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [promptName, setPromptName] = useState<string | null>(null);
 
   // Pagination
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+
+  // Read initial filters from URL params
+  const urlPromptId = searchParams.get("prompt_id") || "";
+  const urlIsTestRun = searchParams.get("is_test_run") || "";
 
   // Filters
   const [filters, setFilters] = useState({
@@ -147,7 +169,20 @@ export default function AgentRunsPage() {
     context_type: "",
     status: "",
     is_best: "",
+    is_test_run: urlIsTestRun,
+    prompt_id: urlPromptId,
   });
+
+  // Update filters when URL changes
+  useEffect(() => {
+    const newPromptId = searchParams.get("prompt_id") || "";
+    const newIsTestRun = searchParams.get("is_test_run") || "";
+    setFilters(prev => ({
+      ...prev,
+      prompt_id: newPromptId,
+      is_test_run: newIsTestRun,
+    }));
+  }, [searchParams]);
 
   // Fetch runs
   const fetchRuns = useCallback(async () => {
@@ -163,6 +198,8 @@ export default function AgentRunsPage() {
       if (filters.context_type) params.set("context_type", filters.context_type);
       if (filters.status) params.set("status", filters.status);
       if (filters.is_best) params.set("is_best", filters.is_best);
+      if (filters.is_test_run) params.set("is_test_run", filters.is_test_run);
+      if (filters.prompt_id) params.set("prompt_id", filters.prompt_id);
 
       const response = await fetch(`/api/agent-runs?${params.toString()}`);
       const data = await response.json();
@@ -171,6 +208,13 @@ export default function AgentRunsPage() {
         setRuns(data.runs || []);
         setTotalCount(data.pagination?.totalCount || 0);
         setTotalPages(data.pagination?.totalPages || 0);
+
+        // If filtered by prompt_id, try to get prompt name from first result
+        if (filters.prompt_id && data.runs?.[0]?.agent_prompts?.name) {
+          setPromptName(data.runs[0].agent_prompts.name);
+        } else if (!filters.prompt_id) {
+          setPromptName(null);
+        }
       } else {
         toast.error("Failed to fetch runs");
       }
@@ -284,17 +328,52 @@ export default function AgentRunsPage() {
                 <ActivityIcon className="size-6 text-primary-foreground" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold">Agent Runs</h1>
+                <h1 className="text-2xl font-bold flex items-center gap-2">
+                  Agent Runs
+                  {filters.prompt_id && promptName && (
+                    <Badge variant="secondary" className="text-sm font-normal">
+                      {promptName}
+                    </Badge>
+                  )}
+                  {filters.is_test_run === "true" && (
+                    <Badge variant="outline" className="text-sm font-normal gap-1">
+                      <FlaskConicalIcon className="size-3" />
+                      Test Runs
+                    </Badge>
+                  )}
+                </h1>
                 <p className="text-muted-foreground">
                   Browse and audit AI agent executions
                 </p>
               </div>
             </div>
 
-            <Button variant="outline" onClick={fetchRuns}>
-              <RefreshCwIcon className="size-4 mr-2" />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-3">
+              {filters.prompt_id && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilters(prev => ({ ...prev, prompt_id: "" }));
+                    router.push("/agent-runs");
+                  }}
+                >
+                  Clear Filter
+                </Button>
+              )}
+
+              <Link href="/prompts">
+                <Button variant="outline" className="gap-2">
+                  <SparklesIcon className="size-4" />
+                  Prompts
+                </Button>
+              </Link>
+
+              <Button variant="outline" onClick={fetchRuns}>
+                <RefreshCwIcon className="size-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -324,7 +403,7 @@ export default function AgentRunsPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs">Agent Type</Label>
                     <Select
@@ -441,6 +520,28 @@ export default function AgentRunsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs">Run Type</Label>
+                    <Select
+                      value={filters.is_test_run}
+                      onValueChange={(v) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          is_test_run: v === "all" ? "" : v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All types" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All types</SelectItem>
+                        <SelectItem value="true">Test runs</SelectItem>
+                        <SelectItem value="false">Production runs</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -466,6 +567,7 @@ export default function AgentRunsPage() {
                       <TableRow>
                         <TableHead>Time</TableHead>
                         <TableHead>Agent</TableHead>
+                        <TableHead>Prompt</TableHead>
                         <TableHead>Model</TableHead>
                         <TableHead>Context</TableHead>
                         <TableHead>Tokens</TableHead>
@@ -477,14 +579,37 @@ export default function AgentRunsPage() {
                     </TableHeader>
                     <TableBody>
                       {runs.map((run) => (
-                        <TableRow key={run.id} className={cn(run.is_best && "bg-yellow-500/5")}>
+                        <TableRow key={run.id} className={cn(
+                          run.is_best && "bg-yellow-500/5",
+                          run.is_test_run && "bg-blue-500/5"
+                        )}>
                           <TableCell className="font-mono text-xs">
-                            {new Date(run.created_at).toLocaleString()}
+                            <div className="flex items-center gap-2">
+                              {new Date(run.created_at).toLocaleString()}
+                              {run.is_test_run && (
+                                <FlaskConicalIcon className="size-3 text-blue-500" />
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className="font-medium">
                               {run.agent_type}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {run.agent_prompts ? (
+                              <Link
+                                href={`/agent-runs?prompt_id=${run.prompt_id}`}
+                                className="text-sm text-primary hover:underline flex items-center gap-1"
+                              >
+                                {run.agent_prompts.name}
+                                <span className="text-xs text-muted-foreground">
+                                  v{run.agent_prompts.version}
+                                </span>
+                              </Link>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1.5">
@@ -796,7 +921,15 @@ export default function AgentRunsPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Status</Label>
-                    <div>{getStatusBadge(selectedRun.status)}</div>
+                    <div className="flex items-center gap-2">
+                      {getStatusBadge(selectedRun.status)}
+                      {selectedRun.is_test_run && (
+                        <Badge variant="outline" className="gap-1">
+                          <FlaskConicalIcon className="size-3" />
+                          Test
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Context</Label>
@@ -807,6 +940,31 @@ export default function AgentRunsPage() {
                     </p>
                   </div>
                 </div>
+
+                {/* Prompt Info */}
+                {selectedRun.agent_prompts && (
+                  <Card className="bg-muted/50">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <SparklesIcon className="size-5 text-primary" />
+                          <div>
+                            <p className="font-medium">{selectedRun.agent_prompts.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Version {selectedRun.agent_prompts.version}
+                            </p>
+                          </div>
+                        </div>
+                        <Link href={`/prompts`}>
+                          <Button variant="outline" size="sm" className="gap-2">
+                            <ExternalLinkIcon className="size-3" />
+                            View Prompt
+                          </Button>
+                        </Link>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Token Usage */}
                 <Card>
@@ -954,5 +1112,18 @@ export default function AgentRunsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// Wrapper component with Suspense boundary for useSearchParams
+export default function AgentRunsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <RefreshCwIcon className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      <AgentRunsPageContent />
+    </Suspense>
   );
 }

@@ -23,7 +23,13 @@ import {
   TargetIcon,
   StarIcon,
   HistoryIcon,
+  ActivityIcon,
+  ExternalLinkIcon,
+  BarChart3Icon,
+  ZapIcon,
+  RocketIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,6 +76,11 @@ interface AgentPrompt {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  stats?: {
+    total_runs: number;
+    test_runs: number;
+    production_runs: number;
+  };
 }
 
 interface TestTranscript {
@@ -160,6 +171,17 @@ export default function PromptsPage() {
   const [testResults, setTestResults] = useState<TestResponse | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
+  // n8n trigger state
+  const [triggeringPromptId, setTriggeringPromptId] = useState<string | null>(null);
+  const [n8nDialogOpen, setN8nDialogOpen] = useState(false);
+  const [n8nPrompt, setN8nPrompt] = useState<AgentPrompt | null>(null);
+  const [n8nResult, setN8nResult] = useState<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    run_id?: string;
+  } | null>(null);
+
   // Form state
   const [formData, setFormData] = useState({
     name: "",
@@ -175,6 +197,7 @@ export default function PromptsPage() {
     try {
       setLoading(true);
       const params = new URLSearchParams();
+      params.set("include_stats", "true");
       if (filterType !== "all") {
         params.set("agent_type", filterType);
       }
@@ -400,6 +423,58 @@ export default function PromptsPage() {
     });
   };
 
+  // Open n8n trigger dialog
+  const handleOpenN8nTrigger = (prompt: AgentPrompt) => {
+    setN8nPrompt(prompt);
+    setN8nResult(null);
+    setN8nDialogOpen(true);
+  };
+
+  // Trigger n8n workflow
+  const handleTriggerN8n = async (workflow: string = "scoreV2") => {
+    if (!n8nPrompt) return;
+
+    setTriggeringPromptId(n8nPrompt.id);
+    try {
+      const response = await fetch("/api/prompts/trigger-n8n", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workflow,
+          prompt_id: n8nPrompt.id,
+          agent_type: n8nPrompt.agent_type,
+          test_mode: false,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setN8nResult({
+          success: true,
+          message: data.message || "Workflow triggered successfully",
+          run_id: data.n8n_response?.run_id,
+        });
+        toast.success("n8n workflow triggered successfully!");
+      } else {
+        setN8nResult({
+          success: false,
+          error: data.error || "Failed to trigger workflow",
+        });
+        toast.error(data.error || "Failed to trigger n8n workflow");
+      }
+    } catch (error) {
+      setN8nResult({
+        success: false,
+        error: "Network error occurred",
+      });
+      toast.error("Error triggering n8n workflow");
+      console.error(error);
+    } finally {
+      setTriggeringPromptId(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -436,6 +511,13 @@ export default function PromptsPage() {
               <Button variant="outline" size="icon" onClick={fetchPrompts}>
                 <RefreshCwIcon className="size-4" />
               </Button>
+
+              <Link href="/agent-runs">
+                <Button variant="outline" className="gap-2">
+                  <ActivityIcon className="size-4" />
+                  View Runs
+                </Button>
+              </Link>
 
               <Button onClick={handleCreate} className="gap-2">
                 <PlusIcon className="size-4" />
@@ -516,6 +598,19 @@ export default function PromptsPage() {
                         }
                       </Badge>
 
+                      {/* Run Stats */}
+                      {prompt.stats && prompt.stats.total_runs > 0 && (
+                        <Link href={`/agent-runs?prompt_id=${prompt.id}`}>
+                          <Badge
+                            variant="secondary"
+                            className="gap-1 cursor-pointer hover:bg-secondary/80"
+                          >
+                            <ActivityIcon className="size-3" />
+                            {prompt.stats.total_runs} runs
+                          </Badge>
+                        </Link>
+                      )}
+
                       {/* Test Button */}
                       <Button
                         variant="default"
@@ -526,6 +621,25 @@ export default function PromptsPage() {
                         <FlaskConicalIcon className="size-3" />
                         Test
                       </Button>
+
+                      {/* Run n8n Workflow Button */}
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => handleOpenN8nTrigger(prompt)}
+                      >
+                        <ZapIcon className="size-3" />
+                        Run n8n
+                      </Button>
+
+                      {/* View Runs Button */}
+                      <Link href={`/agent-runs?prompt_id=${prompt.id}`}>
+                        <Button variant="outline" size="sm" className="gap-1">
+                          <BarChart3Icon className="size-3" />
+                          Runs
+                        </Button>
+                      </Link>
 
                       <Button
                         variant="ghost"
@@ -999,6 +1113,117 @@ export default function PromptsPage() {
                   Run Test
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* n8n Trigger Dialog */}
+      <Dialog open={n8nDialogOpen} onOpenChange={setN8nDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ZapIcon className="size-5 text-yellow-500" />
+              Run n8n Workflow
+            </DialogTitle>
+            <DialogDescription>
+              Trigger the n8n workflow to run this prompt against production data
+            </DialogDescription>
+          </DialogHeader>
+
+          {n8nPrompt && (
+            <div className="space-y-4 py-4">
+              {/* Prompt Info */}
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{n8nPrompt.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {AGENT_TYPES.find((t) => t.value === n8nPrompt.agent_type)?.label || n8nPrompt.agent_type}
+                      </p>
+                    </div>
+                    <Badge variant="secondary">v{n8nPrompt.version}</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Workflow Selection */}
+              <div className="space-y-3">
+                <Label>Select Workflow</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    variant="outline"
+                    className="h-auto py-4 flex-col gap-2"
+                    onClick={() => handleTriggerN8n("scoreV2")}
+                    disabled={triggeringPromptId === n8nPrompt.id}
+                  >
+                    {triggeringPromptId === n8nPrompt.id ? (
+                      <Loader2Icon className="size-5 animate-spin" />
+                    ) : (
+                      <RocketIcon className="size-5 text-blue-500" />
+                    )}
+                    <span className="font-medium">Score V2</span>
+                    <span className="text-xs text-muted-foreground">
+                      Main scoring workflow
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-auto py-4 flex-col gap-2"
+                    onClick={() => handleTriggerN8n("testPrompt")}
+                    disabled={triggeringPromptId === n8nPrompt.id}
+                  >
+                    {triggeringPromptId === n8nPrompt.id ? (
+                      <Loader2Icon className="size-5 animate-spin" />
+                    ) : (
+                      <FlaskConicalIcon className="size-5 text-purple-500" />
+                    )}
+                    <span className="font-medium">Test Prompt</span>
+                    <span className="text-xs text-muted-foreground">
+                      Test prompt workflow
+                    </span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Result */}
+              {n8nResult && (
+                <Card className={cn(n8nResult.success ? "border-green-500/50" : "border-destructive/50")}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      {n8nResult.success ? (
+                        <CheckIcon className="size-5 text-green-500 mt-0.5" />
+                      ) : (
+                        <XIcon className="size-5 text-destructive mt-0.5" />
+                      )}
+                      <div>
+                        <p className={cn("font-medium", n8nResult.success ? "text-green-600" : "text-destructive")}>
+                          {n8nResult.success ? "Workflow Triggered!" : "Trigger Failed"}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {n8nResult.success ? n8nResult.message : n8nResult.error}
+                        </p>
+                        {n8nResult.run_id && (
+                          <Link
+                            href={`/agent-runs?prompt_id=${n8nPrompt.id}`}
+                            className="text-sm text-primary hover:underline mt-2 inline-flex items-center gap-1"
+                          >
+                            View Run Results
+                            <ExternalLinkIcon className="size-3" />
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setN8nDialogOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

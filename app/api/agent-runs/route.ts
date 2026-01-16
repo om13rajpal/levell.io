@@ -33,6 +33,8 @@ export async function GET(request: NextRequest) {
     const contextType = searchParams.get("context_type");
     const status = searchParams.get("status");
     const isBest = searchParams.get("is_best");
+    const isTestRun = searchParams.get("is_test_run");
+    const promptId = searchParams.get("prompt_id");
     const startDate = searchParams.get("start_date");
     const endDate = searchParams.get("end_date");
 
@@ -57,6 +59,9 @@ export async function GET(request: NextRequest) {
     if (contextType) query = query.eq("context_type", contextType);
     if (status) query = query.eq("status", status);
     if (isBest === "true") query = query.eq("is_best", true);
+    if (isTestRun === "true") query = query.eq("is_test_run", true);
+    if (isTestRun === "false") query = query.eq("is_test_run", false);
+    if (promptId) query = query.eq("prompt_id", promptId);
     if (startDate) query = query.gte("created_at", startDate);
     if (endDate) query = query.lte("created_at", endDate);
 

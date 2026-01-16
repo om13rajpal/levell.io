@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const activeOnly = searchParams.get("active_only") !== "false"; // Default to active only
     const includeArchived = searchParams.get("include_archived") === "true";
     const getVersionHistory = searchParams.get("version_history");
+    const includeStats = searchParams.get("include_stats") === "true";
 
     // If requesting version history for a specific prompt
     if (getVersionHistory) {
@@ -79,8 +80,41 @@ export async function GET(request: NextRequest) {
       byAgentType[prompt.agent_type].push(prompt);
     });
 
+    // If stats requested, fetch run counts for each prompt
+    let promptsWithStats = data;
+    if (includeStats && data && data.length > 0) {
+      const promptIds = data.map(p => p.id);
+
+      // Get run counts grouped by prompt_id
+      const { data: runCounts } = await supabase
+        .from("agent_runs")
+        .select("prompt_id, is_test_run")
+        .in("prompt_id", promptIds);
+
+      // Calculate stats per prompt
+      const statsMap: Record<string, { total_runs: number; test_runs: number; production_runs: number }> = {};
+      runCounts?.forEach(run => {
+        if (!run.prompt_id) return;
+        if (!statsMap[run.prompt_id]) {
+          statsMap[run.prompt_id] = { total_runs: 0, test_runs: 0, production_runs: 0 };
+        }
+        statsMap[run.prompt_id].total_runs++;
+        if (run.is_test_run) {
+          statsMap[run.prompt_id].test_runs++;
+        } else {
+          statsMap[run.prompt_id].production_runs++;
+        }
+      });
+
+      // Attach stats to prompts
+      promptsWithStats = data.map(prompt => ({
+        ...prompt,
+        stats: statsMap[prompt.id] || { total_runs: 0, test_runs: 0, production_runs: 0 }
+      }));
+    }
+
     return NextResponse.json({
-      prompts: data,
+      prompts: promptsWithStats,
       byAgentType,
       count: data?.length || 0
     });
