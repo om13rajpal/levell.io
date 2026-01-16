@@ -79,6 +79,24 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Helper to clean UUID fields - convert empty strings to null
+function cleanUuid(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "" || trimmed === "null" || trimmed === "undefined") return null;
+    return trimmed;
+  }
+  return null;
+}
+
+// Helper to clean number fields - convert empty/invalid to 0
+function cleanNumber(value: unknown, defaultValue = 0): number {
+  if (value === null || value === undefined || value === "") return defaultValue;
+  const num = typeof value === "number" ? value : parseFloat(String(value));
+  return isNaN(num) ? defaultValue : num;
+}
+
 // POST - Save agent run results from n8n
 export async function POST(request: NextRequest) {
   try {
@@ -107,23 +125,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Clean UUID fields to convert empty strings to null
+    const cleanedPromptId = cleanUuid(prompt_id);
+    const cleanedTranscriptId = cleanUuid(transcript_id);
+    const cleanedTestTranscriptId = cleanUuid(test_transcript_id);
+
     // Save the run
     const { data, error } = await supabase
       .from("agent_runs")
       .insert({
         agent_type,
-        prompt_id,
-        transcript_id,
+        prompt_id: cleanedPromptId,
+        transcript_id: cleanedTranscriptId,
         output: typeof output === "string" ? output : JSON.stringify(output, null, 2),
         model: model || "gpt-4o",
-        prompt_tokens: prompt_tokens || 0,
-        completion_tokens: completion_tokens || 0,
-        total_cost: total_cost || 0,
-        duration_ms: duration_ms || 0,
+        prompt_tokens: cleanNumber(prompt_tokens, 0),
+        completion_tokens: cleanNumber(completion_tokens, 0),
+        total_cost: cleanNumber(total_cost, 0),
+        duration_ms: cleanNumber(duration_ms, 0),
         status: "completed",
-        is_test_run,
-        test_transcript_id,
-        metadata,
+        is_test_run: Boolean(is_test_run),
+        test_transcript_id: cleanedTestTranscriptId,
+        metadata: metadata || {},
       })
       .select("id, created_at")
       .single();
