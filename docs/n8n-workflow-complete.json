@@ -1,0 +1,642 @@
+{
+  "name": "ScoreV2 - Dynamic Prompts",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scoreV2",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "scoreV2"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.APP_URL }}/api/n8n/prompts",
+        "options": {}
+      },
+      "id": "fetch-prompts",
+      "name": "Fetch Prompts from DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge webhook data with prompts\nconst webhookData = $('Webhook Trigger').first().json;\nconst promptsData = $('Fetch Prompts from DB').first().json;\n\nreturn [{\n  json: {\n    ...webhookData,\n    prompts: promptsData.prompts,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "merge-data",
+      "name": "Merge Webhook & Prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "test-mode-check",
+              "leftValue": "={{ $json.test_mode }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-test-mode",
+      "name": "Check Test Mode",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.APP_URL }}/api/n8n/test-transcripts?ids={{ $json.transcript_ids ? $json.transcript_ids.join(',') : '' }}&limit=5",
+        "options": {}
+      },
+      "id": "fetch-test-transcripts",
+      "name": "Fetch Test Transcripts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Use production transcript from webhook\nconst inputData = $('Merge Webhook & Prompts').first().json;\n\n// Build transcript object from webhook data\nreturn [{\n  json: {\n    ...inputData,\n    transcript: {\n      transcript_id: inputData.transcript_id,\n      transcript_text: inputData.transcript_text || inputData.clean_transcript_text,\n      title: inputData.title,\n      user_name: inputData.user_name || inputData.rep_name,\n      user_email: inputData.user_email,\n      rep_name: inputData.rep_name,\n      rep_transcript_name: inputData.rep_transcript_name,\n      prospects: inputData.prospects || [],\n      talk_ratio: inputData.talk_ratio || { rep_percent: 50, prospect_percent: 50 },\n      sales_motion: inputData.sales_motion || 'consultative',\n      framework: inputData.framework || 'SPICED'\n    },\n    is_test_run: false\n  }\n}];"
+      },
+      "id": "use-production-transcript",
+      "name": "Use Production Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare test transcripts for processing\nconst inputData = $('Merge Webhook & Prompts').first().json;\nconst testTranscripts = $('Fetch Test Transcripts').first().json.test_transcripts;\n\n// Return array of items, one per transcript\nreturn testTranscripts.map(t => ({\n  json: {\n    ...inputData,\n    transcript: {\n      test_id: t.test_id,\n      transcript_id: t.transcript_id,\n      transcript_text: t.clean_transcript_text || '',\n      title: t.title,\n      label: t.label,\n      call_type: t.call_type,\n      difficulty: t.difficulty,\n      user_name: t.user_name,\n      user_email: t.user_email,\n      rep_name: t.rep_name,\n      rep_transcript_name: t.rep_transcript_name,\n      prospects: t.prospects || [],\n      talk_ratio: t.talk_ratio || { rep_percent: 50, prospect_percent: 50 },\n      sales_motion: t.sales_motion || 'consultative',\n      framework: t.framework || 'SPICED',\n      sentences: t.sentences\n    },\n    is_test_run: true,\n    test_transcript_id: t.test_id\n  }\n}));"
+      },
+      "id": "prepare-test-transcripts",
+      "name": "Prepare Test Transcripts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {},
+      "id": "merge-transcripts",
+      "name": "Merge Transcript Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean transcript text if needed\nconst item = $input.first().json;\nlet transcriptText = item.transcript.transcript_text;\n\n// If no clean text, process sentences\nif (!transcriptText && item.transcript.sentences) {\n  const sentences = item.transcript.sentences;\n  const speakers = [...new Set(sentences.map(s => s.speaker_name || s.speaker || 'Unknown'))];\n  const repSpeaker = speakers[0] || 'Unknown';\n  \n  transcriptText = sentences\n    .filter(s => s.text && s.text.trim().length > 3)\n    .map(s => {\n      const speaker = (s.speaker_name || s.speaker || 'Unknown').trim();\n      const isRep = speaker === repSpeaker;\n      const roleTag = isRep ? '[REP]' : '[PROSPECT]';\n      return `${roleTag} ${speaker}: ${s.text.trim()}`;\n    })\n    .join('\\n');\n}\n\n// Build context\nconst context = `## SALES CONTEXT\nSales Motion: ${item.transcript.sales_motion || 'consultative'}\nQualification Framework: ${item.transcript.framework || 'SPICED'}\n\n## CALL PARTICIPANTS\nRep Name: ${item.transcript.user_name || 'Sales Rep'}\nRep Email: ${item.transcript.user_email || ''}\n\n## CALL METADATA\nCall Title: ${item.transcript.title || 'Untitled Call'}`;\n\nreturn [{\n  json: {\n    ...item,\n    transcript_text: transcriptText,\n    context: context,\n    rep_name: item.transcript.rep_name || item.transcript.user_name || 'Sales Rep',\n    rep_transcript_name: item.transcript.rep_transcript_name || item.transcript.rep_name || 'Sales Rep',\n    rep_email: item.transcript.user_email || '',\n    talk_ratio: JSON.stringify(item.transcript.talk_ratio),\n    prospects: JSON.stringify(item.transcript.prospects || [])\n  }\n}];"
+      },
+      "id": "prepare-transcript-data",
+      "name": "Prepare Transcript Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.pain_points?.prompt_content || 'You are a sales call analyst specializing in identifying pain points.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze the following sales call transcript and extract pain points.\n\n{{ $json.context }}\n\n## TRANSCRIPT\n{{ $json.transcript_text }}\n\n## INSTRUCTIONS\nIdentify all pain points mentioned or implied by the prospect. For each pain point, provide:\n- The pain point description\n- Direct quote from the transcript\n- Severity (high/medium/low)\n- Business impact\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-pain-points",
+      "name": "Pain Points Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1760, 0],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.objections?.prompt_content || 'You are a sales call analyst specializing in identifying objections and concerns.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze the following sales call transcript and extract objections.\n\n{{ $json.context }}\n\n## TRANSCRIPT\n{{ $json.transcript_text }}\n\n## INSTRUCTIONS\nIdentify all objections raised by the prospect. For each objection, provide:\n- The objection description\n- Objection type (price, timing, authority, need, competition)\n- How the rep handled it\n- Whether it was resolved\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-objections",
+      "name": "Objections Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1760, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.engagement?.prompt_content || 'You are a sales call analyst specializing in measuring prospect engagement.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze the following sales call transcript and measure engagement.\n\n{{ $json.context }}\n\n## TRANSCRIPT\n{{ $json.transcript_text }}\n\n## TALK RATIO\n{{ $json.talk_ratio }}\n\n## INSTRUCTIONS\nAnalyze the prospect's engagement level throughout the call. Provide:\n- Overall engagement score (1-10)\n- Engagement indicators (questions asked, enthusiasm, participation)\n- Engagement drops (moments of disengagement)\n- Recommendations for improvement\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-engagement",
+      "name": "Engagement Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1760, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.next_steps?.prompt_content || 'You are a sales call analyst specializing in identifying next steps and action items.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze the following sales call transcript and extract next steps.\n\n{{ $json.context }}\n\n## TRANSCRIPT\n{{ $json.transcript_text }}\n\n## INSTRUCTIONS\nIdentify all next steps and action items. For each, provide:\n- Description of the action item\n- Owner (rep or prospect)\n- Due date if mentioned\n- Priority level\n- Whether commitment was obtained\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-next-steps",
+      "name": "Next Steps Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1760, 600],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.call_structure?.prompt_content || 'You are a sales call analyst specializing in analyzing call structure and flow.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze the following sales call transcript and evaluate structure.\n\n{{ $json.context }}\n\n## TRANSCRIPT\n{{ $json.transcript_text }}\n\n## INSTRUCTIONS\nAnalyze the call structure and flow. Provide:\n- Call phases identified (intro, discovery, demo, close, etc.)\n- Time spent on each phase (estimated %)\n- Agenda setting evaluation\n- Flow quality score (1-10)\n- Structural improvements recommended\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-call-structure",
+      "name": "Call Structure Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [2000, 100],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.rep_technique?.prompt_content || 'You are a sales call analyst specializing in evaluating sales rep techniques and skills.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze the following sales call transcript and evaluate the rep's technique.\n\n{{ $json.context }}\n\n## REP INFO\nRep Name: {{ $json.rep_name }}\n\n## TRANSCRIPT\n{{ $json.transcript_text }}\n\n## INSTRUCTIONS\nEvaluate the sales rep's technique. Provide:\n- Overall technique score (1-10)\n- Strengths demonstrated\n- Areas for improvement\n- Specific coaching recommendations\n- Best practices followed/missed\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-rep-technique",
+      "name": "Rep Technique Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [2000, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all agent outputs\nconst inputData = $('Prepare Transcript Data').first().json;\n\nconst painPoints = $('Pain Points Agent').first().json;\nconst objections = $('Objections Agent').first().json;\nconst engagement = $('Engagement Agent').first().json;\nconst nextSteps = $('Next Steps Agent').first().json;\nconst callStructure = $('Call Structure Agent').first().json;\nconst repTechnique = $('Rep Technique Agent').first().json;\n\nreturn [{\n  json: {\n    ...inputData,\n    agent_outputs: {\n      pain_points: painPoints,\n      objections: objections,\n      engagement: engagement,\n      next_steps: nextSteps,\n      call_structure: callStructure,\n      rep_technique: repTechnique\n    }\n  }\n}];"
+      },
+      "id": "collect-agent-outputs",
+      "name": "Collect Agent Outputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2240, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.synthesis?.prompt_content || 'You are a senior sales coach synthesizing multiple analysis dimensions into a comprehensive call review.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Synthesize the following agent analyses into a comprehensive call review.\n\n{{ $json.context }}\n\n## AGENT ANALYSES\n\n### Pain Points Analysis\n{{ JSON.stringify($json.agent_outputs.pain_points, null, 2) }}\n\n### Objections Analysis\n{{ JSON.stringify($json.agent_outputs.objections, null, 2) }}\n\n### Engagement Analysis\n{{ JSON.stringify($json.agent_outputs.engagement, null, 2) }}\n\n### Next Steps Analysis\n{{ JSON.stringify($json.agent_outputs.next_steps, null, 2) }}\n\n### Call Structure Analysis\n{{ JSON.stringify($json.agent_outputs.call_structure, null, 2) }}\n\n### Rep Technique Analysis\n{{ JSON.stringify($json.agent_outputs.rep_technique, null, 2) }}\n\n## INSTRUCTIONS\nProvide a comprehensive synthesis including:\n- Overall call score (1-100)\n- Executive summary\n- Top 3 strengths\n- Top 3 areas for improvement\n- Priority coaching actions\n- Deal health assessment\n- Recommended follow-up strategy\n\nRespond in JSON format."
+            }
+          ]
+        }
+      },
+      "id": "agent-synthesis",
+      "name": "Synthesis Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [2460, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare final output with all results\nconst inputData = $('Collect Agent Outputs').first().json;\nconst synthesis = $('Synthesis Agent').first().json;\n\nconst finalOutput = {\n  transcript_id: inputData.transcript?.transcript_id,\n  test_transcript_id: inputData.test_transcript_id,\n  is_test_run: inputData.is_test_run,\n  title: inputData.transcript?.title,\n  label: inputData.transcript?.label,\n  call_type: inputData.transcript?.call_type,\n  \n  // Individual agent outputs\n  pain_points: inputData.agent_outputs.pain_points,\n  objections: inputData.agent_outputs.objections,\n  engagement: inputData.agent_outputs.engagement,\n  next_steps: inputData.agent_outputs.next_steps,\n  call_structure: inputData.agent_outputs.call_structure,\n  rep_technique: inputData.agent_outputs.rep_technique,\n  \n  // Synthesis\n  synthesis: synthesis,\n  \n  // Metadata\n  prompts_used: {\n    pain_points: inputData.prompts.pain_points?.id,\n    objections: inputData.prompts.objections?.id,\n    engagement: inputData.prompts.engagement?.id,\n    next_steps: inputData.prompts.next_steps?.id,\n    call_structure: inputData.prompts.call_structure?.id,\n    rep_technique: inputData.prompts.rep_technique?.id,\n    synthesis: inputData.prompts.synthesis?.id\n  },\n  processed_at: new Date().toISOString()\n};\n\nreturn [{ json: finalOutput }];"
+      },
+      "id": "prepare-final-output",
+      "name": "Prepare Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/api/n8n/prompts",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent_type\": \"synthesis\",\n  \"prompt_id\": \"{{ $json.prompts_used.synthesis }}\",\n  \"transcript_id\": {{ $json.transcript_id || 'null' }},\n  \"output\": {{ JSON.stringify($json) }},\n  \"model\": \"gpt-4o\",\n  \"is_test_run\": {{ $json.is_test_run }},\n  \"test_transcript_id\": \"{{ $json.test_transcript_id || '' }}\",\n  \"metadata\": {\n    \"prompts_used\": {{ JSON.stringify($json.prompts_used) }},\n    \"call_type\": \"{{ $json.call_type || '' }}\",\n    \"label\": \"{{ $json.label || '' }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "save-results",
+      "name": "Save Results to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2900, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, results: $json, run_id: $('Save Results to DB').first().json.run_id }) }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Prompts from DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Prompts from DB": {
+      "main": [
+        [
+          {
+            "node": "Merge Webhook & Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Webhook & Prompts": {
+      "main": [
+        [
+          {
+            "node": "Check Test Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Test Mode": {
+      "main": [
+        [
+          {
+            "node": "Fetch Test Transcripts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Production Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Test Transcripts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Test Transcripts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Test Transcripts": {
+      "main": [
+        [
+          {
+            "node": "Merge Transcript Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Production Transcript": {
+      "main": [
+        [
+          {
+            "node": "Merge Transcript Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Transcript Sources": {
+      "main": [
+        [
+          {
+            "node": "Prepare Transcript Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Transcript Data": {
+      "main": [
+        [
+          {
+            "node": "Pain Points Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Objections Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Engagement Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Next Steps Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Call Structure Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Rep Technique Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pain Points Agent": {
+      "main": [
+        [
+          {
+            "node": "Collect Agent Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Objections Agent": {
+      "main": [
+        [
+          {
+            "node": "Collect Agent Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Engagement Agent": {
+      "main": [
+        [
+          {
+            "node": "Collect Agent Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next Steps Agent": {
+      "main": [
+        [
+          {
+            "node": "Collect Agent Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Structure Agent": {
+      "main": [
+        [
+          {
+            "node": "Collect Agent Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rep Technique Agent": {
+      "main": [
+        [
+          {
+            "node": "Collect Agent Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Agent Outputs": {
+      "main": [
+        [
+          {
+            "node": "Synthesis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synthesis Agent": {
+      "main": [
+        [
+          {
+            "node": "Prepare Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Final Output": {
+      "main": [
+        [
+          {
+            "node": "Save Results to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Results to DB": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-16T00:00:00.000Z",
+  "versionId": "1"
+}

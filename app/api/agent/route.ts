@@ -10,6 +10,56 @@ import { trackAgentRequest } from "@/lib/openmeter";
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
 
+// Helper to log agent runs to the database
+async function logAgentRun(
+  supabase: SupabaseClient,
+  runData: {
+    agent_type: string;
+    prompt_sent: string;
+    system_prompt: string;
+    user_message: string;
+    output: string;
+    model: string;
+    prompt_tokens: number;
+    completion_tokens: number;
+    transcript_id?: number;
+    company_id?: string;
+    user_id?: string;
+    context_type: string;
+    duration_ms: number;
+    status: string;
+    error_message?: string;
+  }
+) {
+  try {
+    const { error } = await supabase.from("agent_runs").insert({
+      agent_type: runData.agent_type,
+      prompt_sent: runData.prompt_sent,
+      system_prompt: runData.system_prompt,
+      user_message: runData.user_message,
+      output: runData.output,
+      model: runData.model,
+      prompt_tokens: runData.prompt_tokens,
+      completion_tokens: runData.completion_tokens,
+      transcript_id: runData.transcript_id || null,
+      company_id: runData.company_id || null,
+      user_id: runData.user_id || null,
+      context_type: runData.context_type,
+      duration_ms: runData.duration_ms,
+      status: runData.status,
+      error_message: runData.error_message || null,
+    });
+
+    if (error) {
+      console.error("[Agent] Failed to log run:", error);
+    } else {
+      console.log("[Agent] Run logged successfully");
+    }
+  } catch (err) {
+    console.error("[Agent] Error logging run:", err);
+  }
+}
+
 // Lazy-loaded admin Supabase client for server-side operations
 let supabaseAdminInstance: SupabaseClient | null = null;
 
@@ -340,6 +390,8 @@ ${contextData}
 }
 
 export async function POST(req: Request) {
+  const startTime = Date.now();
+
   try {
     const body = await req.json();
 
@@ -383,6 +435,15 @@ export async function POST(req: Request) {
     // Build system prompt
     const systemPrompt = buildSystemPrompt(contextData, contextType || "call");
 
+    // Get the last user message for logging
+    const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+    const lastUserMessage = lastMessage
+      ? ('content' in lastMessage ? lastMessage.content : JSON.stringify(lastMessage))
+      : "";
+    const userMessageText = typeof lastUserMessage === "string"
+      ? lastUserMessage
+      : JSON.stringify(lastUserMessage);
+
     // Get the model
     const model = getOpenAIModel(modelId);
     console.log("[Agent] Using model:", modelId);
@@ -391,7 +452,9 @@ export async function POST(req: Request) {
       model,
       messages: convertToModelMessages(messages),
       system: systemPrompt,
-      onFinish: async ({ usage }) => {
+      onFinish: async ({ text, usage }) => {
+        const durationMs = Date.now() - startTime;
+
         // Track token usage with OpenMeter
         if (userId && usage) {
           try {
@@ -411,6 +474,28 @@ export async function POST(req: Request) {
             console.error("[Agent] Failed to track usage:", trackError);
           }
         }
+
+        // Log the agent run to the database
+        try {
+          await logAgentRun(getSupabaseAdmin(), {
+            agent_type: "sales_intelligence",
+            prompt_sent: systemPrompt + "\n\nUser: " + userMessageText,
+            system_prompt: systemPrompt,
+            user_message: userMessageText,
+            output: text || "",
+            model: modelId,
+            prompt_tokens: usage?.inputTokens || 0,
+            completion_tokens: usage?.outputTokens || 0,
+            transcript_id: contextType === "call" && contextId ? parseInt(contextId) : undefined,
+            company_id: contextType === "company" ? contextId : undefined,
+            user_id: userId,
+            context_type: contextType || "general",
+            duration_ms: durationMs,
+            status: "completed",
+          });
+        } catch (logError) {
+          console.error("[Agent] Failed to log run:", logError);
+        }
       },
     });
 
@@ -420,7 +505,31 @@ export async function POST(req: Request) {
       sendReasoning: true,
     });
   } catch (error) {
+    const durationMs = Date.now() - startTime;
     console.error("Agent API Error:", error);
+
+    // Log the error run
+    try {
+      const body = await req.clone().json().catch(() => ({}));
+      await logAgentRun(getSupabaseAdmin(), {
+        agent_type: "sales_intelligence",
+        prompt_sent: "Error occurred before prompt was built",
+        system_prompt: "",
+        user_message: "",
+        output: "",
+        model: body.model || "gpt-4o",
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        user_id: body.userId,
+        context_type: body.contextType || "general",
+        duration_ms: durationMs,
+        status: "error",
+        error_message: error instanceof Error ? error.message : "Unknown error",
+      });
+    } catch {
+      // Ignore logging errors
+    }
+
     return new Response(
       JSON.stringify({
         error: "An error occurred while processing your request.",
