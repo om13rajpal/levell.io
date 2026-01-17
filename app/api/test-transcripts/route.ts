@@ -13,16 +13,18 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-// Database row type for test_transcripts table
+// Database row type for test_transcripts table (actual DB schema)
 interface TestTranscriptRow {
   id: string;
-  name: string;
+  label: string;
   description: string | null;
-  scenario_type: string;
-  transcript_content?: string;
+  call_type: string | null;
+  clean_transcript_text?: string;
   transcript_id: number | null;
   is_active: boolean;
   created_at: string;
+  difficulty?: string;
+  rep_name?: string;
 }
 
 // GET all test transcripts
@@ -33,15 +35,16 @@ export async function GET(request: NextRequest) {
     const includeContent = searchParams.get("include_content") === "true";
 
     // Select fields based on whether content is needed
+    // Using actual DB column names: label, call_type, clean_transcript_text
     const selectFields = includeContent
-      ? "id, name, description, scenario_type, transcript_content, transcript_id, is_active, created_at"
-      : "id, name, description, scenario_type, transcript_id, is_active, created_at";
+      ? "id, label, description, call_type, clean_transcript_text, transcript_id, is_active, created_at, difficulty"
+      : "id, label, description, call_type, transcript_id, is_active, created_at, difficulty";
 
     const { data, error } = await supabase
       .from("test_transcripts")
       .select(selectFields)
       .eq("is_active", true)
-      .order("scenario_type", { ascending: true });
+      .order("call_type", { ascending: true });
 
     if (error) {
       console.error("[Test Transcripts API] Error fetching:", error);
@@ -51,16 +54,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Map to response format
+    // Map DB columns to API response format expected by frontend
     const transcripts = ((data || []) as unknown as TestTranscriptRow[]).map((t) => ({
       id: t.id,
-      name: t.name,
+      name: t.label, // Map label -> name
       description: t.description,
-      scenario_type: t.scenario_type,
-      transcript_content: t.transcript_content,
+      scenario_type: t.call_type || "other", // Map call_type -> scenario_type
+      transcript_content: t.clean_transcript_text, // Map clean_transcript_text -> transcript_content
       transcript_id: t.transcript_id,
       is_active: t.is_active,
       created_at: t.created_at,
+      difficulty: t.difficulty,
     }));
 
     return NextResponse.json({
@@ -82,11 +86,23 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 
-    const { name, description, scenario_type, expected_outcome, transcript_content, transcript_id } = body;
+    // Accept both old and new field names for flexibility
+    const {
+      name, label,
+      description,
+      scenario_type, call_type,
+      transcript_content, clean_transcript_text,
+      transcript_id,
+      difficulty
+    } = body;
 
-    if (!name || !transcript_content || !scenario_type) {
+    const finalLabel = label || name;
+    const finalCallType = call_type || scenario_type;
+    const finalContent = clean_transcript_text || transcript_content;
+
+    if (!finalLabel || !finalContent || !finalCallType) {
       return NextResponse.json(
-        { error: "name, scenario_type, and transcript_content are required" },
+        { error: "name/label, scenario_type/call_type, and transcript_content/clean_transcript_text are required" },
         { status: 400 }
       );
     }
@@ -94,12 +110,12 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase
       .from("test_transcripts")
       .insert({
-        name,
+        label: finalLabel,
         description: description || null,
-        scenario_type,
-        expected_outcome: expected_outcome || null,
-        transcript_content,
+        call_type: finalCallType,
+        clean_transcript_text: finalContent,
         transcript_id: transcript_id || null,
+        difficulty: difficulty || "medium",
       })
       .select()
       .single();
@@ -112,9 +128,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Map response back to expected format
+    const transcript = {
+      id: data.id,
+      name: data.label,
+      description: data.description,
+      scenario_type: data.call_type,
+      transcript_content: data.clean_transcript_text,
+      transcript_id: data.transcript_id,
+      is_active: data.is_active,
+      created_at: data.created_at,
+    };
+
     return NextResponse.json({
       success: true,
-      transcript: data
+      transcript
     }, { status: 201 });
   } catch (error) {
     console.error("[Test Transcripts API] Unexpected error:", error);
