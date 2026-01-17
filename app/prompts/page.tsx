@@ -405,6 +405,14 @@ function PromptsPageContent() {
             </div>
 
             <div className="flex items-center gap-3">
+              {/* Workflow Variables Info */}
+              <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+                <span className="font-semibold">Workflow Variables:</span>
+                <Badge variant="outline" className="text-xs" title="Content to analyze">transcript</Badge>
+                <Badge variant="outline" className="text-xs" title="Agent prompt template">prompt_content</Badge>
+                <Badge variant="outline" className="text-xs" title="Which agent type">agent_type</Badge>
+              </div>
+
               <Button variant="outline" size="icon" onClick={fetchPrompts}>
                 <RefreshCwIcon className="size-4" />
               </Button>
@@ -418,6 +426,40 @@ function PromptsPageContent() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Workflow Variables Info Card */}
+      <div className="container mx-auto px-4 pt-6">
+        <Card className="bg-muted/30 border-dashed">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-4">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <CodeIcon className="size-4" />
+                  n8n Workflow Variables
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div className="space-y-1">
+                    <Badge variant="secondary" className="font-mono">{"{{transcript}}"}</Badge>
+                    <p className="text-muted-foreground">The sales call transcript content to analyze</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Badge variant="secondary" className="font-mono">{"{{prompt_content}}"}</Badge>
+                    <p className="text-muted-foreground">The agent&apos;s system prompt template</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Badge variant="secondary" className="font-mono">{"{{agent_type}}"}</Badge>
+                    <p className="text-muted-foreground">Agent type (pain_points, objection, etc.)</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Badge variant="secondary" className="font-mono">{"{{prompt_id}}"}</Badge>
+                    <p className="text-muted-foreground">UUID of the prompt being executed</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Content */}
@@ -651,7 +693,7 @@ function PromptsPageContent() {
 
               <Button
                 className="w-full gap-2"
-                onClick={() => executeRun("scoreV2")}
+                onClick={() => executeRun("testPrompt")}
                 disabled={runLoading || !selectedTestTranscript}
               >
                 {runLoading ? (
@@ -662,7 +704,7 @@ function PromptsPageContent() {
                 ) : (
                   <>
                     <ZapIcon className="size-4" />
-                    Run Now
+                    Run Single Agent
                   </>
                 )}
               </Button>
