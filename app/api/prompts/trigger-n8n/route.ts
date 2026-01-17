@@ -89,6 +89,11 @@ export async function POST(request: NextRequest) {
 
     // Add prompt data if available
     if (promptData) {
+      // Add prompt_id at top level for n8n workflow compatibility
+      n8nPayload.prompt_id = promptData.id;
+      n8nPayload.agent_type = promptData.agent_type;
+
+      // Also include full prompt object for reference
       n8nPayload.prompt = {
         id: promptData.id,
         name: promptData.name,
