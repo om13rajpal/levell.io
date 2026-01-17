@@ -16,7 +16,7 @@ function getSupabaseAdmin() {
 // n8n webhook URLs
 const N8N_WEBHOOKS = {
   scoreV2: process.env.N8N_WEBHOOK_SCOREV2 || "https://n8n.omrajpal.tech/webhook/scoreV2",
-  testPrompt: process.env.N8N_WEBHOOK_TEST_PROMPT || "https://n8n.omrajpal.tech/webhook/test-prompt",
+  testPrompt: process.env.N8N_WEBHOOK_TEST_PROMPT || "https://n8n.omrajpal.tech/webhook/run-agent-prompt",
 };
 
 // POST - Trigger n8n workflow with specific parameters
@@ -33,6 +33,8 @@ export async function POST(request: NextRequest) {
       test_mode = false,
       transcript_ids,
       openai_key,
+      test_transcript,
+      test_transcript_name,
     } = body;
 
     // Get webhook URL
@@ -95,6 +97,13 @@ export async function POST(request: NextRequest) {
         version: promptData.version,
         variables: promptData.variables,
       };
+    }
+
+    // Add test transcript if provided (for testing prompts)
+    if (test_mode && test_transcript) {
+      n8nPayload.transcript = test_transcript;
+      n8nPayload.test_transcript = test_transcript;
+      n8nPayload.test_transcript_name = test_transcript_name;
     }
 
     // Add specific transcript IDs if test mode

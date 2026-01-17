@@ -14,25 +14,23 @@ function getSupabaseAdmin() {
 }
 
 // GET all test transcripts
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
+    const searchParams = request.nextUrl.searchParams;
+    const includeContent = searchParams.get("include_content") === "true";
+
+    // Select fields based on whether content is needed
+    // Map existing columns: label->name, call_type->scenario_type, clean_transcript_text->transcript_content
+    const selectFields = includeContent
+      ? "id, label, description, call_type, clean_transcript_text, is_active, created_at"
+      : "id, label, description, call_type, is_active, created_at";
 
     const { data, error } = await supabase
       .from("test_transcripts")
-      .select(`
-        *,
-        transcripts (
-          id,
-          title,
-          fireflies_id,
-          duration,
-          ai_overall_score,
-          created_at
-        )
-      `)
+      .select(selectFields)
       .eq("is_active", true)
-      .order("created_at", { ascending: true });
+      .order("call_type", { ascending: true });
 
     if (error) {
       console.error("[Test Transcripts API] Error fetching:", error);
@@ -42,7 +40,21 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json({ test_transcripts: data });
+    // Map column names to expected format
+    const transcripts = (data || []).map((t: Record<string, unknown>) => ({
+      id: t.id,
+      name: t.label,
+      description: t.description,
+      scenario_type: t.call_type,
+      transcript_content: t.clean_transcript_text,
+      is_active: t.is_active,
+      created_at: t.created_at,
+    }));
+
+    return NextResponse.json({
+      transcripts,
+      count: transcripts.length,
+    });
   } catch (error) {
     console.error("[Test Transcripts API] Unexpected error:", error);
     return NextResponse.json(
@@ -58,42 +70,25 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 
-    const { transcript_id, label, description, call_type, difficulty } = body;
+    const { name, description, scenario_type, expected_outcome, transcript_content } = body;
 
-    if (!transcript_id || !label) {
+    if (!name || !transcript_content || !scenario_type) {
       return NextResponse.json(
-        { error: "transcript_id and label are required" },
+        { error: "name, scenario_type, and transcript_content are required" },
         { status: 400 }
-      );
-    }
-
-    // Verify transcript exists
-    const { data: transcript, error: transcriptError } = await supabase
-      .from("transcripts")
-      .select("id, title")
-      .eq("id", transcript_id)
-      .single();
-
-    if (transcriptError || !transcript) {
-      return NextResponse.json(
-        { error: "Transcript not found" },
-        { status: 404 }
       );
     }
 
     const { data, error } = await supabase
       .from("test_transcripts")
       .insert({
-        transcript_id,
-        label,
+        name,
         description: description || null,
-        call_type: call_type || "other",
-        difficulty: difficulty || "medium",
+        scenario_type,
+        expected_outcome: expected_outcome || null,
+        transcript_content,
       })
-      .select(`
-        *,
-        transcripts (id, title, fireflies_id, duration, ai_overall_score)
-      `)
+      .select()
       .single();
 
     if (error) {
@@ -104,7 +99,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ test_transcript: data }, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      transcript: data
+    }, { status: 201 });
   } catch (error) {
     console.error("[Test Transcripts API] Unexpected error:", error);
     return NextResponse.json(

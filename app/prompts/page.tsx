@@ -1,39 +1,30 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import {
-  FileTextIcon,
-  PlusIcon,
-  SaveIcon,
-  XIcon,
-  EditIcon,
-  TrashIcon,
-  CopyIcon,
-  CheckIcon,
-  CodeIcon,
+  PlayIcon,
+  HistoryIcon,
+  BarChart3Icon,
   RefreshCwIcon,
   SparklesIcon,
+  Loader2Icon,
+  CheckIcon,
+  XIcon,
+  CopyIcon,
+  CodeIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  PlayIcon,
-  FlaskConicalIcon,
-  Loader2Icon,
-  DollarSignIcon,
-  ClockIcon,
-  TargetIcon,
-  StarIcon,
-  HistoryIcon,
-  ActivityIcon,
-  ExternalLinkIcon,
-  BarChart3Icon,
+  CoinsIcon,
   ZapIcon,
-  RocketIcon,
+  ClockIcon,
+  EditIcon,
+  SaveIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -49,7 +40,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -57,10 +57,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -76,133 +72,105 @@ interface AgentPrompt {
   created_by: string | null;
   created_at: string;
   updated_at: string;
-  stats?: {
-    total_runs: number;
-    test_runs: number;
-    production_runs: number;
-  };
+}
+
+interface PromptVersion {
+  id: string;
+  prompt_id: string;
+  version: number;
+  name: string;
+  prompt_content: string;
+  description: string | null;
+  variables: string[];
+  created_at: string;
+  is_current: boolean;
+}
+
+interface AgentRun {
+  id: string;
+  agent_type: string;
+  prompt_version: number;
+  status: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: string;
+  duration_ms: number;
+  model: string;
+  output: string | null;
+  output_data: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  is_test_run: boolean;
 }
 
 interface TestTranscript {
   id: string;
-  transcript_id: number;
-  label: string;
+  name: string;
   description: string | null;
-  call_type: string;
-  difficulty: string;
-  transcripts: {
-    id: number;
-    title: string;
-    fireflies_id: string;
-    duration: number;
-    ai_overall_score: number | null;
-  };
+  scenario_type: string;
+  expected_outcome: string | null;
+  transcript_content?: string;
 }
 
-interface TestResult {
-  test_transcript_id: string;
-  label: string;
-  call_type: string;
-  transcript_title: string;
-  input_tokens: number;
-  output_tokens: number;
-  cost: number;
-  duration_ms: number;
-  output: Record<string, unknown> | null;
-  error?: string;
-  run_id?: string;
-}
+const AGENT_LABELS: Record<string, string> = {
+  pain_points: "Pain Points",
+  objection: "Objection",
+  engagement: "Engagement",
+  next_steps: "Next Steps",
+  call_structure: "Call Structure",
+  rep_technique: "Rep Technique",
+  synthesis: "Synthesis",
+};
 
-interface TestResponse {
-  prompt: {
-    id: string;
-    name: string;
-    agent_type: string;
-    version: number;
-  };
-  model: string;
-  summary: {
-    total_transcripts: number;
-    successful: number;
-    failed: number;
-    total_input_tokens: number;
-    total_output_tokens: number;
-    total_cost: string;
-    total_duration_ms: number;
-  };
-  results: TestResult[];
-}
-
-const AGENT_TYPES = [
-  { value: "sales_intelligence", label: "Sales Intelligence" },
-  { value: "pain_points", label: "Pain Points" },
-  { value: "objections", label: "Objections" },
-  { value: "engagement", label: "Engagement" },
-  { value: "next_steps", label: "Next Steps" },
-  { value: "call_structure", label: "Call Structure" },
-  { value: "rep_technique", label: "Rep Technique" },
-  { value: "synthesis", label: "Synthesis" },
-  { value: "custom", label: "Custom" },
-];
-
-const MODELS = [
-  { value: "gpt-4o", label: "GPT-4o", cost: "$2.50/$10.00" },
-  { value: "gpt-4o-mini", label: "GPT-4o Mini", cost: "$0.15/$0.60" },
-  { value: "gpt-4-turbo", label: "GPT-4 Turbo", cost: "$10.00/$30.00" },
-];
-
-export default function PromptsPage() {
+function PromptsPageContent() {
+  const searchParams = useSearchParams();
   const [prompts, setPrompts] = useState<AgentPrompt[]>([]);
-  const [testTranscripts, setTestTranscripts] = useState<TestTranscript[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPrompt, setSelectedPrompt] = useState<AgentPrompt | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
   const [expandedPrompts, setExpandedPrompts] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [filterType, setFilterType] = useState<string>("all");
 
-  // Test state
-  const [testDialogOpen, setTestDialogOpen] = useState(false);
-  const [testPrompt, setTestPrompt] = useState<AgentPrompt | null>(null);
-  const [selectedTranscripts, setSelectedTranscripts] = useState<Set<string>>(new Set());
-  const [testModel, setTestModel] = useState("gpt-4o");
-  const [testResults, setTestResults] = useState<TestResponse | null>(null);
-  const [testLoading, setTestLoading] = useState(false);
+  // Version History Dialog
+  const [versionsDialogOpen, setVersionsDialogOpen] = useState(false);
+  const [selectedPromptForVersions, setSelectedPromptForVersions] = useState<AgentPrompt | null>(null);
+  const [versions, setVersions] = useState<PromptVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [selectedVersionContent, setSelectedVersionContent] = useState<string | null>(null);
 
-  // n8n trigger state
-  const [triggeringPromptId, setTriggeringPromptId] = useState<string | null>(null);
-  const [n8nDialogOpen, setN8nDialogOpen] = useState(false);
-  const [n8nPrompt, setN8nPrompt] = useState<AgentPrompt | null>(null);
-  const [n8nResult, setN8nResult] = useState<{
+  // Outputs Dialog
+  const [outputsDialogOpen, setOutputsDialogOpen] = useState(false);
+  const [selectedPromptForOutputs, setSelectedPromptForOutputs] = useState<AgentPrompt | null>(null);
+  const [outputs, setOutputs] = useState<AgentRun[]>([]);
+  const [outputsLoading, setOutputsLoading] = useState(false);
+  const [selectedOutput, setSelectedOutput] = useState<AgentRun | null>(null);
+
+  // Run Prompt Dialog
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [selectedPromptForRun, setSelectedPromptForRun] = useState<AgentPrompt | null>(null);
+  const [runLoading, setRunLoading] = useState(false);
+  const [runResult, setRunResult] = useState<{
     success: boolean;
     message?: string;
     error?: string;
     run_id?: string;
   } | null>(null);
 
-  // Form state
-  const [formData, setFormData] = useState({
-    name: "",
-    agent_type: "sales_intelligence",
-    prompt_content: "",
-    description: "",
-    is_active: true,
-    variables: [] as string[],
-  });
+  // Test Transcripts
+  const [testTranscripts, setTestTranscripts] = useState<TestTranscript[]>([]);
+  const [selectedTestTranscript, setSelectedTestTranscript] = useState<string>("");
+  const [testTranscriptsLoading, setTestTranscriptsLoading] = useState(false);
+
+  // Edit Prompt Dialog
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedPromptForEdit, setSelectedPromptForEdit] = useState<AgentPrompt | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
 
   // Fetch prompts
   const fetchPrompts = useCallback(async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      params.set("include_stats", "true");
-      if (filterType !== "all") {
-        params.set("agent_type", filterType);
-      }
-
-      const response = await fetch(`/api/prompts?${params.toString()}`);
+      const response = await fetch("/api/prompts?active_only=true");
       const data = await response.json();
 
       if (response.ok) {
@@ -215,187 +183,11 @@ export default function PromptsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterType]);
-
-  // Fetch test transcripts
-  const fetchTestTranscripts = useCallback(async () => {
-    try {
-      const response = await fetch("/api/test-transcripts");
-      const data = await response.json();
-      if (response.ok) {
-        setTestTranscripts(data.test_transcripts || []);
-        // Select all by default
-        setSelectedTranscripts(new Set(data.test_transcripts?.map((t: TestTranscript) => t.id) || []));
-      }
-    } catch (error) {
-      console.error("Failed to fetch test transcripts:", error);
-    }
   }, []);
 
   useEffect(() => {
     fetchPrompts();
-    fetchTestTranscripts();
-  }, [fetchPrompts, fetchTestTranscripts]);
-
-  // Extract variables from prompt content
-  const extractVariables = (content: string): string[] => {
-    const matches = content.match(/\{\{(\w+)\}\}/g);
-    if (!matches) return [];
-    return [...new Set(matches.map((m) => m.replace(/\{\{|\}\}/g, "")))];
-  };
-
-  // Handle form changes
-  const handleContentChange = (content: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      prompt_content: content,
-      variables: extractVariables(content),
-    }));
-  };
-
-  // Open edit dialog
-  const handleEdit = (prompt: AgentPrompt) => {
-    setSelectedPrompt(prompt);
-    setFormData({
-      name: prompt.name,
-      agent_type: prompt.agent_type,
-      prompt_content: prompt.prompt_content,
-      description: prompt.description || "",
-      is_active: prompt.is_active,
-      variables: prompt.variables || [],
-    });
-    setIsEditing(true);
-  };
-
-  // Open create dialog
-  const handleCreate = () => {
-    setFormData({
-      name: "",
-      agent_type: "sales_intelligence",
-      prompt_content: "",
-      description: "",
-      is_active: true,
-      variables: [],
-    });
-    setIsCreating(true);
-  };
-
-  // Open test dialog
-  const handleOpenTest = (prompt: AgentPrompt) => {
-    setTestPrompt(prompt);
-    setTestResults(null);
-    setTestDialogOpen(true);
-  };
-
-  // Run test
-  const handleRunTest = async () => {
-    if (!testPrompt) return;
-    if (selectedTranscripts.size === 0) {
-      toast.error("Please select at least one test transcript");
-      return;
-    }
-
-    setTestLoading(true);
-    try {
-      const response = await fetch("/api/prompts/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt_id: testPrompt.id,
-          model: testModel,
-          test_transcript_ids: Array.from(selectedTranscripts),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setTestResults(data);
-        toast.success(`Test completed: ${data.summary.successful}/${data.summary.total_transcripts} successful`);
-      } else {
-        toast.error(data.error || "Test failed");
-      }
-    } catch (error) {
-      toast.error("Error running test");
-      console.error(error);
-    } finally {
-      setTestLoading(false);
-    }
-  };
-
-  // Save prompt (create or update)
-  const handleSave = async () => {
-    try {
-      if (!formData.name || !formData.prompt_content) {
-        toast.error("Name and prompt content are required");
-        return;
-      }
-
-      if (isEditing && selectedPrompt) {
-        const response = await fetch(`/api/prompts/${selectedPrompt.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        });
-
-        if (response.ok) {
-          toast.success("Prompt updated (previous version archived)");
-          setIsEditing(false);
-          fetchPrompts();
-        } else {
-          toast.error("Failed to update prompt");
-        }
-      } else {
-        const response = await fetch("/api/prompts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        });
-
-        if (response.ok) {
-          toast.success("Prompt created successfully");
-          setIsCreating(false);
-          fetchPrompts();
-        } else {
-          toast.error("Failed to create prompt");
-        }
-      }
-    } catch {
-      toast.error("Error saving prompt");
-    }
-  };
-
-  // Delete prompt
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this prompt?")) return;
-
-    try {
-      const response = await fetch(`/api/prompts/${id}`, {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        toast.success("Prompt deleted successfully");
-        fetchPrompts();
-      } else {
-        toast.error("Failed to delete prompt");
-      }
-    } catch {
-      toast.error("Error deleting prompt");
-    }
-  };
-
-  // Copy prompt to clipboard
-  const handleCopy = async (prompt: AgentPrompt) => {
-    try {
-      await navigator.clipboard.writeText(prompt.prompt_content);
-      setCopiedId(prompt.id);
-      toast.success("Copied to clipboard");
-      setTimeout(() => setCopiedId(null), 2000);
-    } catch {
-      toast.error("Failed to copy");
-    }
-  };
+  }, [fetchPrompts]);
 
   // Toggle prompt expansion
   const toggleExpand = (id: string) => {
@@ -410,69 +202,188 @@ export default function PromptsPage() {
     });
   };
 
-  // Toggle transcript selection
-  const toggleTranscript = (id: string) => {
-    setSelectedTranscripts((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  // Open n8n trigger dialog
-  const handleOpenN8nTrigger = (prompt: AgentPrompt) => {
-    setN8nPrompt(prompt);
-    setN8nResult(null);
-    setN8nDialogOpen(true);
-  };
-
-  // Trigger n8n workflow
-  const handleTriggerN8n = async (workflow: string = "scoreV2") => {
-    if (!n8nPrompt) return;
-
-    setTriggeringPromptId(n8nPrompt.id);
+  // Copy prompt to clipboard
+  const handleCopy = async (prompt: AgentPrompt) => {
     try {
+      await navigator.clipboard.writeText(prompt.prompt_content);
+      setCopiedId(prompt.id);
+      toast.success("Copied to clipboard");
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      toast.error("Failed to copy");
+    }
+  };
+
+  // Open Version History Dialog
+  const handleViewVersions = async (prompt: AgentPrompt) => {
+    setSelectedPromptForVersions(prompt);
+    setVersionsDialogOpen(true);
+    setVersionsLoading(true);
+    setSelectedVersionContent(null);
+
+    try {
+      const response = await fetch(`/api/prompts?version_history=${prompt.id}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setVersions(data.versions || []);
+      } else {
+        toast.error("Failed to fetch versions");
+      }
+    } catch {
+      toast.error("Error fetching versions");
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  // Open Outputs Dialog
+  const handleViewOutputs = async (prompt: AgentPrompt) => {
+    setSelectedPromptForOutputs(prompt);
+    setOutputsDialogOpen(true);
+    setOutputsLoading(true);
+    setSelectedOutput(null);
+
+    try {
+      const response = await fetch(`/api/agent-runs?prompt_id=${prompt.id}&page_size=50`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setOutputs(data.runs || []);
+      } else {
+        toast.error("Failed to fetch outputs");
+      }
+    } catch {
+      toast.error("Error fetching outputs");
+    } finally {
+      setOutputsLoading(false);
+    }
+  };
+
+  // Fetch test transcripts
+  const fetchTestTranscripts = async () => {
+    setTestTranscriptsLoading(true);
+    try {
+      const response = await fetch("/api/test-transcripts");
+      const data = await response.json();
+      if (response.ok) {
+        setTestTranscripts(data.transcripts || []);
+      }
+    } catch {
+      console.error("Failed to fetch test transcripts");
+    } finally {
+      setTestTranscriptsLoading(false);
+    }
+  };
+
+  // Open Run Prompt Dialog
+  const handleRunPrompt = (prompt: AgentPrompt) => {
+    setSelectedPromptForRun(prompt);
+    setRunResult(null);
+    setSelectedTestTranscript("");
+    setRunDialogOpen(true);
+    fetchTestTranscripts();
+  };
+
+  // Execute Run
+  const executeRun = async (workflow: string = "scoreV2") => {
+    if (!selectedPromptForRun) return;
+
+    if (!selectedTestTranscript) {
+      toast.error("Please select a test transcript");
+      return;
+    }
+
+    // Find the selected transcript to get its content
+    const transcript = testTranscripts.find(t => t.id === selectedTestTranscript);
+
+    setRunLoading(true);
+    try {
+      // First fetch the full transcript content
+      const transcriptResponse = await fetch(`/api/test-transcripts?include_content=true`);
+      const transcriptData = await transcriptResponse.json();
+      const fullTranscript = transcriptData.transcripts?.find((t: TestTranscript) => t.id === selectedTestTranscript);
+
       const response = await fetch("/api/prompts/trigger-n8n", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workflow,
-          prompt_id: n8nPrompt.id,
-          agent_type: n8nPrompt.agent_type,
-          test_mode: false,
+          prompt_id: selectedPromptForRun.id,
+          agent_type: selectedPromptForRun.agent_type,
+          test_mode: true,
+          test_transcript: fullTranscript?.transcript_content || "",
+          test_transcript_name: transcript?.name || "",
         }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        setN8nResult({
+        setRunResult({
           success: true,
           message: data.message || "Workflow triggered successfully",
           run_id: data.n8n_response?.run_id,
         });
-        toast.success("n8n workflow triggered successfully!");
+        toast.success("Prompt run triggered successfully!");
       } else {
-        setN8nResult({
+        setRunResult({
           success: false,
           error: data.error || "Failed to trigger workflow",
         });
-        toast.error(data.error || "Failed to trigger n8n workflow");
+        toast.error(data.error || "Failed to run prompt");
       }
     } catch (error) {
-      setN8nResult({
+      setRunResult({
         success: false,
         error: "Network error occurred",
       });
-      toast.error("Error triggering n8n workflow");
-      console.error(error);
+      toast.error("Error running prompt");
     } finally {
-      setTriggeringPromptId(null);
+      setRunLoading(false);
     }
+  };
+
+  // Open Edit Dialog
+  const handleEditPrompt = (prompt: AgentPrompt) => {
+    setSelectedPromptForEdit(prompt);
+    setEditContent(prompt.prompt_content);
+    setEditDialogOpen(true);
+  };
+
+  // Save Edited Prompt
+  const handleSavePrompt = async () => {
+    if (!selectedPromptForEdit) return;
+
+    setEditLoading(true);
+    try {
+      const response = await fetch(`/api/prompts/${selectedPromptForEdit.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt_content: editContent,
+        }),
+      });
+
+      if (response.ok) {
+        toast.success("Prompt saved (previous version archived)");
+        setEditDialogOpen(false);
+        fetchPrompts();
+      } else {
+        toast.error("Failed to save prompt");
+      }
+    } catch {
+      toast.error("Error saving prompt");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // Format duration
+  const formatDuration = (ms: number | null) => {
+    if (!ms) return "-";
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
   };
 
   return (
@@ -488,41 +399,22 @@ export default function PromptsPage() {
               <div>
                 <h1 className="text-2xl font-bold">Agent Prompts</h1>
                 <p className="text-muted-foreground">
-                  View, edit, and test AI agent prompts
+                  7 AI agents for sales call analysis
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filter by type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  {AGENT_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
               <Button variant="outline" size="icon" onClick={fetchPrompts}>
                 <RefreshCwIcon className="size-4" />
               </Button>
 
               <Link href="/agent-runs">
                 <Button variant="outline" className="gap-2">
-                  <ActivityIcon className="size-4" />
-                  View Runs
+                  <BarChart3Icon className="size-4" />
+                  View All Runs
                 </Button>
               </Link>
-
-              <Button onClick={handleCreate} className="gap-2">
-                <PlusIcon className="size-4" />
-                New Prompt
-              </Button>
             </div>
           </div>
         </div>
@@ -537,26 +429,19 @@ export default function PromptsPage() {
         ) : prompts.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-20">
-              <FileTextIcon className="size-12 text-muted-foreground mb-4" />
+              <SparklesIcon className="size-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No prompts found</h3>
-              <p className="text-muted-foreground mb-4">
-                Create your first agent prompt to get started
+              <p className="text-muted-foreground">
+                Prompts will appear here once configured
               </p>
-              <Button onClick={handleCreate} className="gap-2">
-                <PlusIcon className="size-4" />
-                Create Prompt
-              </Button>
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-4">
+          <div className="grid gap-4">
             {prompts.map((prompt) => (
               <Card
                 key={prompt.id}
-                className={cn(
-                  "transition-all duration-200",
-                  !prompt.is_active && "opacity-60"
-                )}
+                className="transition-all duration-200 hover:shadow-md"
               >
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
@@ -577,70 +462,61 @@ export default function PromptsPage() {
                           <Badge variant="secondary" className="text-xs">
                             v{prompt.version}
                           </Badge>
-                          {!prompt.is_active && (
-                            <Badge variant="outline" className="text-xs">
-                              Inactive
-                            </Badge>
-                          )}
                         </CardTitle>
                         <CardDescription className="mt-1">
-                          {prompt.description ||
-                            `${prompt.agent_type} prompt`}
+                          {prompt.description || `${AGENT_LABELS[prompt.agent_type] || prompt.agent_type} agent`}
                         </CardDescription>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <Badge variant="outline">
-                        {
-                          AGENT_TYPES.find((t) => t.value === prompt.agent_type)
-                            ?.label || prompt.agent_type
-                        }
+                        {AGENT_LABELS[prompt.agent_type] || prompt.agent_type}
                       </Badge>
 
-                      {/* Run Stats */}
-                      {prompt.stats && prompt.stats.total_runs > 0 && (
-                        <Link href={`/agent-runs?prompt_id=${prompt.id}`}>
-                          <Badge
-                            variant="secondary"
-                            className="gap-1 cursor-pointer hover:bg-secondary/80"
-                          >
-                            <ActivityIcon className="size-3" />
-                            {prompt.stats.total_runs} runs
-                          </Badge>
-                        </Link>
-                      )}
-
-                      {/* Test Button */}
+                      {/* Run Prompt Button */}
                       <Button
                         variant="default"
                         size="sm"
                         className="gap-1"
-                        onClick={() => handleOpenTest(prompt)}
+                        onClick={() => handleRunPrompt(prompt)}
                       >
-                        <FlaskConicalIcon className="size-3" />
-                        Test
+                        <PlayIcon className="size-3" />
+                        Run Prompt
                       </Button>
 
-                      {/* Run n8n Workflow Button */}
+                      {/* View Versions Button */}
                       <Button
-                        variant="secondary"
+                        variant="outline"
                         size="sm"
                         className="gap-1"
-                        onClick={() => handleOpenN8nTrigger(prompt)}
+                        onClick={() => handleViewVersions(prompt)}
                       >
-                        <ZapIcon className="size-3" />
-                        Run n8n
+                        <HistoryIcon className="size-3" />
+                        Versions
                       </Button>
 
-                      {/* View Runs Button */}
-                      <Link href={`/agent-runs?prompt_id=${prompt.id}`}>
-                        <Button variant="outline" size="sm" className="gap-1">
-                          <BarChart3Icon className="size-3" />
-                          Runs
-                        </Button>
-                      </Link>
+                      {/* View Outputs Button */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => handleViewOutputs(prompt)}
+                      >
+                        <BarChart3Icon className="size-3" />
+                        Outputs
+                      </Button>
 
+                      {/* Edit Button */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEditPrompt(prompt)}
+                      >
+                        <EditIcon className="size-4" />
+                      </Button>
+
+                      {/* Copy Button */}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -651,20 +527,6 @@ export default function PromptsPage() {
                         ) : (
                           <CopyIcon className="size-4" />
                         )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleEdit(prompt)}
-                      >
-                        <EditIcon className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDelete(prompt.id)}
-                      >
-                        <TrashIcon className="size-4 text-destructive" />
                       </Button>
                     </div>
                   </div>
@@ -708,16 +570,9 @@ export default function PromptsPage() {
                     {/* Metadata */}
                     <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
                       <span>
-                        Created:{" "}
-                        {new Date(prompt.created_at).toLocaleDateString()}
+                        Updated: {new Date(prompt.updated_at).toLocaleDateString()}
                       </span>
-                      <span>
-                        Updated:{" "}
-                        {new Date(prompt.updated_at).toLocaleDateString()}
-                      </span>
-                      <span>
-                        {prompt.prompt_content.length} characters
-                      </span>
+                      <span>{prompt.prompt_content.length} characters</span>
                     </div>
                   </CardContent>
                 )}
@@ -727,490 +582,113 @@ export default function PromptsPage() {
         )}
       </div>
 
-      {/* Create/Edit Dialog */}
-      <Dialog
-        open={isEditing || isCreating}
-        onOpenChange={() => {
-          setIsEditing(false);
-          setIsCreating(false);
-        }}
-      >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {isEditing ? "Edit Prompt" : "Create New Prompt"}
-            </DialogTitle>
-            <DialogDescription>
-              {isEditing
-                ? "Modify the prompt. Previous version will be archived."
-                : "Configure your new agent prompt"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6 py-4">
-            {/* Name */}
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, name: e.target.value }))
-                }
-                placeholder="e.g., Pain Points Extraction"
-              />
-            </div>
-
-            {/* Agent Type */}
-            <div className="space-y-2">
-              <Label htmlFor="type">Agent Type</Label>
-              <Select
-                value={formData.agent_type}
-                onValueChange={(v) =>
-                  setFormData((prev) => ({ ...prev, agent_type: v }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {AGENT_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Description */}
-            <div className="space-y-2">
-              <Label htmlFor="description">Description (optional)</Label>
-              <Input
-                id="description"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                placeholder="Brief description of this prompt"
-              />
-            </div>
-
-            {/* Prompt Content */}
-            <div className="space-y-2">
-              <Label htmlFor="content">Prompt Content</Label>
-              <Textarea
-                id="content"
-                value={formData.prompt_content}
-                onChange={(e) => handleContentChange(e.target.value)}
-                placeholder="Enter your prompt here. Use {{variable_name}} for dynamic content."
-                className="min-h-[300px] font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Use {`{{variable_name}}`} syntax for dynamic variables
-              </p>
-            </div>
-
-            {/* Detected Variables */}
-            {formData.variables.length > 0 && (
-              <div className="space-y-2">
-                <Label>Detected Variables</Label>
-                <div className="flex flex-wrap gap-2">
-                  {formData.variables.map((v) => (
-                    <Badge key={v} variant="secondary" className="font-mono">
-                      {`{{${v}}}`}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Active Switch */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Active</Label>
-                <p className="text-sm text-muted-foreground">
-                  Only active prompts will be used by agents
-                </p>
-              </div>
-              <Switch
-                checked={formData.is_active}
-                onCheckedChange={(checked) =>
-                  setFormData((prev) => ({ ...prev, is_active: checked }))
-                }
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsEditing(false);
-                setIsCreating(false);
-              }}
-            >
-              <XIcon className="size-4 mr-2" />
-              Cancel
-            </Button>
-            <Button onClick={handleSave}>
-              <SaveIcon className="size-4 mr-2" />
-              {isEditing ? "Save Changes" : "Create Prompt"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Test Dialog */}
-      <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+      {/* Run Prompt Dialog */}
+      <Dialog open={runDialogOpen} onOpenChange={setRunDialogOpen}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <FlaskConicalIcon className="size-5" />
-              Test Prompt: {testPrompt?.name}
+              <PlayIcon className="size-5 text-green-500" />
+              Run Prompt
             </DialogTitle>
             <DialogDescription>
-              Run this prompt against test transcripts to evaluate output quality
+              Trigger the n8n workflow to run this prompt
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs defaultValue="config" className="flex-1 overflow-hidden flex flex-col">
-            <TabsList className="w-full justify-start">
-              <TabsTrigger value="config">Configuration</TabsTrigger>
-              <TabsTrigger value="results" disabled={!testResults}>
-                Results {testResults && `(${testResults.summary.successful}/${testResults.summary.total_transcripts})`}
-              </TabsTrigger>
-            </TabsList>
+          {selectedPromptForRun && (
+            <div className="space-y-4 py-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{selectedPromptForRun.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {AGENT_LABELS[selectedPromptForRun.agent_type] || selectedPromptForRun.agent_type}
+                      </p>
+                    </div>
+                    <Badge variant="secondary">v{selectedPromptForRun.version}</Badge>
+                  </div>
+                </CardContent>
+              </Card>
 
-            <TabsContent value="config" className="flex-1 overflow-auto">
-              <div className="space-y-6 py-4">
-                {/* Model Selection */}
-                <div className="space-y-2">
-                  <Label>Model</Label>
-                  <Select value={testModel} onValueChange={setTestModel}>
-                    <SelectTrigger className="w-[250px]">
-                      <SelectValue />
+              {/* Test Transcript Selector */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Select Test Transcript</Label>
+                {testTranscriptsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                    <Loader2Icon className="size-4 animate-spin" />
+                    Loading transcripts...
+                  </div>
+                ) : testTranscripts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">
+                    No test transcripts available
+                  </p>
+                ) : (
+                  <Select value={selectedTestTranscript} onValueChange={setSelectedTestTranscript}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose a test transcript..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {MODELS.map((model) => (
-                        <SelectItem key={model.value} value={model.value}>
-                          <div className="flex items-center justify-between w-full">
-                            <span>{model.label}</span>
-                            <span className="text-xs text-muted-foreground ml-4">
-                              {model.cost}
-                            </span>
+                      {testTranscripts.map((transcript) => (
+                        <SelectItem key={transcript.id} value={transcript.id}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {transcript.scenario_type}
+                            </Badge>
+                            <span>{transcript.name}</span>
                           </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                )}
+                {selectedTestTranscript && (
                   <p className="text-xs text-muted-foreground">
-                    Cost shown as input/output per 1M tokens
+                    {testTranscripts.find(t => t.id === selectedTestTranscript)?.description}
                   </p>
-                </div>
-
-                {/* Test Transcripts Selection */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Test Transcripts ({selectedTranscripts.size} selected)</Label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        if (selectedTranscripts.size === testTranscripts.length) {
-                          setSelectedTranscripts(new Set());
-                        } else {
-                          setSelectedTranscripts(new Set(testTranscripts.map((t) => t.id)));
-                        }
-                      }}
-                    >
-                      {selectedTranscripts.size === testTranscripts.length ? "Deselect All" : "Select All"}
-                    </Button>
-                  </div>
-
-                  <div className="border rounded-lg divide-y">
-                    {testTranscripts.map((transcript) => (
-                      <div
-                        key={transcript.id}
-                        className="flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors"
-                      >
-                        <Checkbox
-                          checked={selectedTranscripts.has(transcript.id)}
-                          onCheckedChange={() => toggleTranscript(transcript.id)}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{transcript.label}</p>
-                          <p className="text-sm text-muted-foreground truncate">
-                            {transcript.transcripts?.title}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">
-                            {transcript.call_type}
-                          </Badge>
-                          <Badge
-                            variant={
-                              transcript.difficulty === "easy"
-                                ? "secondary"
-                                : transcript.difficulty === "hard"
-                                ? "destructive"
-                                : "outline"
-                            }
-                            className="text-xs"
-                          >
-                            {transcript.difficulty}
-                          </Badge>
-                          {transcript.transcripts?.ai_overall_score && (
-                            <Badge variant="secondary" className="text-xs">
-                              Score: {transcript.transcripts.ai_overall_score}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="results" className="flex-1 overflow-auto">
-              {testResults && (
-                <div className="space-y-6 py-4">
-                  {/* Summary */}
-                  <div className="grid grid-cols-4 gap-4">
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-2">
-                          <TargetIcon className="size-4 text-green-500" />
-                          <span className="text-sm font-medium">Success Rate</span>
-                        </div>
-                        <p className="text-2xl font-bold mt-1">
-                          {Math.round((testResults.summary.successful / testResults.summary.total_transcripts) * 100)}%
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {testResults.summary.successful}/{testResults.summary.total_transcripts} passed
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-2">
-                          <DollarSignIcon className="size-4 text-yellow-500" />
-                          <span className="text-sm font-medium">Total Cost</span>
-                        </div>
-                        <p className="text-2xl font-bold mt-1">
-                          ${parseFloat(testResults.summary.total_cost).toFixed(4)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {testResults.summary.total_input_tokens + testResults.summary.total_output_tokens} tokens
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-2">
-                          <ClockIcon className="size-4 text-blue-500" />
-                          <span className="text-sm font-medium">Duration</span>
-                        </div>
-                        <p className="text-2xl font-bold mt-1">
-                          {(testResults.summary.total_duration_ms / 1000).toFixed(1)}s
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {(testResults.summary.total_duration_ms / testResults.summary.total_transcripts / 1000).toFixed(1)}s avg
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-2">
-                          <CodeIcon className="size-4 text-purple-500" />
-                          <span className="text-sm font-medium">Model</span>
-                        </div>
-                        <p className="text-2xl font-bold mt-1">
-                          {testResults.model}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          v{testResults.prompt.version}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  {/* Individual Results */}
-                  <div className="space-y-4">
-                    <h3 className="font-semibold">Individual Results</h3>
-                    {testResults.results.map((result, idx) => (
-                      <Card key={idx} className={cn(result.error && "border-destructive")}>
-                        <CardHeader className="pb-2">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <CardTitle className="text-base flex items-center gap-2">
-                                {result.error ? (
-                                  <XIcon className="size-4 text-destructive" />
-                                ) : (
-                                  <CheckIcon className="size-4 text-green-500" />
-                                )}
-                                {result.label}
-                              </CardTitle>
-                              <CardDescription>{result.transcript_title}</CardDescription>
-                            </div>
-                            <div className="flex items-center gap-2 text-sm">
-                              <Badge variant="outline">{result.call_type}</Badge>
-                              <span className="text-muted-foreground">
-                                ${result.cost.toFixed(4)} | {result.duration_ms}ms
-                              </span>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          {result.error ? (
-                            <p className="text-destructive text-sm">{result.error}</p>
-                          ) : result.output ? (
-                            <ScrollArea className="h-[200px]">
-                              <pre className="bg-muted rounded-lg p-4 text-xs font-mono whitespace-pre-wrap">
-                                {JSON.stringify(result.output, null, 2)}
-                              </pre>
-                            </ScrollArea>
-                          ) : null}
-
-                          {/* Show score if present in output */}
-                          {result.output && typeof result.output === "object" && "score" in result.output && (
-                            <div className="mt-3 flex items-center gap-2">
-                              <StarIcon className="size-4 text-yellow-500" />
-                              <span className="font-medium">Score: {String(result.output.score)}/100</span>
-                              {"summary" in result.output && (
-                                <span className="text-muted-foreground text-sm">
-                                  - {String(result.output.summary)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTestDialogOpen(false)}>
-              Close
-            </Button>
-            <Button onClick={handleRunTest} disabled={testLoading || selectedTranscripts.size === 0}>
-              {testLoading ? (
-                <>
-                  <Loader2Icon className="size-4 mr-2 animate-spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <PlayIcon className="size-4 mr-2" />
-                  Run Test
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* n8n Trigger Dialog */}
-      <Dialog open={n8nDialogOpen} onOpenChange={setN8nDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ZapIcon className="size-5 text-yellow-500" />
-              Run n8n Workflow
-            </DialogTitle>
-            <DialogDescription>
-              Trigger the n8n workflow to run this prompt against production data
-            </DialogDescription>
-          </DialogHeader>
-
-          {n8nPrompt && (
-            <div className="space-y-4 py-4">
-              {/* Prompt Info */}
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold">{n8nPrompt.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {AGENT_TYPES.find((t) => t.value === n8nPrompt.agent_type)?.label || n8nPrompt.agent_type}
-                      </p>
-                    </div>
-                    <Badge variant="secondary">v{n8nPrompt.version}</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Workflow Selection */}
-              <div className="space-y-3">
-                <Label>Select Workflow</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    variant="outline"
-                    className="h-auto py-4 flex-col gap-2"
-                    onClick={() => handleTriggerN8n("scoreV2")}
-                    disabled={triggeringPromptId === n8nPrompt.id}
-                  >
-                    {triggeringPromptId === n8nPrompt.id ? (
-                      <Loader2Icon className="size-5 animate-spin" />
-                    ) : (
-                      <RocketIcon className="size-5 text-blue-500" />
-                    )}
-                    <span className="font-medium">Score V2</span>
-                    <span className="text-xs text-muted-foreground">
-                      Main scoring workflow
-                    </span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-auto py-4 flex-col gap-2"
-                    onClick={() => handleTriggerN8n("testPrompt")}
-                    disabled={triggeringPromptId === n8nPrompt.id}
-                  >
-                    {triggeringPromptId === n8nPrompt.id ? (
-                      <Loader2Icon className="size-5 animate-spin" />
-                    ) : (
-                      <FlaskConicalIcon className="size-5 text-purple-500" />
-                    )}
-                    <span className="font-medium">Test Prompt</span>
-                    <span className="text-xs text-muted-foreground">
-                      Test prompt workflow
-                    </span>
-                  </Button>
-                </div>
+                )}
               </div>
 
-              {/* Result */}
-              {n8nResult && (
-                <Card className={cn(n8nResult.success ? "border-green-500/50" : "border-destructive/50")}>
+              <Button
+                className="w-full gap-2"
+                onClick={() => executeRun("scoreV2")}
+                disabled={runLoading || !selectedTestTranscript}
+              >
+                {runLoading ? (
+                  <>
+                    <Loader2Icon className="size-4 animate-spin" />
+                    Running...
+                  </>
+                ) : (
+                  <>
+                    <ZapIcon className="size-4" />
+                    Run Now
+                  </>
+                )}
+              </Button>
+
+              {runResult && (
+                <Card className={cn(runResult.success ? "border-green-500/50" : "border-destructive/50")}>
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
-                      {n8nResult.success ? (
+                      {runResult.success ? (
                         <CheckIcon className="size-5 text-green-500 mt-0.5" />
                       ) : (
                         <XIcon className="size-5 text-destructive mt-0.5" />
                       )}
                       <div>
-                        <p className={cn("font-medium", n8nResult.success ? "text-green-600" : "text-destructive")}>
-                          {n8nResult.success ? "Workflow Triggered!" : "Trigger Failed"}
+                        <p className={cn("font-medium", runResult.success ? "text-green-600" : "text-destructive")}>
+                          {runResult.success ? "Run Started!" : "Run Failed"}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {n8nResult.success ? n8nResult.message : n8nResult.error}
+                          {runResult.success ? runResult.message : runResult.error}
                         </p>
-                        {n8nResult.run_id && (
+                        {runResult.run_id && (
                           <Link
-                            href={`/agent-runs?prompt_id=${n8nPrompt.id}`}
-                            className="text-sm text-primary hover:underline mt-2 inline-flex items-center gap-1"
+                            href={`/agent-runs?prompt_id=${selectedPromptForRun.id}`}
+                            className="text-sm text-primary hover:underline mt-2 inline-block"
                           >
-                            View Run Results
-                            <ExternalLinkIcon className="size-3" />
+                            View Run Results →
                           </Link>
                         )}
                       </div>
@@ -1222,12 +700,323 @@ export default function PromptsPage() {
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setN8nDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setRunDialogOpen(false)}>
               Close
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Version History Dialog */}
+      <Dialog open={versionsDialogOpen} onOpenChange={setVersionsDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HistoryIcon className="size-5" />
+              Version History: {selectedPromptForVersions?.name}
+            </DialogTitle>
+            <DialogDescription>
+              View and compare all versions of this prompt
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden flex gap-4">
+            {/* Version List */}
+            <div className="w-1/3 border-r pr-4">
+              {versionsLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2Icon className="size-6 animate-spin" />
+                </div>
+              ) : versions.length === 0 ? (
+                <p className="text-muted-foreground text-center py-10">
+                  No version history
+                </p>
+              ) : (
+                <ScrollArea className="h-[400px]">
+                  <div className="space-y-2">
+                    {versions.map((version) => (
+                      <button
+                        key={version.id}
+                        onClick={() => setSelectedVersionContent(version.prompt_content)}
+                        className={cn(
+                          "w-full text-left p-3 rounded-lg border transition-colors",
+                          selectedVersionContent === version.prompt_content
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted"
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">Version {version.version}</span>
+                          {version.is_current && (
+                            <Badge variant="default" className="text-xs">Current</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {new Date(version.created_at).toLocaleString()}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
+
+            {/* Version Content */}
+            <div className="flex-1">
+              {selectedVersionContent ? (
+                <ScrollArea className="h-[400px]">
+                  <pre className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap font-mono">
+                    {selectedVersionContent}
+                  </pre>
+                </ScrollArea>
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  Select a version to view content
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVersionsDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Outputs Dialog */}
+      <Dialog open={outputsDialogOpen} onOpenChange={setOutputsDialogOpen}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart3Icon className="size-5" />
+              Outputs: {selectedPromptForOutputs?.name}
+            </DialogTitle>
+            <DialogDescription>
+              View all execution outputs and token usage
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden">
+            {outputsLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2Icon className="size-6 animate-spin" />
+              </div>
+            ) : outputs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10">
+                <BarChart3Icon className="size-10 text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">No outputs yet</p>
+                <p className="text-sm text-muted-foreground">Run the prompt to see outputs here</p>
+              </div>
+            ) : selectedOutput ? (
+              // Detail View
+              <div className="space-y-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedOutput(null)}
+                >
+                  ← Back to list
+                </Button>
+
+                {/* Token Usage Summary */}
+                <div className="grid grid-cols-4 gap-4">
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2">
+                        <ZapIcon className="size-4 text-blue-500" />
+                        <span className="text-sm">Input Tokens</span>
+                      </div>
+                      <p className="text-xl font-bold mt-1">
+                        {selectedOutput.input_tokens?.toLocaleString() || 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2">
+                        <ZapIcon className="size-4 text-green-500" />
+                        <span className="text-sm">Output Tokens</span>
+                      </div>
+                      <p className="text-xl font-bold mt-1">
+                        {selectedOutput.output_tokens?.toLocaleString() || 0}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2">
+                        <CoinsIcon className="size-4 text-yellow-500" />
+                        <span className="text-sm">Cost</span>
+                      </div>
+                      <p className="text-xl font-bold mt-1">
+                        ${parseFloat(selectedOutput.cost_usd || "0").toFixed(4)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2">
+                        <ClockIcon className="size-4 text-purple-500" />
+                        <span className="text-sm">Duration</span>
+                      </div>
+                      <p className="text-xl font-bold mt-1">
+                        {formatDuration(selectedOutput.duration_ms)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Output Content */}
+                <div>
+                  <Label className="text-sm font-medium mb-2 block">Output</Label>
+                  <ScrollArea className="h-[300px]">
+                    <pre className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap font-mono">
+                      {selectedOutput.output || JSON.stringify(selectedOutput.output_data, null, 2) || "No output"}
+                    </pre>
+                  </ScrollArea>
+                </div>
+
+                {selectedOutput.error_message && (
+                  <div>
+                    <Label className="text-sm font-medium mb-2 block text-destructive">Error</Label>
+                    <pre className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-sm text-destructive">
+                      {selectedOutput.error_message}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ) : (
+              // List View
+              <ScrollArea className="h-[500px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Version</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Tokens</TableHead>
+                      <TableHead>Cost</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {outputs.map((run) => (
+                      <TableRow key={run.id}>
+                        <TableCell className="text-xs">
+                          {new Date(run.created_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">v{run.prompt_version}</Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">{run.model}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {((run.input_tokens || 0) + (run.output_tokens || 0)).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          ${parseFloat(run.cost_usd || "0").toFixed(4)}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {formatDuration(run.duration_ms)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={run.status === "completed" ? "default" : "destructive"}
+                            className={cn(
+                              "text-xs",
+                              run.status === "completed" && "bg-green-500/10 text-green-600 border-green-500/20"
+                            )}
+                          >
+                            {run.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedOutput(run)}
+                          >
+                            View
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Link href={`/agent-runs?prompt_id=${selectedPromptForOutputs?.id}`}>
+              <Button variant="outline" className="gap-2">
+                View Full History
+              </Button>
+            </Link>
+            <Button variant="outline" onClick={() => setOutputsDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Prompt Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <EditIcon className="size-5" />
+              Edit Prompt: {selectedPromptForEdit?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Modify the prompt content. Previous version will be archived.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden py-4">
+            <Textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              className="min-h-[400px] font-mono text-sm"
+              placeholder="Enter prompt content..."
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSavePrompt} disabled={editLoading} className="gap-2">
+              {editLoading ? (
+                <>
+                  <Loader2Icon className="size-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <SaveIcon className="size-4" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+export default function PromptsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <RefreshCwIcon className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      <PromptsPageContent />
+    </Suspense>
   );
 }

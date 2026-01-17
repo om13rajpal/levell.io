@@ -1,0 +1,386 @@
+{
+  "name": "Score V2 - All Agents",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scoreV2",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "ScoreV2 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 400],
+      "webhookId": "scoreV2"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://levell-io.vercel.app/api/prompts",
+        "options": {}
+      },
+      "id": "fetch-prompts",
+      "name": "Fetch Prompts from API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract data from webhook and prompts\nconst webhookData = $('ScoreV2 Webhook').first().json.body;\nconst promptsResponse = $input.first().json;\n\n// Get prompts array\nconst prompts = promptsResponse.prompts || promptsResponse || [];\n\n// Create a map of prompts by agent_type\nconst promptMap = {};\nfor (const p of prompts) {\n  promptMap[p.agent_type] = p;\n}\n\n// Get transcript from webhook\nconst transcript = webhookData.transcript || '';\nconst transcriptId = webhookData.transcript_id || null;\nconst userId = webhookData.user_id || null;\nconst testMode = webhookData.test_mode || false;\nconst testTranscript = webhookData.test_transcript || '';\n\n// Use test transcript if in test mode\nconst finalTranscript = testMode && testTranscript ? testTranscript : transcript;\n\nreturn {\n  prompts: promptMap,\n  transcript: finalTranscript,\n  transcript_id: transcriptId,\n  user_id: userId,\n  test_mode: testMode,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "parse-data",
+      "name": "Parse Webhook & Prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.pain_points?.prompt_content || 'Analyze the transcript and identify customer pain points. Return JSON with pain_points array.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-pain-points",
+      "name": "Pain Points Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [900, 100],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.objection?.prompt_content || 'Analyze the transcript for objection handling. Return JSON with objections array and handling_score.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-objection",
+      "name": "Objection Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [900, 250],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.engagement?.prompt_content || 'Analyze the transcript for engagement patterns. Return JSON with engagement_score and patterns array.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-engagement",
+      "name": "Engagement Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [900, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.next_steps?.prompt_content || 'Analyze the transcript for next steps and commitments. Return JSON with next_steps array and commitment_level.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-next-steps",
+      "name": "Next Steps Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [900, 550],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.call_structure?.prompt_content || 'Analyze the transcript for call structure and methodology. Return JSON with structure_score and methodology_adherence.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-call-structure",
+      "name": "Call Structure Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [900, 700],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.rep_technique?.prompt_content || 'Analyze the transcript for sales rep techniques. Return JSON with techniques array and effectiveness_score.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-rep-technique",
+      "name": "Rep Technique Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [900, 850],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-agents",
+      "name": "Wait For All Agents",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1150, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all agent outputs\nconst items = $input.all();\nconst parseData = $('Parse Webhook & Prompts').first().json;\n\nconst agentOutputs = {\n  pain_points: null,\n  objection: null,\n  engagement: null,\n  next_steps: null,\n  call_structure: null,\n  rep_technique: null\n};\n\nconst tokenUsage = {\n  pain_points: { input: 0, output: 0 },\n  objection: { input: 0, output: 0 },\n  engagement: { input: 0, output: 0 },\n  next_steps: { input: 0, output: 0 },\n  call_structure: { input: 0, output: 0 },\n  rep_technique: { input: 0, output: 0 }\n};\n\n// Parse outputs from each agent\nfor (const item of items) {\n  const content = item.json.message?.content || item.json.content || '';\n  const usage = item.json.usage || {};\n  \n  try {\n    const parsed = JSON.parse(content);\n    \n    // Determine agent type from the parsed content\n    if (parsed.pain_points !== undefined) {\n      agentOutputs.pain_points = parsed;\n      tokenUsage.pain_points = { input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0 };\n    } else if (parsed.objections !== undefined || parsed.handling_score !== undefined) {\n      agentOutputs.objection = parsed;\n      tokenUsage.objection = { input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0 };\n    } else if (parsed.engagement_score !== undefined || parsed.patterns !== undefined) {\n      agentOutputs.engagement = parsed;\n      tokenUsage.engagement = { input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0 };\n    } else if (parsed.next_steps !== undefined || parsed.commitment_level !== undefined) {\n      agentOutputs.next_steps = parsed;\n      tokenUsage.next_steps = { input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0 };\n    } else if (parsed.structure_score !== undefined || parsed.methodology_adherence !== undefined) {\n      agentOutputs.call_structure = parsed;\n      tokenUsage.call_structure = { input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0 };\n    } else if (parsed.techniques !== undefined || parsed.effectiveness_score !== undefined) {\n      agentOutputs.rep_technique = parsed;\n      tokenUsage.rep_technique = { input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0 };\n    }\n  } catch (e) {\n    // Skip if not valid JSON\n  }\n}\n\nreturn {\n  agent_outputs: agentOutputs,\n  token_usage: tokenUsage,\n  prompts: parseData.prompts,\n  transcript: parseData.transcript,\n  transcript_id: parseData.transcript_id,\n  user_id: parseData.user_id,\n  test_mode: parseData.test_mode\n};"
+      },
+      "id": "collect-outputs",
+      "name": "Collect Agent Outputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4096,
+          "responseFormat": "json_object"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.prompts.synthesis?.prompt_content || 'You are a call analysis synthesizer. Combine the outputs from all analysis agents into a comprehensive summary. Return JSON with overall_score, key_insights array, and recommendations array.' }}"
+            },
+            {
+              "role": "user",
+              "content": "Synthesize these agent analysis results into a comprehensive call summary:\n\nPain Points Analysis:\n{{ JSON.stringify($json.agent_outputs.pain_points, null, 2) }}\n\nObjection Handling Analysis:\n{{ JSON.stringify($json.agent_outputs.objection, null, 2) }}\n\nEngagement Analysis:\n{{ JSON.stringify($json.agent_outputs.engagement, null, 2) }}\n\nNext Steps Analysis:\n{{ JSON.stringify($json.agent_outputs.next_steps, null, 2) }}\n\nCall Structure Analysis:\n{{ JSON.stringify($json.agent_outputs.call_structure, null, 2) }}\n\nRep Technique Analysis:\n{{ JSON.stringify($json.agent_outputs.rep_technique, null, 2) }}"
+            }
+          ]
+        }
+      },
+      "id": "agent-synthesis",
+      "name": "Synthesis Agent",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1550, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "s4JHez4r5GFcPdkg",
+          "name": "Seb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const collectData = $('Collect Agent Outputs').first().json;\nconst synthesisResponse = $input.first().json;\n\n// Parse synthesis output\nlet synthesisOutput = {};\ntry {\n  synthesisOutput = JSON.parse(synthesisResponse.message?.content || '{}');\n} catch (e) {\n  synthesisOutput = { error: 'Failed to parse synthesis output' };\n}\n\nconst synthesisUsage = synthesisResponse.usage || {};\n\n// Calculate total tokens and cost\nconst tokenUsage = collectData.token_usage;\nlet totalInputTokens = synthesisUsage.prompt_tokens || 0;\nlet totalOutputTokens = synthesisUsage.completion_tokens || 0;\n\nfor (const agent of Object.keys(tokenUsage)) {\n  totalInputTokens += tokenUsage[agent].input;\n  totalOutputTokens += tokenUsage[agent].output;\n}\n\n// Calculate cost (GPT-4o pricing: $2.50/1M input, $10.00/1M output)\nconst inputCost = (totalInputTokens * 2.5) / 1000000;\nconst outputCost = (totalOutputTokens * 10) / 1000000;\nconst totalCost = inputCost + outputCost;\n\nreturn {\n  results: {\n    pain_points: collectData.agent_outputs.pain_points,\n    objection: collectData.agent_outputs.objection,\n    engagement: collectData.agent_outputs.engagement,\n    next_steps: collectData.agent_outputs.next_steps,\n    call_structure: collectData.agent_outputs.call_structure,\n    rep_technique: collectData.agent_outputs.rep_technique,\n    synthesis: synthesisOutput\n  },\n  prompts: collectData.prompts,\n  transcript_id: collectData.transcript_id,\n  user_id: collectData.user_id,\n  test_mode: collectData.test_mode,\n  token_usage: {\n    per_agent: tokenUsage,\n    synthesis: { input: synthesisUsage.prompt_tokens || 0, output: synthesisUsage.completion_tokens || 0 },\n    total_input: totalInputTokens,\n    total_output: totalOutputTokens\n  },\n  cost_usd: totalCost\n};"
+      },
+      "id": "prepare-results",
+      "name": "Prepare Final Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://levell-io.vercel.app/api/agent-runs/batch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"runs\": [\n    {\n      \"prompt_id\": \"{{ $json.prompts.pain_points?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.pain_points?.version || 1 }},\n      \"agent_type\": \"pain_points\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.pain_points)) }},\n      \"input_tokens\": {{ $json.token_usage.per_agent.pain_points?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.per_agent.pain_points?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    },\n    {\n      \"prompt_id\": \"{{ $json.prompts.objection?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.objection?.version || 1 }},\n      \"agent_type\": \"objection\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.objection)) }},\n      \"input_tokens\": {{ $json.token_usage.per_agent.objection?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.per_agent.objection?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    },\n    {\n      \"prompt_id\": \"{{ $json.prompts.engagement?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.engagement?.version || 1 }},\n      \"agent_type\": \"engagement\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.engagement)) }},\n      \"input_tokens\": {{ $json.token_usage.per_agent.engagement?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.per_agent.engagement?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    },\n    {\n      \"prompt_id\": \"{{ $json.prompts.next_steps?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.next_steps?.version || 1 }},\n      \"agent_type\": \"next_steps\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.next_steps)) }},\n      \"input_tokens\": {{ $json.token_usage.per_agent.next_steps?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.per_agent.next_steps?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    },\n    {\n      \"prompt_id\": \"{{ $json.prompts.call_structure?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.call_structure?.version || 1 }},\n      \"agent_type\": \"call_structure\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.call_structure)) }},\n      \"input_tokens\": {{ $json.token_usage.per_agent.call_structure?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.per_agent.call_structure?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    },\n    {\n      \"prompt_id\": \"{{ $json.prompts.rep_technique?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.rep_technique?.version || 1 }},\n      \"agent_type\": \"rep_technique\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.rep_technique)) }},\n      \"input_tokens\": {{ $json.token_usage.per_agent.rep_technique?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.per_agent.rep_technique?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    },\n    {\n      \"prompt_id\": \"{{ $json.prompts.synthesis?.id || null }}\",\n      \"prompt_version\": {{ $json.prompts.synthesis?.version || 1 }},\n      \"agent_type\": \"synthesis\",\n      \"run_type\": \"n8n\",\n      \"is_test_run\": {{ $json.test_mode }},\n      \"transcript_id\": {{ $json.transcript_id || 'null' }},\n      \"output\": {{ JSON.stringify(JSON.stringify($json.results.synthesis)) }},\n      \"input_tokens\": {{ $json.token_usage.synthesis?.input || 0 }},\n      \"output_tokens\": {{ $json.token_usage.synthesis?.output || 0 }},\n      \"model\": \"gpt-4o\",\n      \"status\": \"completed\"\n    }\n  ],\n  \"total_cost_usd\": {{ $json.cost_usd }}\n}",
+        "options": {}
+      },
+      "id": "save-results",
+      "name": "Save Results to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1950, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"All 7 agents completed successfully\",\n  \"agents_run\": 7,\n  \"results\": {{ JSON.stringify($('Prepare Final Results').first().json.results) }},\n  \"token_usage\": {{ JSON.stringify($('Prepare Final Results').first().json.token_usage) }},\n  \"cost_usd\": {{ $('Prepare Final Results').first().json.cost_usd }}\n}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2150, 400]
+    }
+  ],
+  "connections": {
+    "ScoreV2 Webhook": {
+      "main": [[{ "node": "Fetch Prompts from API", "type": "main", "index": 0 }]]
+    },
+    "Fetch Prompts from API": {
+      "main": [[{ "node": "Parse Webhook & Prompts", "type": "main", "index": 0 }]]
+    },
+    "Parse Webhook & Prompts": {
+      "main": [
+        [
+          { "node": "Pain Points Agent", "type": "main", "index": 0 },
+          { "node": "Objection Agent", "type": "main", "index": 0 },
+          { "node": "Engagement Agent", "type": "main", "index": 0 },
+          { "node": "Next Steps Agent", "type": "main", "index": 0 },
+          { "node": "Call Structure Agent", "type": "main", "index": 0 },
+          { "node": "Rep Technique Agent", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Pain Points Agent": {
+      "main": [[{ "node": "Wait For All Agents", "type": "main", "index": 0 }]]
+    },
+    "Objection Agent": {
+      "main": [[{ "node": "Wait For All Agents", "type": "main", "index": 0 }]]
+    },
+    "Engagement Agent": {
+      "main": [[{ "node": "Wait For All Agents", "type": "main", "index": 0 }]]
+    },
+    "Next Steps Agent": {
+      "main": [[{ "node": "Wait For All Agents", "type": "main", "index": 0 }]]
+    },
+    "Call Structure Agent": {
+      "main": [[{ "node": "Wait For All Agents", "type": "main", "index": 0 }]]
+    },
+    "Rep Technique Agent": {
+      "main": [[{ "node": "Wait For All Agents", "type": "main", "index": 0 }]]
+    },
+    "Wait For All Agents": {
+      "main": [[{ "node": "Collect Agent Outputs", "type": "main", "index": 0 }]]
+    },
+    "Collect Agent Outputs": {
+      "main": [[{ "node": "Synthesis Agent", "type": "main", "index": 0 }]]
+    },
+    "Synthesis Agent": {
+      "main": [[{ "node": "Prepare Final Results", "type": "main", "index": 0 }]]
+    },
+    "Prepare Final Results": {
+      "main": [[{ "node": "Save Results to DB", "type": "main", "index": 0 }]]
+    },
+    "Save Results to DB": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
