@@ -22,7 +22,8 @@ export async function GET(
     const { id } = await params;
 
     // Handle undefined, null, or invalid IDs gracefully (for n8n test mode)
-    if (!id || id === "undefined" || id === "null" || id === "") {
+    // n8n renders undefined variables as "[undefined]" with brackets
+    if (!id || id === "undefined" || id === "[undefined]" || id === "null" || id === "[null]" || id === "") {
       return NextResponse.json({
         id: null,
         content: "",

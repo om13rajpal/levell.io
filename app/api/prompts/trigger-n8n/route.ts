@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
     const n8nPayload: Record<string, unknown> = {
       user_id: user_id,
       test_mode: test_mode,
+      transcript_id: body.transcript_id || null,
       timestamp: new Date().toISOString(),
     };
 
