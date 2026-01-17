@@ -13,6 +13,17 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
+// Database row type for test_transcripts table
+interface TestTranscriptRow {
+  id: string;
+  label: string;
+  description: string | null;
+  call_type: string;
+  clean_transcript_text?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 // GET all test transcripts
 export async function GET(request: NextRequest) {
   try {
@@ -41,7 +52,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Map column names to expected format
-    const transcripts = (data || []).map((t: Record<string, unknown>) => ({
+    const transcripts = ((data || []) as unknown as TestTranscriptRow[]).map((t) => ({
       id: t.id,
       name: t.label,
       description: t.description,
