@@ -111,6 +111,7 @@ interface TestTranscript {
   scenario_type: string;
   expected_outcome: string | null;
   transcript_content?: string;
+  transcript_id: number | null;
 }
 
 const AGENT_LABELS: Record<string, string> = {
@@ -312,6 +313,7 @@ function PromptsPageContent() {
           prompt_id: selectedPromptForRun.id,
           agent_type: selectedPromptForRun.agent_type,
           test_mode: true,
+          transcript_id: fullTranscript?.transcript_id || null,
           test_transcript: fullTranscript?.transcript_content || "",
           test_transcript_name: transcript?.name || "",
         }),

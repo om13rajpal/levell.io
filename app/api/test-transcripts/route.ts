@@ -16,10 +16,11 @@ function getSupabaseAdmin() {
 // Database row type for test_transcripts table
 interface TestTranscriptRow {
   id: string;
-  label: string;
+  name: string;
   description: string | null;
-  call_type: string;
-  clean_transcript_text?: string;
+  scenario_type: string;
+  transcript_content?: string;
+  transcript_id: number | null;
   is_active: boolean;
   created_at: string;
 }
@@ -32,16 +33,15 @@ export async function GET(request: NextRequest) {
     const includeContent = searchParams.get("include_content") === "true";
 
     // Select fields based on whether content is needed
-    // Map existing columns: label->name, call_type->scenario_type, clean_transcript_text->transcript_content
     const selectFields = includeContent
-      ? "id, label, description, call_type, clean_transcript_text, is_active, created_at"
-      : "id, label, description, call_type, is_active, created_at";
+      ? "id, name, description, scenario_type, transcript_content, transcript_id, is_active, created_at"
+      : "id, name, description, scenario_type, transcript_id, is_active, created_at";
 
     const { data, error } = await supabase
       .from("test_transcripts")
       .select(selectFields)
       .eq("is_active", true)
-      .order("call_type", { ascending: true });
+      .order("scenario_type", { ascending: true });
 
     if (error) {
       console.error("[Test Transcripts API] Error fetching:", error);
@@ -51,13 +51,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Map column names to expected format
+    // Map to response format
     const transcripts = ((data || []) as unknown as TestTranscriptRow[]).map((t) => ({
       id: t.id,
-      name: t.label,
+      name: t.name,
       description: t.description,
-      scenario_type: t.call_type,
-      transcript_content: t.clean_transcript_text,
+      scenario_type: t.scenario_type,
+      transcript_content: t.transcript_content,
+      transcript_id: t.transcript_id,
       is_active: t.is_active,
       created_at: t.created_at,
     }));
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 
-    const { name, description, scenario_type, expected_outcome, transcript_content } = body;
+    const { name, description, scenario_type, expected_outcome, transcript_content, transcript_id } = body;
 
     if (!name || !transcript_content || !scenario_type) {
       return NextResponse.json(
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
         scenario_type,
         expected_outcome: expected_outcome || null,
         transcript_content,
+        transcript_id: transcript_id || null,
       })
       .select()
       .single();

@@ -20,12 +20,18 @@ interface AgentRunInput {
   run_type?: string;
   is_test_run?: boolean;
   transcript_id?: number | null;
+  prompt_sent?: string;
   output?: string;
   input_tokens?: number;
   output_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cost_usd?: number;
+  total_cost?: number;
   model?: string;
   status?: string;
   error_message?: string;
+  user_id?: string;
 }
 
 // POST - Batch insert multiple agent runs (for n8n workflows)
@@ -50,12 +56,13 @@ export async function POST(request: NextRequest) {
     const records = runs.map((run) => ({
       agent_type: run.agent_type,
       prompt_id: run.prompt_id || null,
-      prompt_sent: run.output || "", // Use output as prompt_sent fallback for n8n
+      prompt_sent: run.prompt_sent || run.output || "",
       output: run.output || null,
       model: run.model || "gpt-4o",
-      prompt_tokens: run.input_tokens || 0,
-      completion_tokens: run.output_tokens || 0,
+      prompt_tokens: run.prompt_tokens || run.input_tokens || 0,
+      completion_tokens: run.completion_tokens || run.output_tokens || 0,
       transcript_id: run.transcript_id || null,
+      user_id: run.user_id || null,
       context_type: run.run_type || "n8n",
       status: run.status || "completed",
       error_message: run.error_message || null,
@@ -63,6 +70,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         prompt_version: run.prompt_version,
         run_type: run.run_type,
+        cost_usd: run.cost_usd || run.total_cost || 0,
         batch_run: true,
       },
     }));
