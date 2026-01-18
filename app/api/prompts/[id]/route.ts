@@ -65,7 +65,16 @@ export async function PUT(
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 
-    const { name, prompt_content, description, variables, is_active } = body;
+    const {
+      name,
+      prompt_content,
+      system_prompt,
+      user_prompt_template,
+      temperature,
+      description,
+      variables,
+      is_active
+    } = body;
 
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {
@@ -74,9 +83,19 @@ export async function PUT(
 
     if (name !== undefined) updateData.name = name;
     if (prompt_content !== undefined) updateData.prompt_content = prompt_content;
+    if (system_prompt !== undefined) updateData.system_prompt = system_prompt;
+    if (user_prompt_template !== undefined) updateData.user_prompt_template = user_prompt_template;
+    if (temperature !== undefined) updateData.temperature = temperature;
     if (description !== undefined) updateData.description = description;
     if (variables !== undefined) updateData.variables = variables;
     if (is_active !== undefined) updateData.is_active = is_active;
+
+    console.log("[Prompts API] Updating prompt:", {
+      id,
+      has_system_prompt: system_prompt !== undefined,
+      has_user_prompt: user_prompt_template !== undefined,
+      temperature: temperature,
+    });
 
     const { data, error } = await supabase
       .from("agent_prompts")
@@ -99,9 +118,10 @@ export async function PUT(
       );
     }
 
+    const contentChanged = prompt_content !== undefined || system_prompt !== undefined || user_prompt_template !== undefined;
     return NextResponse.json({
       prompt: data,
-      message: prompt_content !== undefined
+      message: contentChanged
         ? "Prompt updated. Previous version has been archived."
         : "Prompt updated."
     });

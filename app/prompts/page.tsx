@@ -57,6 +57,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -65,6 +68,9 @@ interface AgentPrompt {
   name: string;
   agent_type: string;
   prompt_content: string;
+  system_prompt: string | null;
+  user_prompt_template: string | null;
+  temperature: number;
   description: string | null;
   is_active: boolean;
   version: number;
@@ -164,8 +170,13 @@ function PromptsPageContent() {
   // Edit Prompt Dialog
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedPromptForEdit, setSelectedPromptForEdit] = useState<AgentPrompt | null>(null);
-  const [editContent, setEditContent] = useState("");
+  const [editSystemPrompt, setEditSystemPrompt] = useState("");
+  const [editUserPrompt, setEditUserPrompt] = useState("");
+  const [editTemperature, setEditTemperature] = useState(0.3);
   const [editLoading, setEditLoading] = useState(false);
+
+  // Run dialog temperature override
+  const [runTemperature, setRunTemperature] = useState(0.3);
 
   // Fetch prompts
   const fetchPrompts = useCallback(async () => {
@@ -282,6 +293,7 @@ function PromptsPageContent() {
     setSelectedPromptForRun(prompt);
     setRunResult(null);
     setSelectedTestTranscript("");
+    setRunTemperature(prompt.temperature ?? 0.3);
     setRunDialogOpen(true);
     fetchTestTranscripts();
   };
@@ -330,6 +342,10 @@ function PromptsPageContent() {
           transcript_id: transcriptId,
           test_transcript: transcriptContent,
           test_transcript_name: transcript.name,
+          // Include system/user prompts and temperature
+          system_prompt: selectedPromptForRun.system_prompt || selectedPromptForRun.prompt_content,
+          user_prompt_template: selectedPromptForRun.user_prompt_template || "",
+          temperature: runTemperature,
         }),
       });
 
@@ -363,7 +379,10 @@ function PromptsPageContent() {
   // Open Edit Dialog
   const handleEditPrompt = (prompt: AgentPrompt) => {
     setSelectedPromptForEdit(prompt);
-    setEditContent(prompt.prompt_content);
+    // Use system_prompt if available, otherwise fall back to prompt_content
+    setEditSystemPrompt(prompt.system_prompt || prompt.prompt_content || "");
+    setEditUserPrompt(prompt.user_prompt_template || "");
+    setEditTemperature(prompt.temperature ?? 0.3);
     setEditDialogOpen(true);
   };
 
@@ -377,7 +396,11 @@ function PromptsPageContent() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt_content: editContent,
+          system_prompt: editSystemPrompt,
+          user_prompt_template: editUserPrompt,
+          temperature: editTemperature,
+          // Also update prompt_content for backward compatibility
+          prompt_content: editSystemPrompt,
         }),
       });
 
@@ -707,6 +730,26 @@ function PromptsPageContent() {
                 )}
               </div>
 
+              {/* Temperature Control */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Temperature</Label>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    value={[runTemperature]}
+                    onValueChange={(v) => setRunTemperature(v[0])}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    className="flex-1"
+                  />
+                  <span className="text-sm font-mono w-10 text-center">{runTemperature}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {runTemperature <= 0.3 ? "Lower = more deterministic/consistent" :
+                   runTemperature >= 1 ? "Higher = more creative/varied" : "Balanced output"}
+                </p>
+              </div>
+
               <Button
                 className="w-full gap-2"
                 onClick={() => executeRun("testPrompt")}
@@ -1023,24 +1066,76 @@ function PromptsPageContent() {
 
       {/* Edit Prompt Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <EditIcon className="size-5" />
               Edit Prompt: {selectedPromptForEdit?.name}
             </DialogTitle>
             <DialogDescription>
-              Modify the prompt content. Previous version will be archived.
+              Modify system and user prompts. Previous version will be archived.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-hidden py-4">
-            <Textarea
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              className="min-h-[400px] font-mono text-sm"
-              placeholder="Enter prompt content..."
-            />
+          <div className="flex-1 overflow-hidden py-4 space-y-4">
+            {/* Temperature Control */}
+            <div className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
+              <Label className="text-sm font-medium min-w-[100px]">Temperature:</Label>
+              <Slider
+                value={[editTemperature]}
+                onValueChange={(v) => setEditTemperature(v[0])}
+                min={0}
+                max={2}
+                step={0.1}
+                className="flex-1 max-w-[200px]"
+              />
+              <Input
+                type="number"
+                value={editTemperature}
+                onChange={(e) => setEditTemperature(parseFloat(e.target.value) || 0)}
+                min={0}
+                max={2}
+                step={0.1}
+                className="w-20 text-center"
+              />
+              <span className="text-xs text-muted-foreground">
+                {editTemperature <= 0.3 ? "More deterministic" : editTemperature >= 1 ? "More creative" : "Balanced"}
+              </span>
+            </div>
+
+            {/* Tabbed Prompts */}
+            <Tabs defaultValue="system" className="flex-1">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="system">System Prompt</TabsTrigger>
+                <TabsTrigger value="user">User Prompt Template</TabsTrigger>
+              </TabsList>
+              <TabsContent value="system" className="mt-4">
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">
+                    Sets the AI&apos;s behavior, role, and output format
+                  </Label>
+                  <Textarea
+                    value={editSystemPrompt}
+                    onChange={(e) => setEditSystemPrompt(e.target.value)}
+                    className="min-h-[350px] font-mono text-sm"
+                    placeholder="Enter system prompt (e.g., You are a sales coach...)"
+                  />
+                </div>
+              </TabsContent>
+              <TabsContent value="user" className="mt-4">
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">
+                    Template with {"{{variables}}"} for dynamic content (e.g., {"{{transcript}}"})
+                  </Label>
+                  <Textarea
+                    value={editUserPrompt}
+                    onChange={(e) => setEditUserPrompt(e.target.value)}
+                    className="min-h-[350px] font-mono text-sm"
+                    placeholder="Enter user prompt template (e.g., Analyze this transcript: {{transcript}})"
+                  />
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
 
           <DialogFooter>

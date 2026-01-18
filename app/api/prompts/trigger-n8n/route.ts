@@ -36,6 +36,10 @@ export async function POST(request: NextRequest) {
       openai_key,
       test_transcript,
       test_transcript_name,
+      // New fields for separate system/user prompts and temperature
+      system_prompt: overrideSystemPrompt,
+      user_prompt_template: overrideUserPrompt,
+      temperature = 0.3,
     } = body;
 
     console.log("[n8n Trigger] Received request:", {
@@ -46,6 +50,9 @@ export async function POST(request: NextRequest) {
       transcript_id,
       has_test_transcript: !!test_transcript,
       test_transcript_name,
+      temperature,
+      has_system_prompt: !!overrideSystemPrompt,
+      has_user_prompt: !!overrideUserPrompt,
     });
 
     // Get webhook URL
@@ -107,15 +114,36 @@ export async function POST(request: NextRequest) {
       n8nPayload.prompt_id = promptData.id;
       n8nPayload.agent_type = promptData.agent_type;
 
+      // Determine system and user prompts (override from request takes precedence)
+      const systemPrompt = overrideSystemPrompt || promptData.system_prompt || promptData.prompt_content;
+      const userPromptTemplate = overrideUserPrompt || promptData.user_prompt_template || "";
+      const promptTemperature = temperature ?? promptData.temperature ?? 0.3;
+
+      // Add separate prompts and temperature to payload
+      n8nPayload.system_prompt = systemPrompt;
+      n8nPayload.user_prompt_template = userPromptTemplate;
+      n8nPayload.temperature = promptTemperature;
+
       // Also include full prompt object for reference
       n8nPayload.prompt = {
         id: promptData.id,
         name: promptData.name,
         agent_type: promptData.agent_type,
         prompt_content: promptData.prompt_content,
+        system_prompt: systemPrompt,
+        user_prompt_template: userPromptTemplate,
+        temperature: promptTemperature,
         version: promptData.version,
         variables: promptData.variables,
       };
+
+      console.log("[n8n Trigger] Prompt data:", {
+        prompt_id: promptData.id,
+        version: promptData.version,
+        temperature: promptTemperature,
+        system_prompt_length: systemPrompt?.length || 0,
+        user_prompt_length: userPromptTemplate?.length || 0,
+      });
     }
 
     // Add test transcript if provided (for testing prompts)
