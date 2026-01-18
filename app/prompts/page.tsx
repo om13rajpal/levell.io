@@ -1077,66 +1077,68 @@ function PromptsPageContent() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-hidden py-4 space-y-4">
-            {/* Temperature Control */}
-            <div className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
-              <Label className="text-sm font-medium min-w-[100px]">Temperature:</Label>
-              <Slider
-                value={[editTemperature]}
-                onValueChange={(v) => setEditTemperature(v[0])}
-                min={0}
-                max={2}
-                step={0.1}
-                className="flex-1 max-w-[200px]"
-              />
-              <Input
-                type="number"
-                value={editTemperature}
-                onChange={(e) => setEditTemperature(parseFloat(e.target.value) || 0)}
-                min={0}
-                max={2}
-                step={0.1}
-                className="w-20 text-center"
-              />
-              <span className="text-xs text-muted-foreground">
-                {editTemperature <= 0.3 ? "More deterministic" : editTemperature >= 1 ? "More creative" : "Balanced"}
-              </span>
-            </div>
+          <ScrollArea className="flex-1 pr-4">
+            <div className="py-4 space-y-4">
+              {/* Temperature Control */}
+              <div className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
+                <Label className="text-sm font-medium min-w-[100px]">Temperature:</Label>
+                <Slider
+                  value={[editTemperature]}
+                  onValueChange={(v) => setEditTemperature(v[0])}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  className="flex-1 max-w-[200px]"
+                />
+                <Input
+                  type="number"
+                  value={editTemperature}
+                  onChange={(e) => setEditTemperature(parseFloat(e.target.value) || 0)}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  className="w-20 text-center"
+                />
+                <span className="text-xs text-muted-foreground">
+                  {editTemperature <= 0.3 ? "More deterministic" : editTemperature >= 1 ? "More creative" : "Balanced"}
+                </span>
+              </div>
 
-            {/* Tabbed Prompts */}
-            <Tabs defaultValue="system" className="flex-1">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="system">System Prompt</TabsTrigger>
-                <TabsTrigger value="user">User Prompt Template</TabsTrigger>
-              </TabsList>
-              <TabsContent value="system" className="mt-4">
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">
-                    Sets the AI&apos;s behavior, role, and output format
-                  </Label>
-                  <Textarea
-                    value={editSystemPrompt}
-                    onChange={(e) => setEditSystemPrompt(e.target.value)}
-                    className="min-h-[350px] font-mono text-sm"
-                    placeholder="Enter system prompt (e.g., You are a sales coach...)"
-                  />
-                </div>
-              </TabsContent>
-              <TabsContent value="user" className="mt-4">
-                <div className="space-y-2">
-                  <Label className="text-sm text-muted-foreground">
-                    Template with {"{{variables}}"} for dynamic content (e.g., {"{{transcript}}"})
-                  </Label>
-                  <Textarea
-                    value={editUserPrompt}
-                    onChange={(e) => setEditUserPrompt(e.target.value)}
-                    className="min-h-[350px] font-mono text-sm"
-                    placeholder="Enter user prompt template (e.g., Analyze this transcript: {{transcript}})"
-                  />
-                </div>
-              </TabsContent>
-            </Tabs>
-          </div>
+              {/* Tabbed Prompts */}
+              <Tabs defaultValue="system" className="flex-1">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="system">System Prompt</TabsTrigger>
+                  <TabsTrigger value="user">User Prompt Template</TabsTrigger>
+                </TabsList>
+                <TabsContent value="system" className="mt-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">
+                      Sets the AI&apos;s behavior, role, and output format
+                    </Label>
+                    <Textarea
+                      value={editSystemPrompt}
+                      onChange={(e) => setEditSystemPrompt(e.target.value)}
+                      className="min-h-[400px] max-h-[500px] font-mono text-sm resize-y"
+                      placeholder="Enter system prompt (e.g., You are a sales coach...)"
+                    />
+                  </div>
+                </TabsContent>
+                <TabsContent value="user" className="mt-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">
+                      Template with {"{{variables}}"} for dynamic content (e.g., {"{{transcript}}"})
+                    </Label>
+                    <Textarea
+                      value={editUserPrompt}
+                      onChange={(e) => setEditUserPrompt(e.target.value)}
+                      className="min-h-[400px] max-h-[500px] font-mono text-sm resize-y"
+                      placeholder="Enter user prompt template (e.g., Analyze this transcript: {{transcript}})"
+                    />
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </div>
+          </ScrollArea>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
