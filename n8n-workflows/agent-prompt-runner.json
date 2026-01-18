@@ -41,7 +41,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const webhookData = $('Webhook').first().json.body;\nconst prompt = $('Fetch Prompt from API').first().json;\nconst transcript = $input.first().json;\n\n// Use test transcript if in test mode, otherwise use fetched transcript\nconst transcriptContent = webhookData.test_mode && webhookData.test_transcript \n  ? webhookData.test_transcript \n  : (transcript.content || transcript.transcript || '');\n\n// IMPORTANT: Preserve transcript_id from webhook body\n// This is the ID selected by the user on the frontend\nconst transcriptId = webhookData.transcript_id;\n\nreturn {\n  prompt_id: prompt.id,\n  prompt_version: prompt.version || 1,\n  agent_type: prompt.agent_type,\n  prompt_content: prompt.prompt_content,\n  transcript: transcriptContent,\n  transcript_id: transcriptId,\n  user_id: webhookData.user_id || null,\n  test_mode: webhookData.test_mode || false\n};"
+        "jsCode": "const webhookData = $('Webhook').first().json.body;\nconst promptResponse = $('Fetch Prompt from API').first().json;\nconst transcript = $input.first().json;\n\n// Access the nested prompt object from API response\nconst prompt = promptResponse.prompt;\n\n// Use test transcript if in test mode, otherwise use fetched transcript\nconst transcriptContent = webhookData.test_mode && webhookData.test_transcript \n  ? webhookData.test_transcript \n  : (transcript.content || transcript.transcript || '');\n\n// Get system_prompt: webhook override > prompt.system_prompt > prompt.prompt_content\nconst systemPrompt = webhookData.system_prompt \n  || prompt.system_prompt \n  || prompt.prompt_content \n  || '';\n\n// Get user_prompt_template: webhook override > prompt.user_prompt_template\nconst userPromptTemplate = webhookData.user_prompt_template \n  || prompt.user_prompt_template \n  || '';\n\n// Get temperature: webhook override > prompt.temperature > default 0.3\nconst temperature = webhookData.temperature ?? prompt.temperature ?? 0.3;\n\n// Build the user message by replacing {{transcript}} and other placeholders\nlet userMessage = userPromptTemplate\n  ? userPromptTemplate\n      .replace(/\\{\\{transcript\\}\\}/gi, transcriptContent)\n      .replace(/\\{\\{rep_transcript_name\\}\\}/gi, webhookData.test_transcript_name || '')\n  : `Analyze this sales call transcript:\\n\\n${transcriptContent}`;\n\n// IMPORTANT: Preserve transcript_id from webhook body\nconst transcriptId = webhookData.transcript_id;\n\nreturn {\n  prompt_id: prompt.id,\n  prompt_version: prompt.version || 1,\n  agent_type: prompt.agent_type,\n  system_prompt: systemPrompt,\n  user_prompt_template: userPromptTemplate,\n  user_message: userMessage,\n  temperature: temperature,\n  transcript: transcriptContent,\n  transcript_id: transcriptId,\n  user_id: webhookData.user_id || null,\n  test_mode: webhookData.test_mode || false\n};"
       },
       "id": "prepare-prompt",
       "name": "Prepare Prompt Data",
@@ -60,17 +60,17 @@
         "messages": {
           "values": [
             {
-              "content": "={{ $json.prompt_content }}",
+              "content": "={{ $json.system_prompt }}",
               "role": "system"
             },
             {
-              "content": "Analyze this sales call transcript:\n\n{{ $json.transcript }}"
+              "content": "={{ $json.user_message }}"
             }
           ]
         },
         "options": {
           "maxTokens": 4096,
-          "temperature": 0.3,
+          "temperature": "={{ $json.temperature }}",
           "responseFormat": "json_object"
         }
       },
@@ -88,7 +88,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const promptData = $('Prepare Prompt Data').first().json;\nconst aiResponse = $input.first().json;\n\n// Parse the AI response\nlet outputData = {};\ntry {\n  outputData = JSON.parse(aiResponse.message?.content || '{}');\n} catch (e) {\n  outputData = { raw_output: aiResponse.message?.content };\n}\n\nconst usage = aiResponse.usage || {};\n\n// Get the actual model used from the response\nconst modelUsed = aiResponse.model || 'gpt-4.1';\n\n// Calculate cost based on model\nconst inputTokens = usage.prompt_tokens || 0;\nconst outputTokens = usage.completion_tokens || 0;\n\nlet inputRate = 2.5;\nlet outputRate = 10.0;\n\nif (modelUsed.includes('gpt-4.1') || modelUsed.includes('gpt-4-turbo')) {\n  inputRate = 2.0;\n  outputRate = 8.0;\n} else if (modelUsed.includes('gpt-4o-mini')) {\n  inputRate = 0.15;\n  outputRate = 0.60;\n}\n\nconst inputCost = (inputTokens * inputRate) / 1000000;\nconst outputCost = (outputTokens * outputRate) / 1000000;\nconst totalCost = inputCost + outputCost;\n\n// Preserve transcript_id from prompt data\nconst transcriptId = promptData.transcript_id;\n\nreturn {\n  prompt_id: promptData.prompt_id,\n  prompt_version: promptData.prompt_version,\n  agent_type: promptData.agent_type,\n  run_type: 'n8n',\n  is_test_run: promptData.test_mode,\n  transcript_id: transcriptId,\n  user_id: promptData.user_id,\n  prompt_content: promptData.prompt_content,\n  output: aiResponse.message?.content || '',\n  output_data: outputData,\n  input_tokens: inputTokens,\n  output_tokens: outputTokens,\n  prompt_tokens: inputTokens,\n  completion_tokens: outputTokens,\n  cost_usd: totalCost,\n  total_cost: totalCost,\n  model: modelUsed,\n  status: 'completed'\n};"
+        "jsCode": "const promptData = $('Prepare Prompt Data').first().json;\nconst aiResponse = $input.first().json;\n\n// Parse the AI response\nlet outputData = {};\ntry {\n  outputData = JSON.parse(aiResponse.message?.content || '{}');\n} catch (e) {\n  outputData = { raw_output: aiResponse.message?.content };\n}\n\nconst usage = aiResponse.usage || {};\n\n// Get the actual model used from the response\nconst modelUsed = aiResponse.model || 'gpt-4.1';\n\n// Calculate cost based on model (rates per 1M tokens)\nconst inputTokens = usage.prompt_tokens || 0;\nconst outputTokens = usage.completion_tokens || 0;\n\nlet inputRate = 2.5;\nlet outputRate = 10.0;\n\nif (modelUsed.includes('gpt-4.1') || modelUsed.includes('gpt-4-turbo')) {\n  inputRate = 2.0;\n  outputRate = 8.0;\n} else if (modelUsed.includes('gpt-4o-mini')) {\n  inputRate = 0.15;\n  outputRate = 0.60;\n} else if (modelUsed.includes('gpt-4o')) {\n  inputRate = 2.5;\n  outputRate = 10.0;\n}\n\nconst inputCost = (inputTokens * inputRate) / 1000000;\nconst outputCost = (outputTokens * outputRate) / 1000000;\nconst totalCost = inputCost + outputCost;\n\nreturn {\n  // Prompt identification\n  prompt_id: promptData.prompt_id,\n  prompt_version: promptData.prompt_version,\n  agent_type: promptData.agent_type,\n  \n  // Prompt content (for saving to DB)\n  system_prompt: promptData.system_prompt,\n  user_message: promptData.user_message,\n  temperature: promptData.temperature,\n  \n  // Run metadata\n  run_type: 'n8n',\n  is_test_run: promptData.test_mode,\n  transcript_id: promptData.transcript_id,\n  user_id: promptData.user_id,\n  \n  // AI Response\n  output: aiResponse.message?.content || '',\n  output_data: outputData,\n  \n  // Token usage\n  input_tokens: inputTokens,\n  output_tokens: outputTokens,\n  prompt_tokens: inputTokens,\n  completion_tokens: outputTokens,\n  total_tokens: inputTokens + outputTokens,\n  \n  // Cost calculation\n  cost_usd: totalCost,\n  total_cost: totalCost,\n  \n  // Model info\n  model: modelUsed,\n  status: 'completed'\n};"
       },
       "id": "prepare-run-data",
       "name": "Prepare Run Data",
@@ -102,7 +102,7 @@
         "url": "https://levell-io.vercel.app/api/agent-runs",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  agent_type: $json.agent_type,\n  prompt_id: $json.prompt_id,\n  prompt_sent: $json.prompt_content,\n  output: $json.output,\n  model: $json.model,\n  prompt_tokens: $json.prompt_tokens,\n  completion_tokens: $json.completion_tokens,\n  transcript_id: $json.transcript_id,\n  user_id: $json.user_id,\n  context_type: $json.run_type,\n  status: $json.status,\n  metadata: {\n    prompt_version: $json.prompt_version,\n    is_test_run: $json.is_test_run,\n    cost_usd: $json.cost_usd,\n    input_tokens: $json.input_tokens,\n    output_tokens: $json.output_tokens\n  }\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  agent_type: $json.agent_type,\n  prompt_id: $json.prompt_id,\n  prompt_sent: $json.system_prompt,\n  system_prompt: $json.system_prompt,\n  user_message: $json.user_message,\n  output: $json.output,\n  model: $json.model,\n  prompt_tokens: $json.prompt_tokens,\n  completion_tokens: $json.completion_tokens,\n  transcript_id: $json.transcript_id,\n  user_id: $json.user_id,\n  context_type: $json.run_type,\n  status: $json.status,\n  metadata: {\n    prompt_version: $json.prompt_version,\n    is_test_run: $json.is_test_run,\n    cost_usd: $json.cost_usd,\n    temperature: $json.temperature,\n    input_tokens: $json.input_tokens,\n    output_tokens: $json.output_tokens,\n    total_tokens: $json.total_tokens\n  }\n}) }}",
         "options": {}
       },
       "id": "save-run",
@@ -114,7 +114,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({\n  success: true,\n  run_id: $json.run?.id || $json.id,\n  agent_type: $('Prepare Run Data').first().json.agent_type,\n  message: 'Agent run completed',\n  transcript_id: $('Prepare Run Data').first().json.transcript_id,\n  token_usage: {\n    input: $('Prepare Run Data').first().json.input_tokens,\n    output: $('Prepare Run Data').first().json.output_tokens\n  },\n  cost_usd: $('Prepare Run Data').first().json.cost_usd\n}) }}"
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  run_id: $json.run?.id || $json.id,\n  agent_type: $('Prepare Run Data').first().json.agent_type,\n  prompt_version: $('Prepare Run Data').first().json.prompt_version,\n  message: 'Agent run completed',\n  transcript_id: $('Prepare Run Data').first().json.transcript_id,\n  temperature: $('Prepare Run Data').first().json.temperature,\n  token_usage: {\n    input: $('Prepare Run Data').first().json.input_tokens,\n    output: $('Prepare Run Data').first().json.output_tokens,\n    total: $('Prepare Run Data').first().json.total_tokens\n  },\n  cost_usd: $('Prepare Run Data').first().json.cost_usd,\n  model: $('Prepare Run Data').first().json.model\n}) }}"
       },
       "id": "respond",
       "name": "Respond to Webhook",
