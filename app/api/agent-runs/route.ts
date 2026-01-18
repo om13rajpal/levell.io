@@ -124,19 +124,34 @@ export async function POST(request: NextRequest) {
       metadata,
     } = body;
 
-    // Validation
-    if (!agent_type || !prompt_sent || !model) {
+    // Validation - prompt_id is required by DB schema (NOT NULL)
+    if (!agent_type || !prompt_sent || !model || !prompt_id) {
       return NextResponse.json(
-        { error: "Missing required fields: agent_type, prompt_sent, model" },
+        { error: "Missing required fields: agent_type, prompt_sent, model, prompt_id" },
         { status: 400 }
       );
+    }
+
+    // Fetch prompt version from the prompt if not provided in metadata
+    let promptVersion = metadata?.prompt_version || 1;
+    if (!metadata?.prompt_version) {
+      const { data: promptData } = await supabase
+        .from("agent_prompts")
+        .select("version")
+        .eq("id", prompt_id)
+        .single();
+
+      if (promptData) {
+        promptVersion = promptData.version;
+      }
     }
 
     const { data, error } = await supabase
       .from("agent_runs")
       .insert({
         agent_type,
-        prompt_id: prompt_id || null,
+        prompt_id,
+        prompt_version: promptVersion,
         prompt_sent,
         system_prompt: system_prompt || null,
         user_message: user_message || null,
