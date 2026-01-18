@@ -31,11 +31,22 @@ export async function POST(request: NextRequest) {
       prompt_id,
       agent_type,
       test_mode = false,
+      transcript_id,
       transcript_ids,
       openai_key,
       test_transcript,
       test_transcript_name,
     } = body;
+
+    console.log("[n8n Trigger] Received request:", {
+      workflow,
+      prompt_id,
+      agent_type,
+      test_mode,
+      transcript_id,
+      has_test_transcript: !!test_transcript,
+      test_transcript_name,
+    });
 
     // Get webhook URL
     const webhookUrl = N8N_WEBHOOKS[workflow as keyof typeof N8N_WEBHOOKS];
@@ -79,9 +90,11 @@ export async function POST(request: NextRequest) {
     const n8nPayload: Record<string, unknown> = {
       user_id: user_id,
       test_mode: test_mode,
-      transcript_id: body.transcript_id || null,
+      transcript_id: transcript_id ?? null,  // Use destructured value, preserve 0 if present
       timestamp: new Date().toISOString(),
     };
+
+    console.log("[n8n Trigger] transcript_id being sent:", transcript_id ?? null);
 
     // Add OpenAI key if provided (for n8n to use)
     if (openai_key) {

@@ -295,15 +295,29 @@ function PromptsPageContent() {
       return;
     }
 
-    // Find the selected transcript to get its content
+    // Find the selected transcript from already loaded data
     const transcript = testTranscripts.find(t => t.id === selectedTestTranscript);
+
+    if (!transcript) {
+      toast.error("Selected transcript not found");
+      return;
+    }
 
     setRunLoading(true);
     try {
-      // First fetch the full transcript content
+      // Fetch full transcript content for the test
       const transcriptResponse = await fetch(`/api/test-transcripts?include_content=true`);
       const transcriptData = await transcriptResponse.json();
       const fullTranscript = transcriptData.transcripts?.find((t: TestTranscript) => t.id === selectedTestTranscript);
+
+      // Use transcript_id from already loaded data as primary source (more reliable)
+      // Fallback to fullTranscript if available
+      const transcriptId = transcript.transcript_id ?? fullTranscript?.transcript_id ?? null;
+      const transcriptContent = fullTranscript?.transcript_content || "";
+
+      console.log("[Run Prompt] Selected transcript:", transcript.name);
+      console.log("[Run Prompt] transcript_id:", transcriptId);
+      console.log("[Run Prompt] Has content:", !!transcriptContent);
 
       const response = await fetch("/api/prompts/trigger-n8n", {
         method: "POST",
@@ -313,9 +327,9 @@ function PromptsPageContent() {
           prompt_id: selectedPromptForRun.id,
           agent_type: selectedPromptForRun.agent_type,
           test_mode: true,
-          transcript_id: fullTranscript?.transcript_id || null,
-          test_transcript: fullTranscript?.transcript_content || "",
-          test_transcript_name: transcript?.name || "",
+          transcript_id: transcriptId,
+          test_transcript: transcriptContent,
+          test_transcript_name: transcript.name,
         }),
       });
 
