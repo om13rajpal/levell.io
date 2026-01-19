@@ -62,6 +62,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { AgentOutputRenderer } from "@/components/agent-output-renderer";
+import { parseJsonOutput, formatCost, formatTokens, formatDuration } from "@/lib/output-parser";
 
 interface AgentPrompt {
   id: string;
@@ -97,14 +99,13 @@ interface AgentRun {
   agent_type: string;
   prompt_version: number;
   status: string;
-  input_tokens: number;
-  output_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
   total_tokens: number;
-  cost_usd: string;
+  total_cost: string;
   duration_ms: number;
   model: string;
   output: string | null;
-  output_data: Record<string, unknown> | null;
   error_message: string | null;
   created_at: string;
   is_test_run: boolean;
@@ -418,12 +419,6 @@ function PromptsPageContent() {
     }
   };
 
-  // Format duration
-  const formatDuration = (ms: number | null) => {
-    if (!ms) return "-";
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(2)}s`;
-  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -888,7 +883,7 @@ function PromptsPageContent() {
 
       {/* Outputs Dialog */}
       <Dialog open={outputsDialogOpen} onOpenChange={setOutputsDialogOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3Icon className="size-5" />
@@ -930,7 +925,7 @@ function PromptsPageContent() {
                         <span className="text-sm">Input Tokens</span>
                       </div>
                       <p className="text-xl font-bold mt-1">
-                        {selectedOutput.input_tokens?.toLocaleString() || 0}
+                        {formatTokens(selectedOutput.prompt_tokens)}
                       </p>
                     </CardContent>
                   </Card>
@@ -941,7 +936,7 @@ function PromptsPageContent() {
                         <span className="text-sm">Output Tokens</span>
                       </div>
                       <p className="text-xl font-bold mt-1">
-                        {selectedOutput.output_tokens?.toLocaleString() || 0}
+                        {formatTokens(selectedOutput.completion_tokens)}
                       </p>
                     </CardContent>
                   </Card>
@@ -952,7 +947,7 @@ function PromptsPageContent() {
                         <span className="text-sm">Cost</span>
                       </div>
                       <p className="text-xl font-bold mt-1">
-                        ${parseFloat(selectedOutput.cost_usd || "0").toFixed(4)}
+                        {formatCost(selectedOutput.total_cost)}
                       </p>
                     </CardContent>
                   </Card>
@@ -971,12 +966,8 @@ function PromptsPageContent() {
 
                 {/* Output Content */}
                 <div>
-                  <Label className="text-sm font-medium mb-2 block">Output</Label>
-                  <ScrollArea className="h-[300px]">
-                    <pre className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap font-mono">
-                      {selectedOutput.output || JSON.stringify(selectedOutput.output_data, null, 2) || "No output"}
-                    </pre>
-                  </ScrollArea>
+                  <Label className="text-sm font-medium mb-2 block">Agent Output</Label>
+                  <AgentOutputRenderer output={parseJsonOutput(selectedOutput.output)} />
                 </div>
 
                 {selectedOutput.error_message && (
@@ -1015,10 +1006,10 @@ function PromptsPageContent() {
                         </TableCell>
                         <TableCell className="text-sm">{run.model}</TableCell>
                         <TableCell className="font-mono text-xs">
-                          {((run.input_tokens || 0) + (run.output_tokens || 0)).toLocaleString()}
+                          {formatTokens((run.prompt_tokens || 0) + (run.completion_tokens || 0))}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
-                          ${parseFloat(run.cost_usd || "0").toFixed(4)}
+                          {formatCost(run.total_cost)}
                         </TableCell>
                         <TableCell className="text-xs">
                           {formatDuration(run.duration_ms)}

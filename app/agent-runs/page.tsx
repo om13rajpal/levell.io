@@ -69,6 +69,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { AgentOutputRenderer } from "@/components/agent-output-renderer";
+import { parseJsonOutput } from "@/lib/output-parser";
 
 interface AgentRun {
   id: string;
@@ -1089,9 +1091,7 @@ function AgentRunsPageContent() {
                         )}
                       </Button>
                     </div>
-                    <pre className="bg-muted rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">
-                      {selectedRun.output}
-                    </pre>
+                    <AgentOutputRenderer output={parseJsonOutput(selectedRun.output)} />
                   </div>
                 )}
 
