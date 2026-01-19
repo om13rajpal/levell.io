@@ -4,6 +4,7 @@
 
 /**
  * Parse JSON from code blocks (```json ... ```)
+ * Returns the parsed object, or the original string if it can't be parsed
  */
 export function parseJsonOutput(output: string | null): any | null {
   if (!output) return null;
@@ -19,7 +20,8 @@ export function parseJsonOutput(output: string | null): any | null {
         return JSON.parse(jsonMatch[1].trim());
       } catch (e) {
         console.error("Failed to parse JSON from code block:", e);
-        return null;
+        // Return original string for fallback rendering
+        return output;
       }
     }
 
@@ -30,11 +32,13 @@ export function parseJsonOutput(output: string | null): any | null {
         return JSON.parse(objectMatch[0]);
       } catch (e) {
         console.error("Failed to parse JSON object:", e);
-        return null;
+        // Return original string for fallback rendering
+        return output;
       }
     }
 
-    return null;
+    // If we can't parse, return the original string for fallback rendering
+    return output;
   }
 }
 

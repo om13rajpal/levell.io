@@ -34,54 +34,77 @@ interface AgentOutputRendererProps {
 }
 
 export function AgentOutputRenderer({ output, className }: AgentOutputRendererProps) {
-  if (!output || typeof output !== "object") {
-    // Check if it's markdown text (for sales_intelligence)
-    if (typeof output === "string" && output.includes("##")) {
-      return <MarkdownOutputRenderer output={output} className={className} />;
-    }
+  // Handle null/undefined output
+  if (!output) {
     return (
       <div className={cn("text-sm text-muted-foreground", className)}>
-        No structured output available
+        No output available
       </div>
     );
   }
 
-  // Route to appropriate renderer based on output structure
-  if (output.executive_summary || output.performance_scorecard) {
-    return <SynthesisOutputRenderer output={output} className={className} />;
+  // Handle string outputs (markdown, raw text, or unparsed JSON)
+  if (typeof output === "string") {
+    // Check if it's markdown (contains headers or lists)
+    if (output.includes("##") || output.includes("- **") || output.includes("### ")) {
+      return <MarkdownOutputRenderer output={output} className={className} />;
+    }
+
+    // Try to display as formatted text with better readability
+    return (
+      <ScrollArea className={cn("h-[600px]", className)}>
+        <div className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap">
+          {output}
+        </div>
+      </ScrollArea>
+    );
   }
 
-  if (output.explicit_pain_points || output.implicit_pain_points) {
-    return <PainPointsOutputRenderer output={output} className={className} />;
+  // Handle object outputs - route to appropriate renderer based on structure
+  if (typeof output === "object") {
+    if (output.executive_summary || output.performance_scorecard) {
+      return <SynthesisOutputRenderer output={output} className={className} />;
+    }
+
+    if (output.explicit_pain_points || output.implicit_pain_points) {
+      return <PainPointsOutputRenderer output={output} className={className} />;
+    }
+
+    if (output.objections && Array.isArray(output.objections)) {
+      return <ObjectionsOutputRenderer output={output} className={className} />;
+    }
+
+    if (output.engagement_indicators || output.engagement_timeline) {
+      return <EngagementOutputRenderer output={output} className={className} />;
+    }
+
+    if (output.commitments || output.next_steps || output.follow_up_tasks) {
+      return <NextStepsOutputRenderer output={output} className={className} />;
+    }
+
+    if (output.call_phases || output.structure_analysis) {
+      return <CallStructureOutputRenderer output={output} className={className} />;
+    }
+
+    if (output.technique_evaluation || output.communication_assessment) {
+      return <RepTechniqueOutputRenderer output={output} className={className} />;
+    }
+
+    // Generic JSON renderer for unrecognized structures
+    return (
+      <ScrollArea className={cn("h-[600px]", className)}>
+        <pre className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap font-mono">
+          {JSON.stringify(output, null, 2)}
+        </pre>
+      </ScrollArea>
+    );
   }
 
-  if (output.objections && Array.isArray(output.objections)) {
-    return <ObjectionsOutputRenderer output={output} className={className} />;
-  }
-
-  if (output.engagement_indicators || output.engagement_timeline) {
-    return <EngagementOutputRenderer output={output} className={className} />;
-  }
-
-  if (output.commitments || output.next_steps || output.follow_up_tasks) {
-    return <NextStepsOutputRenderer output={output} className={className} />;
-  }
-
-  if (output.call_phases || output.structure_analysis) {
-    return <CallStructureOutputRenderer output={output} className={className} />;
-  }
-
-  if (output.technique_evaluation || output.communication_assessment) {
-    return <RepTechniqueOutputRenderer output={output} className={className} />;
-  }
-
-  // Generic JSON renderer
+  // Final fallback
   return (
-    <ScrollArea className={cn("h-[600px]", className)}>
-      <pre className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap font-mono">
-        {JSON.stringify(output, null, 2)}
-      </pre>
-    </ScrollArea>
+    <div className={cn("text-sm text-muted-foreground", className)}>
+      Unable to render output
+    </div>
   );
 }
 
