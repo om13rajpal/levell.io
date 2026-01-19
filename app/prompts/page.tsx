@@ -660,7 +660,7 @@ function PromptsPageContent() {
 
       {/* Run Prompt Dialog */}
       <Dialog open={runDialogOpen} onOpenChange={setRunDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-[66vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <PlayIcon className="size-5 text-green-500" />
@@ -805,7 +805,7 @@ function PromptsPageContent() {
 
       {/* Version History Dialog */}
       <Dialog open={versionsDialogOpen} onOpenChange={setVersionsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-[66vw] max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <HistoryIcon className="size-5" />
@@ -883,7 +883,7 @@ function PromptsPageContent() {
 
       {/* Outputs Dialog */}
       <Dialog open={outputsDialogOpen} onOpenChange={setOutputsDialogOpen}>
-        <DialogContent className="max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-[66vw] max-h-[95vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3Icon className="size-5" />
@@ -1057,7 +1057,7 @@ function PromptsPageContent() {
 
       {/* Edit Prompt Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-[66vw] max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <EditIcon className="size-5" />

@@ -891,7 +891,7 @@ function AgentRunsPageContent() {
 
       {/* Run Detail Dialog */}
       <Dialog open={!!selectedRun} onOpenChange={() => setSelectedRun(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[66vw] max-h-[90vh] overflow-y-auto">
           {selectedRun && (
             <>
               <DialogHeader>
