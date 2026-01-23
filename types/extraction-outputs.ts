@@ -273,6 +273,11 @@ export const UserProfileSchema = z.object({
   })).optional(),
   elevator_pitch: z.string().optional(),
   sales_motion: z.string().optional(),
+  team_tags: z.array(z.object({
+    tag_name: z.string(),
+    tag_type: z.enum(["role", "department"]),
+    description: z.string().optional(),
+  })).optional(),
 });
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 

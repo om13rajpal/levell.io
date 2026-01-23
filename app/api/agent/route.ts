@@ -6,6 +6,7 @@ import {
 import { getOpenAIModel } from "@/lib/openai";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { trackAgentRequest } from "@/lib/openmeter";
+import { getRelevantContext } from "@/lib/embeddings";
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -350,7 +351,7 @@ async function fetchCompanyContext(companyId: string): Promise<string> {
   }
 }
 
-// Build system prompt
+// Build system prompt for legacy mode (specific call/company)
 function buildSystemPrompt(contextData: string, contextType: "call" | "company"): string {
   const contextDescription = contextType === "call"
     ? "a sales call transcript with analysis"
@@ -389,6 +390,42 @@ ${contextData}
 `;
 }
 
+// Build system prompt for workspace mode (semantic search)
+function buildWorkspaceSystemPrompt(contextData: string): string {
+  return `# Sales Intelligence Assistant - Full Workspace Access
+
+You are an expert sales intelligence assistant with access to the user's entire workspace of calls and company data. The context below contains the most relevant information from their workspace based on their question.
+
+## Your Capabilities
+- Access and analyze all call transcripts in the workspace
+- Review company profiles and relationship history
+- Cross-reference information across multiple calls and companies
+- Identify patterns and trends across the sales pipeline
+- Provide comprehensive, data-driven insights
+
+## Communication Style
+- Be direct and actionable
+- Reference specific data points from the context
+- When data comes from multiple sources, cite which call or company it's from
+- Prioritize insights that can improve sales outcomes
+- Use markdown formatting for clarity
+- Be concise but thorough
+
+## Relevant Context from Your Workspace
+${contextData}
+
+---
+
+## Guidelines
+1. The context above was automatically retrieved based on relevance to your question
+2. Reference specific calls, companies, or data points when answering
+3. If you need more specific information, ask clarifying questions
+4. Identify patterns across multiple calls when relevant
+5. Provide actionable insights and recommendations
+6. If the context doesn't contain relevant information, acknowledge this and suggest what to look for
+`;
+}
+
 export async function POST(req: Request) {
   const startTime = Date.now();
 
@@ -401,12 +438,14 @@ export async function POST(req: Request) {
       contextType,
       contextId,
       userId,
+      useSemanticSearch = false, // New: Enable semantic search mode
     }: {
       messages: UIMessage[];
       model?: string;
-      contextType?: "call" | "company";
+      contextType?: "call" | "company" | "workspace";
       contextId?: string;
       userId?: string;
+      useSemanticSearch?: boolean;
     } = body;
 
     console.log("[Agent] Request received:", {
@@ -414,12 +453,54 @@ export async function POST(req: Request) {
       contextType,
       contextId,
       messageCount: messages?.length,
+      useSemanticSearch,
       bodyKeys: Object.keys(body),
     });
 
-    // Fetch context based on selection
+    // Fetch context based on mode
     let contextData = "";
-    if (contextType && contextId) {
+    let systemPrompt = "";
+
+    // NEW: Workspace mode with semantic search
+    if (useSemanticSearch || contextType === "workspace") {
+      if (!userId) {
+        throw new Error("userId is required for semantic search mode");
+      }
+
+      // Extract the user's query from the last message
+      const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+      let userQuery = "";
+      if (lastMessage) {
+        // Handle different message content types
+        if ('content' in lastMessage && typeof (lastMessage as { content?: unknown }).content === "string") {
+          userQuery = (lastMessage as { content: string }).content;
+        } else if ('parts' in lastMessage && Array.isArray(lastMessage.parts)) {
+          // Handle parts-based messages - filter for text parts only
+          const textParts = lastMessage.parts.filter(
+            (p): p is { type: 'text'; text: string } =>
+              p !== null && typeof p === 'object' && 'type' in p && p.type === 'text' && 'text' in p
+          );
+          userQuery = textParts.map(p => p.text).join(" ");
+        } else {
+          userQuery = JSON.stringify(lastMessage);
+        }
+      }
+
+      console.log("[Agent] Using semantic search for query:", userQuery.slice(0, 100));
+
+      try {
+        // Fetch relevant context using semantic search
+        contextData = await getRelevantContext(userId, userQuery, 8);
+        console.log("[Agent] Semantic search returned context length:", contextData.length);
+      } catch (searchError) {
+        console.error("[Agent] Semantic search failed:", searchError);
+        contextData = "No indexed content found. Your workspace may need to be indexed first. Please contact support.";
+      }
+
+      systemPrompt = buildWorkspaceSystemPrompt(contextData);
+    }
+    // Legacy mode: specific call or company
+    else if (contextType && contextId) {
       console.log("[Agent] Fetching context for:", contextType, contextId);
       if (contextType === "call") {
         contextData = await fetchCallContext(contextId);
@@ -427,13 +508,14 @@ export async function POST(req: Request) {
         contextData = await fetchCompanyContext(contextId);
       }
       console.log("[Agent] Context data length:", contextData.length);
-    } else {
-      console.log("[Agent] No context provided - contextType:", contextType, "contextId:", contextId);
-      contextData = `No context selected. Please select a call or company to analyze. (Debug: contextType=${contextType}, contextId=${contextId})`;
+      systemPrompt = buildSystemPrompt(contextData, contextType);
     }
-
-    // Build system prompt
-    const systemPrompt = buildSystemPrompt(contextData, contextType || "call");
+    // No context provided
+    else {
+      console.log("[Agent] No context provided - contextType:", contextType, "contextId:", contextId);
+      contextData = `No context selected. Please select a call or company to analyze, or enable workspace mode for full access.`;
+      systemPrompt = buildSystemPrompt(contextData, "call");
+    }
 
     // Get the last user message for logging
     const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
