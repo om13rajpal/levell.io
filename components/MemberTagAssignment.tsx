@@ -13,8 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, Tag, Shield, Building2 } from "lucide-react";
+import { Loader2, Tag, Shield, Briefcase } from "lucide-react";
 import { toast } from "sonner";
+import { Separator } from "@/components/ui/separator";
 
 type TeamTag = {
   id: number;
@@ -55,14 +56,14 @@ export function MemberTagAssignment({
   isOwner = false,
 }: MemberTagAssignmentProps) {
   const [isSaving, setIsSaving] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<number | null>(null);
-  const [selectedDepartments, setSelectedDepartments] = useState<Set<number>>(
+  const [selectedSystemRole, setSelectedSystemRole] = useState<number | null>(null);
+  const [selectedCustomRoles, setSelectedCustomRoles] = useState<Set<number>>(
     new Set()
   );
 
   // Separate tags by type
-  const roleTags = allTags.filter((tag) => tag.tag_type === "role");
-  const departmentTags = allTags.filter((tag) => tag.tag_type === "department");
+  const systemRoleTags = allTags.filter((tag) => tag.tag_type === "role");
+  const customRoleTags = allTags.filter((tag) => tag.tag_type === "department");
 
   // Get current tag IDs for this member
   const currentTagIds = new Set(currentMemberTags.map((mt) => mt.tag_id));
@@ -70,20 +71,20 @@ export function MemberTagAssignment({
   // Initialize selections when dialog opens or member changes
   useEffect(() => {
     if (open) {
-      // Find currently assigned role
-      const currentRole = roleTags.find((tag) => currentTagIds.has(tag.id));
-      setSelectedRole(currentRole?.id ?? null);
+      // Find currently assigned system role
+      const currentRole = systemRoleTags.find((tag) => currentTagIds.has(tag.id));
+      setSelectedSystemRole(currentRole?.id ?? null);
 
-      // Find currently assigned departments
-      const currentDepts = departmentTags
+      // Find currently assigned custom roles
+      const currentCustomRoles = customRoleTags
         .filter((tag) => currentTagIds.has(tag.id))
         .map((tag) => tag.id);
-      setSelectedDepartments(new Set(currentDepts));
+      setSelectedCustomRoles(new Set(currentCustomRoles));
     }
   }, [open, member.id, currentMemberTags]);
 
-  const handleDepartmentToggle = (tagId: number) => {
-    setSelectedDepartments((prev) => {
+  const handleCustomRoleToggle = (tagId: number) => {
+    setSelectedCustomRoles((prev) => {
       const next = new Set(prev);
       if (next.has(tagId)) {
         next.delete(tagId);
@@ -101,19 +102,19 @@ export function MemberTagAssignment({
       // Build the set of all tag IDs that should be assigned
       const newTagIds = new Set<number>();
 
-      // Add selected role (if not owner, otherwise keep existing role)
+      // Add selected system role (if not owner, otherwise keep existing role)
       if (isOwner) {
         // Keep the current role for owners
-        const currentRole = roleTags.find((tag) => currentTagIds.has(tag.id));
+        const currentRole = systemRoleTags.find((tag) => currentTagIds.has(tag.id));
         if (currentRole) {
           newTagIds.add(currentRole.id);
         }
-      } else if (selectedRole !== null) {
-        newTagIds.add(selectedRole);
+      } else if (selectedSystemRole !== null) {
+        newTagIds.add(selectedSystemRole);
       }
 
-      // Add selected departments
-      selectedDepartments.forEach((id) => newTagIds.add(id));
+      // Add selected custom roles
+      selectedCustomRoles.forEach((id) => newTagIds.add(id));
 
       // Determine tags to add and remove
       const tagsToAdd = [...newTagIds].filter((id) => !currentTagIds.has(id));
@@ -150,12 +151,12 @@ export function MemberTagAssignment({
         }
       }
 
-      toast.success("Tags updated successfully");
+      toast.success("Roles updated successfully");
       onSave();
       onOpenChange(false);
     } catch (error) {
-      console.error("Error updating member tags:", error);
-      toast.error("Failed to update tags. Please try again.");
+      console.error("Error updating member roles:", error);
+      toast.error("Failed to update roles. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -180,33 +181,33 @@ export function MemberTagAssignment({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Tag className="h-5 w-5" />
-            Assign Tags to {member.name || member.email}
+            Assign Roles to {member.name || member.email}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* Roles Section */}
-          {roleTags.length > 0 && (
+          {/* System Roles Section */}
+          {systemRoleTags.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Shield className="h-4 w-4" />
-                Role
-                <span className="text-xs font-normal">(select one)</span>
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-semibold">System Role</span>
+                <span className="text-xs text-muted-foreground">(select one)</span>
               </div>
 
               {isOwner ? (
-                <p className="text-sm text-muted-foreground italic">
+                <p className="text-sm text-muted-foreground italic pl-6">
                   Team owner role cannot be changed.
                 </p>
               ) : (
                 <RadioGroup
-                  value={selectedRole?.toString() ?? ""}
+                  value={selectedSystemRole?.toString() ?? ""}
                   onValueChange={(value) =>
-                    setSelectedRole(value ? parseInt(value) : null)
+                    setSelectedSystemRole(value ? parseInt(value) : null)
                   }
-                  className="space-y-2"
+                  className="space-y-2 pl-6"
                 >
-                  {roleTags.map((tag) => (
+                  {systemRoleTags.map((tag) => (
                     <div key={tag.id} className="flex items-center space-x-3">
                       <RadioGroupItem
                         value={tag.id.toString()}
@@ -217,7 +218,7 @@ export function MemberTagAssignment({
                         className="flex items-center gap-2 cursor-pointer"
                       >
                         <span
-                          className="px-2 py-0.5 rounded-full text-xs font-medium border"
+                          className="px-2.5 py-1 rounded-full text-xs font-medium border"
                           style={getTagColorStyle(tag.tag_color)}
                         >
                           {tag.tag_name}
@@ -230,29 +231,34 @@ export function MemberTagAssignment({
             </div>
           )}
 
-          {/* Departments Section */}
-          {departmentTags.length > 0 && (
+          {/* Separator between sections */}
+          {systemRoleTags.length > 0 && customRoleTags.length > 0 && (
+            <Separator />
+          )}
+
+          {/* Custom Roles Section */}
+          {customRoleTags.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Building2 className="h-4 w-4" />
-                Departments
-                <span className="text-xs font-normal">(select multiple)</span>
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-semibold">Custom Roles</span>
+                <span className="text-xs text-muted-foreground">(select multiple)</span>
               </div>
 
-              <div className="space-y-2">
-                {departmentTags.map((tag) => (
+              <div className="space-y-2 pl-6">
+                {customRoleTags.map((tag) => (
                   <div key={tag.id} className="flex items-center space-x-3">
                     <Checkbox
-                      id={`dept-${tag.id}`}
-                      checked={selectedDepartments.has(tag.id)}
-                      onCheckedChange={() => handleDepartmentToggle(tag.id)}
+                      id={`custom-${tag.id}`}
+                      checked={selectedCustomRoles.has(tag.id)}
+                      onCheckedChange={() => handleCustomRoleToggle(tag.id)}
                     />
                     <Label
-                      htmlFor={`dept-${tag.id}`}
+                      htmlFor={`custom-${tag.id}`}
                       className="flex items-center gap-2 cursor-pointer"
                     >
                       <span
-                        className="px-2 py-0.5 rounded-full text-xs font-medium border"
+                        className="px-2.5 py-1 rounded-full text-xs font-medium border"
                         style={getTagColorStyle(tag.tag_color)}
                       >
                         {tag.tag_name}
@@ -265,11 +271,11 @@ export function MemberTagAssignment({
           )}
 
           {/* No tags message */}
-          {roleTags.length === 0 && departmentTags.length === 0 && (
+          {systemRoleTags.length === 0 && customRoleTags.length === 0 && (
             <div className="text-center py-6 text-muted-foreground">
               <Tag className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>No tags available for this team.</p>
-              <p className="text-sm">Create tags in team settings first.</p>
+              <p>No roles available for this team.</p>
+              <p className="text-sm">Create roles in team settings first.</p>
             </div>
           )}
         </div>
@@ -284,7 +290,7 @@ export function MemberTagAssignment({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={isSaving || (roleTags.length === 0 && departmentTags.length === 0)}
+            disabled={isSaving || (systemRoleTags.length === 0 && customRoleTags.length === 0)}
           >
             {isSaving ? (
               <>

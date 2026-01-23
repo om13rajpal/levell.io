@@ -134,6 +134,63 @@ async function fetchCompanyProfile(companyId: number | null): Promise<CompanyPro
 }
 
 /**
+ * Fetch user's team tags (system roles and custom roles)
+ */
+async function fetchUserTeamTags(userId: string): Promise<UserProfile["team_tags"]> {
+  try {
+    // First, get the user's team_id
+    const { data: userData, error: userError } = await getSupabaseAdmin()
+      .from("users")
+      .select("team_id")
+      .eq("id", userId)
+      .single();
+
+    if (userError || !userData?.team_id) {
+      console.log("[ContextLoader] User has no team or error fetching team:", userError?.message);
+      return undefined;
+    }
+
+    const teamId = userData.team_id;
+
+    // Get the user's tag assignments
+    const { data: memberTags, error: memberTagsError } = await getSupabaseAdmin()
+      .from("team_member_tags")
+      .select("tag_id")
+      .eq("user_id", userId)
+      .eq("team_id", teamId);
+
+    if (memberTagsError || !memberTags || memberTags.length === 0) {
+      console.log("[ContextLoader] No tags found for user:", userId);
+      return undefined;
+    }
+
+    const tagIds = memberTags.map((mt) => mt.tag_id);
+
+    // Fetch the actual tag details
+    const { data: tags, error: tagsError } = await getSupabaseAdmin()
+      .from("team_tags")
+      .select("tag_name, tag_type, description")
+      .in("id", tagIds);
+
+    if (tagsError || !tags || tags.length === 0) {
+      console.log("[ContextLoader] Error fetching tag details:", tagsError?.message);
+      return undefined;
+    }
+
+    console.log(`[ContextLoader] Found ${tags.length} tags for user`);
+
+    return tags.map((tag) => ({
+      tag_name: tag.tag_name,
+      tag_type: tag.tag_type as "role" | "department",
+      description: tag.description || undefined,
+    }));
+  } catch (error) {
+    console.error("[ContextLoader] Error in fetchUserTeamTags:", error);
+    return undefined;
+  }
+}
+
+/**
  * Load user's business profile (ICP, products, personas, etc.)
  */
 async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
@@ -155,6 +212,9 @@ async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
     }
 
     const bp = user.business_profile;
+
+    // Fetch team tags for this user
+    const teamTags = await fetchUserTeamTags(userId);
 
     // Parse business profile into UserProfile format
     const profile: UserProfile = {
@@ -179,9 +239,10 @@ async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
       })) || undefined,
       elevator_pitch: bp.elevator_pitch || bp.value_proposition || undefined,
       sales_motion: bp.sales_motion || undefined,
+      team_tags: teamTags,
     };
 
-    console.log("[ContextLoader] Loaded user profile with business data");
+    console.log("[ContextLoader] Loaded user profile with business data and team tags");
     return profile;
   } catch (error) {
     console.error("[ContextLoader] Error in fetchUserProfile:", error);
@@ -353,6 +414,41 @@ export function formatContextForPrompt(context: ContextObject): string {
   if (context.user_profile) {
     const up = context.user_profile;
     formatted += "### Rep's Business Context\n";
+
+    // Team role tags - CRITICAL FOR SCORING CONTEXT
+    if (up.team_tags && up.team_tags.length > 0) {
+      formatted += "**Rep's Roles:**\n";
+
+      const systemRoleTags = up.team_tags.filter(t => t.tag_type === "role");
+      const customRoleTags = up.team_tags.filter(t => t.tag_type === "department");
+
+      if (systemRoleTags.length > 0) {
+        formatted += "- System Role: ";
+        systemRoleTags.forEach((tag, index) => {
+          formatted += tag.tag_name;
+          if (tag.description) formatted += ` (${tag.description})`;
+          if (index < systemRoleTags.length - 1) formatted += ", ";
+        });
+        formatted += "\n";
+      }
+
+      if (customRoleTags.length > 0) {
+        formatted += "- Custom Role(s): ";
+        customRoleTags.forEach((tag, index) => {
+          formatted += tag.tag_name;
+          if (tag.description) formatted += ` (${tag.description})`;
+          if (index < customRoleTags.length - 1) formatted += ", ";
+        });
+        formatted += "\n";
+      }
+
+      formatted += "\n**Important:** When scoring this call, consider the rep's role. Different roles have different expectations:\n";
+      formatted += "- HR reps may focus more on people and culture topics\n";
+      formatted += "- Sales reps should excel at objection handling and closing techniques\n";
+      formatted += "- Engineering reps may dive deeper into technical details\n";
+      formatted += "- Customer Success reps prioritize relationship building and support\n";
+      formatted += "Adjust your scoring criteria and feedback based on their specific role context.\n\n";
+    }
 
     if (up.elevator_pitch) {
       formatted += `**Value Proposition:** ${up.elevator_pitch}\n\n`;

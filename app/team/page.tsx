@@ -791,16 +791,16 @@ export default function TeamPage() {
     setMemberTags(memberTagsResult.data || []);
   };
 
-  // Get department tags for a member
-  const getMemberDepartmentTags = (memberId: string) => {
+  // Get custom role tags for a member
+  const getMemberCustomRoleTags = (memberId: string) => {
     if (!team) return [];
     const userMemberTags = memberTags.filter(
       (mt) => mt.user_id === memberId && mt.team_id === team.id
     );
-    const departmentTags = tags.filter(
+    const customRoleTags = tags.filter(
       (t) => t.tag_type === "department" && userMemberTags.some((mt) => mt.tag_id === t.id)
     );
-    return departmentTags;
+    return customRoleTags;
   };
 
   const saveMemberRole = async () => {
@@ -1484,7 +1484,7 @@ export default function TeamPage() {
                               <TableCell className="py-3">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   {renderRoleBadge(role, isMemberOwner)}
-                                  {getMemberDepartmentTags(m.id).map((tag) => (
+                                  {getMemberCustomRoleTags(m.id).map((tag) => (
                                     <Badge
                                       key={tag.id}
                                       variant="outline"

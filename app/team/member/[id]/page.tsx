@@ -67,7 +67,7 @@ import {
   Loader2,
   Shield,
   Crown,
-  Building2,
+  Briefcase,
 } from "lucide-react";
 import {
   Bar,
@@ -569,8 +569,8 @@ export default function TeamMemberProfilePage() {
       .slice(-20);
   }, [chartData]);
 
-  // Get department tags for display
-  const departmentTags = useMemo(() => {
+  // Get custom role tags for display
+  const customRoleTags = useMemo(() => {
     if (!teamTags.length || !memberTags.length) return [];
     return teamTags.filter(
       (t) => t.tag_type === "department" && memberTags.some((mt) => mt.tag_id === t.id)
@@ -740,11 +740,11 @@ export default function TeamMemberProfilePage() {
                         ) : null}
                       </div>
                       <p className="text-sm text-muted-foreground">{member.email}</p>
-                      {/* Department Tags */}
-                      {departmentTags.length > 0 && (
+                      {/* Custom Role Tags */}
+                      {customRoleTags.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                          <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          {departmentTags.map((tag: any) => (
+                          <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                          {customRoleTags.map((tag: any) => (
                             <Badge
                               key={tag.id}
                               variant="outline"

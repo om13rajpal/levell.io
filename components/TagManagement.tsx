@@ -25,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 
 import {
   Plus,
@@ -33,10 +35,11 @@ import {
   Trash2,
   Loader2,
   Shield,
-  Building2,
+  Briefcase,
   Users,
   AlertTriangle,
   Check,
+  Sparkles,
 } from "lucide-react";
 
 // Type definition for TeamTag
@@ -54,12 +57,14 @@ type TeamTag = {
 const PRESET_COLORS = [
   { name: "Red", value: "#ef4444", bg: "bg-red-500", ring: "ring-red-500" },
   { name: "Orange", value: "#f97316", bg: "bg-orange-500", ring: "ring-orange-500" },
-  { name: "Yellow", value: "#eab308", bg: "bg-yellow-500", ring: "ring-yellow-500" },
+  { name: "Amber", value: "#f59e0b", bg: "bg-amber-500", ring: "ring-amber-500" },
   { name: "Green", value: "#22c55e", bg: "bg-green-500", ring: "ring-green-500" },
+  { name: "Teal", value: "#14b8a6", bg: "bg-teal-500", ring: "ring-teal-500" },
   { name: "Blue", value: "#3b82f6", bg: "bg-blue-500", ring: "ring-blue-500" },
   { name: "Indigo", value: "#6366f1", bg: "bg-indigo-500", ring: "ring-indigo-500" },
   { name: "Purple", value: "#a855f7", bg: "bg-purple-500", ring: "ring-purple-500" },
   { name: "Pink", value: "#ec4899", bg: "bg-pink-500", ring: "ring-pink-500" },
+  { name: "Rose", value: "#f43f5e", bg: "bg-rose-500", ring: "ring-rose-500" },
 ];
 
 // Protected role tag names that cannot be deleted
@@ -85,7 +90,7 @@ export default function TagManagement({
 
   // Form states for create
   const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[4].value); // Default to blue
+  const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[5].value); // Default to blue
   const [newTagDescription, setNewTagDescription] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -100,11 +105,11 @@ export default function TagManagement({
   const [deletingTag, setDeletingTag] = useState<TeamTag | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Separate tags by type
-  const roleTags = tags.filter(
+  // Separate tags by type - system roles vs custom roles
+  const systemRoleTags = tags.filter(
     (t) => t.tag_type === "role" || PROTECTED_ROLE_TAGS.includes(t.tag_name.toLowerCase())
   );
-  const departmentTags = tags.filter(
+  const customRoleTags = tags.filter(
     (t) => t.tag_type === "department" && !PROTECTED_ROLE_TAGS.includes(t.tag_name.toLowerCase())
   );
 
@@ -116,14 +121,14 @@ export default function TagManagement({
   // Reset create form
   const resetCreateForm = () => {
     setNewTagName("");
-    setNewTagColor(PRESET_COLORS[4].value);
+    setNewTagColor(PRESET_COLORS[5].value);
     setNewTagDescription("");
   };
 
   // Handle create tag
   const handleCreateTag = async () => {
     if (!newTagName.trim()) {
-      toast.error("Tag name is required");
+      toast.error("Role name is required");
       return;
     }
 
@@ -132,7 +137,7 @@ export default function TagManagement({
       (t) => t.tag_name.toLowerCase() === newTagName.trim().toLowerCase()
     );
     if (nameExists) {
-      toast.error("A tag with this name already exists");
+      toast.error("A role with this name already exists");
       return;
     }
 
@@ -149,17 +154,17 @@ export default function TagManagement({
 
       if (error) {
         console.error("Error creating tag:", error);
-        toast.error("Failed to create tag");
+        toast.error("Failed to create role");
         return;
       }
 
-      toast.success("Tag created successfully");
+      toast.success("Role created successfully");
       setCreateDialogOpen(false);
       resetCreateForm();
       onTagsChange();
     } catch (err) {
       console.error("Error creating tag:", err);
-      toast.error("An error occurred while creating the tag");
+      toast.error("An error occurred while creating the role");
     } finally {
       setCreateLoading(false);
     }
@@ -169,7 +174,7 @@ export default function TagManagement({
   const openEditDialog = (tag: TeamTag) => {
     setEditingTag(tag);
     setEditTagName(tag.tag_name);
-    setEditTagColor(tag.tag_color || PRESET_COLORS[4].value);
+    setEditTagColor(tag.tag_color || PRESET_COLORS[5].value);
     setEditTagDescription(tag.description || "");
     setEditDialogOpen(true);
   };
@@ -177,7 +182,7 @@ export default function TagManagement({
   // Handle edit tag
   const handleEditTag = async () => {
     if (!editingTag || !editTagName.trim()) {
-      toast.error("Tag name is required");
+      toast.error("Role name is required");
       return;
     }
 
@@ -188,15 +193,14 @@ export default function TagManagement({
         t.tag_name.toLowerCase() === editTagName.trim().toLowerCase()
     );
     if (nameExists) {
-      toast.error("A tag with this name already exists");
+      toast.error("A role with this name already exists");
       return;
     }
 
     // Prevent renaming protected tags
     if (isProtectedTag(editingTag)) {
-      // Only allow color and description changes for protected tags
       if (editTagName.trim().toLowerCase() !== editingTag.tag_name.toLowerCase()) {
-        toast.error("Cannot rename Admin or Member role tags");
+        toast.error("Cannot rename Admin or Member system roles");
         return;
       }
     }
@@ -221,17 +225,17 @@ export default function TagManagement({
 
       if (error) {
         console.error("Error updating tag:", error);
-        toast.error("Failed to update tag");
+        toast.error("Failed to update role");
         return;
       }
 
-      toast.success("Tag updated successfully");
+      toast.success("Role updated successfully");
       setEditDialogOpen(false);
       setEditingTag(null);
       onTagsChange();
     } catch (err) {
       console.error("Error updating tag:", err);
-      toast.error("An error occurred while updating the tag");
+      toast.error("An error occurred while updating the role");
     } finally {
       setEditLoading(false);
     }
@@ -240,7 +244,7 @@ export default function TagManagement({
   // Open delete confirmation dialog
   const openDeleteDialog = (tag: TeamTag) => {
     if (isProtectedTag(tag)) {
-      toast.error("Cannot delete Admin or Member role tags");
+      toast.error("Cannot delete Admin or Member system roles");
       return;
     }
     setDeletingTag(tag);
@@ -252,7 +256,7 @@ export default function TagManagement({
     if (!deletingTag) return;
 
     if (isProtectedTag(deletingTag)) {
-      toast.error("Cannot delete Admin or Member role tags");
+      toast.error("Cannot delete Admin or Member system roles");
       setDeleteDialogOpen(false);
       setDeletingTag(null);
       return;
@@ -275,87 +279,101 @@ export default function TagManagement({
 
       if (error) {
         console.error("Error deleting tag:", error);
-        toast.error("Failed to delete tag");
+        toast.error("Failed to delete role");
         return;
       }
 
-      toast.success("Tag deleted successfully");
+      toast.success("Role deleted successfully");
       setDeleteDialogOpen(false);
       setDeletingTag(null);
       onTagsChange();
     } catch (err) {
       console.error("Error deleting tag:", err);
-      toast.error("An error occurred while deleting the tag");
+      toast.error("An error occurred while deleting the role");
     } finally {
       setDeleteLoading(false);
     }
   };
 
-  // Render a single tag badge
-  const renderTagBadge = (tag: TeamTag, showActions: boolean = true) => {
+  // Render a single tag card
+  const renderTagCard = (tag: TeamTag, isSystem: boolean = false) => {
     const isProtected = isProtectedTag(tag);
-    const bgColor = tag.tag_color
-      ? { backgroundColor: tag.tag_color }
-      : undefined;
-    const isRole = tag.tag_type === "role" || isProtected;
 
     return (
       <div
         key={tag.id}
         className={`
-          group flex items-center gap-2 p-2.5 rounded-lg border transition-all
-          ${showActions && isAdmin ? "hover:bg-muted/50 cursor-pointer" : ""}
-          ${isProtected ? "border-dashed" : ""}
+          group relative flex items-start gap-3 p-4 rounded-xl border bg-card
+          transition-all duration-200
+          ${!isProtected && isAdmin ? "hover:shadow-md hover:border-primary/30 cursor-pointer" : ""}
+          ${isProtected ? "border-dashed bg-muted/30" : "hover:bg-accent/5"}
         `}
-        onClick={() => showActions && isAdmin && !isProtected && openEditDialog(tag)}
+        onClick={() => !isProtected && isAdmin && openEditDialog(tag)}
       >
+        {/* Color indicator */}
         <div
-          className="h-4 w-4 rounded-full shrink-0"
-          style={bgColor}
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="font-medium text-sm truncate">{tag.tag_name}</span>
+          className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center shadow-sm"
+          style={{ backgroundColor: tag.tag_color || "#6366f1" }}
+        >
+          {isSystem ? (
+            <Shield className="h-5 w-5 text-white" />
+          ) : (
+            <Briefcase className="h-5 w-5 text-white" />
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm">{tag.tag_name}</span>
             {isProtected && (
               <Badge
-                variant="outline"
-                className="text-[9px] px-1 py-0 h-3.5 bg-muted/50 border-dashed"
+                variant="secondary"
+                className="text-[10px] px-1.5 py-0 h-4 bg-muted border-0"
               >
                 System
               </Badge>
             )}
           </div>
-          {tag.description && (
-            <p className="text-xs text-muted-foreground truncate mt-0.5">
+          {tag.description ? (
+            <p className="text-xs text-muted-foreground line-clamp-2">
               {tag.description}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground/60 italic">
+              No description
             </p>
           )}
         </div>
 
-        {showActions && isAdmin && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Action buttons */}
+        {isAdmin && (
+          <div className={`
+            flex items-center gap-1
+            ${isProtected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
+            transition-opacity duration-200
+          `}>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-8 w-8 rounded-lg"
               onClick={(e) => {
                 e.stopPropagation();
                 openEditDialog(tag);
               }}
             >
-              <Pencil className="h-3.5 w-3.5" />
+              <Pencil className="h-4 w-4" />
             </Button>
             {!isProtected && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 hover:text-destructive"
+                className="h-8 w-8 rounded-lg hover:text-destructive hover:bg-destructive/10"
                 onClick={(e) => {
                   e.stopPropagation();
                   openDeleteDialog(tag);
                 }}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -372,21 +390,23 @@ export default function TagManagement({
     value: string;
     onChange: (color: string) => void;
   }) => (
-    <div className="flex flex-wrap gap-2">
+    <div className="grid grid-cols-5 gap-2">
       {PRESET_COLORS.map((color) => (
         <button
           key={color.value}
           type="button"
           className={`
-            h-8 w-8 rounded-full transition-all
+            h-9 w-full rounded-lg transition-all duration-200 relative
             ${color.bg}
-            ${value === color.value ? "ring-2 ring-offset-2 " + color.ring : "hover:scale-110"}
+            ${value === color.value
+              ? "ring-2 ring-offset-2 ring-offset-background " + color.ring + " scale-105"
+              : "hover:scale-110 hover:shadow-md"}
           `}
           onClick={() => onChange(color.value)}
           title={color.name}
         >
           {value === color.value && (
-            <Check className="h-4 w-4 text-white mx-auto" />
+            <Check className="h-4 w-4 text-white absolute inset-0 m-auto" />
           )}
         </button>
       ))}
@@ -394,63 +414,69 @@ export default function TagManagement({
   );
 
   return (
-    <Card className="@container/card shadow-xs">
-      <CardHeader className="pb-3">
+    <Card className="@container/card shadow-sm border-0 bg-gradient-to-b from-card to-card/80">
+      <CardHeader className="pb-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Tag className="h-5 w-5 text-primary" />
-              Team Tags
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Tag className="h-4 w-4 text-primary" />
+              </div>
+              Team Roles
             </CardTitle>
-            <CardDescription>
-              Organize team members with roles and departments
+            <CardDescription className="text-sm">
+              Organize and categorize your team members with custom roles
             </CardDescription>
           </div>
 
           {isAdmin && (
             <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
               <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5 h-8">
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Tag
+                <Button size="sm" className="gap-2 shadow-sm">
+                  <Plus className="h-4 w-4" />
+                  Add Role
                 </Button>
               </DialogTrigger>
 
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
-                    <Plus className="h-5 w-5 text-primary" />
-                    Create Department Tag
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                    </div>
+                    Create New Role
                   </DialogTitle>
                   <DialogDescription>
-                    Add a new department tag to categorize team members.
+                    Add a custom role to categorize and organize team members.
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-4 py-4">
+                <div className="space-y-5 py-4">
                   <div className="space-y-2">
-                    <Label htmlFor="tag-name">Tag Name *</Label>
+                    <Label htmlFor="tag-name" className="text-sm font-medium">
+                      Role Name <span className="text-destructive">*</span>
+                    </Label>
                     <Input
                       id="tag-name"
                       placeholder="e.g., Sales, Engineering, Support..."
                       value={newTagName}
                       onChange={(e) => setNewTagName(e.target.value)}
-                      className="h-10"
+                      className="h-11"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Color</Label>
+                    <Label className="text-sm font-medium">Color</Label>
                     <ColorPicker value={newTagColor} onChange={setNewTagColor} />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="tag-description">
-                      Description <span className="text-muted-foreground">(optional)</span>
+                    <Label htmlFor="tag-description" className="text-sm font-medium">
+                      Description <span className="text-muted-foreground text-xs">(optional)</span>
                     </Label>
                     <Textarea
                       id="tag-description"
-                      placeholder="Brief description of this department..."
+                      placeholder="Brief description of this role..."
                       value={newTagDescription}
                       onChange={(e) => setNewTagDescription(e.target.value)}
                       className="min-h-[80px] resize-none"
@@ -459,27 +485,29 @@ export default function TagManagement({
 
                   {/* Preview */}
                   <div className="space-y-2">
-                    <Label>Preview</Label>
-                    <div className="p-3 rounded-lg border bg-muted/30">
-                      <div className="flex items-center gap-2">
+                    <Label className="text-sm font-medium">Preview</Label>
+                    <div className="p-4 rounded-xl border bg-accent/5">
+                      <div className="flex items-center gap-3">
                         <div
-                          className="h-4 w-4 rounded-full shrink-0"
+                          className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center shadow-sm"
                           style={{ backgroundColor: newTagColor }}
-                        />
-                        <span className="font-medium text-sm">
-                          {newTagName || "Tag Name"}
-                        </span>
+                        >
+                          <Briefcase className="h-5 w-5 text-white" />
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-sm">
+                            {newTagName || "Role Name"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {newTagDescription || "No description"}
+                          </p>
+                        </div>
                       </div>
-                      {newTagDescription && (
-                        <p className="text-xs text-muted-foreground mt-1 ml-6">
-                          {newTagDescription}
-                        </p>
-                      )}
                     </div>
                   </div>
                 </div>
 
-                <DialogFooter>
+                <DialogFooter className="gap-2">
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -499,7 +527,7 @@ export default function TagManagement({
                     ) : (
                       <Plus className="h-4 w-4" />
                     )}
-                    {createLoading ? "Creating..." : "Create Tag"}
+                    {createLoading ? "Creating..." : "Create Role"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -509,43 +537,51 @@ export default function TagManagement({
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* Role Tags Section */}
+        {/* System Roles Section */}
         <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Shield className="h-4 w-4" />
-            Roles ({roleTags.length})
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">System Roles</span>
+            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+              {systemRoleTags.length}
+            </Badge>
           </div>
-          {roleTags.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-6 text-center border rounded-lg bg-muted/10">
-              <Users className="h-8 w-8 text-muted-foreground/40 mb-2" />
-              <p className="text-sm text-muted-foreground">No role tags</p>
+          {systemRoleTags.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center border rounded-xl bg-muted/5 border-dashed">
+              <Shield className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No system roles</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {roleTags.map((tag) => renderTagBadge(tag))}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {systemRoleTags.map((tag) => renderTagCard(tag, true))}
             </div>
           )}
         </div>
 
-        {/* Department Tags Section */}
+        <Separator />
+
+        {/* Custom Roles Section */}
         <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Building2 className="h-4 w-4" />
-            Departments ({departmentTags.length})
+          <div className="flex items-center gap-2">
+            <Briefcase className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Custom Roles</span>
+            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+              {customRoleTags.length}
+            </Badge>
           </div>
-          {departmentTags.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-6 text-center border rounded-lg bg-muted/10">
-              <Building2 className="h-8 w-8 text-muted-foreground/40 mb-2" />
-              <p className="text-sm text-muted-foreground">No department tags</p>
+          {customRoleTags.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center border rounded-xl bg-muted/5 border-dashed">
+              <Briefcase className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No custom roles yet</p>
               {isAdmin && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Click "Add Tag" to create your first department
+                  Click "Add Role" to create your first custom role
                 </p>
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {departmentTags.map((tag) => renderTagBadge(tag))}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {customRoleTags.map((tag) => renderTagCard(tag, false))}
             </div>
           )}
         </div>
@@ -556,43 +592,47 @@ export default function TagManagement({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Pencil className="h-5 w-5 text-primary" />
-              Edit Tag
+              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Pencil className="h-4 w-4 text-primary" />
+              </div>
+              Edit Role
             </DialogTitle>
             <DialogDescription>
               {editingTag && isProtectedTag(editingTag)
-                ? "You can only change the color and description of system tags."
-                : "Update the tag name, color, and description."}
+                ? "System roles can only have their color and description modified."
+                : "Update the role name, color, and description."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 py-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-tag-name">Tag Name *</Label>
+              <Label htmlFor="edit-tag-name" className="text-sm font-medium">
+                Role Name <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="edit-tag-name"
-                placeholder="Tag name"
+                placeholder="Role name"
                 value={editTagName}
                 onChange={(e) => setEditTagName(e.target.value)}
-                className="h-10"
+                className="h-11"
                 disabled={editingTag ? isProtectedTag(editingTag) : false}
               />
               {editingTag && isProtectedTag(editingTag) && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                   <Shield className="h-3 w-3" />
-                  System tag names cannot be changed
+                  System role names cannot be changed
                 </p>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label>Color</Label>
+              <Label className="text-sm font-medium">Color</Label>
               <ColorPicker value={editTagColor} onChange={setEditTagColor} />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="edit-tag-description">
-                Description <span className="text-muted-foreground">(optional)</span>
+              <Label htmlFor="edit-tag-description" className="text-sm font-medium">
+                Description <span className="text-muted-foreground text-xs">(optional)</span>
               </Label>
               <Textarea
                 id="edit-tag-description"
@@ -605,27 +645,33 @@ export default function TagManagement({
 
             {/* Preview */}
             <div className="space-y-2">
-              <Label>Preview</Label>
-              <div className="p-3 rounded-lg border bg-muted/30">
-                <div className="flex items-center gap-2">
+              <Label className="text-sm font-medium">Preview</Label>
+              <div className="p-4 rounded-xl border bg-accent/5">
+                <div className="flex items-center gap-3">
                   <div
-                    className="h-4 w-4 rounded-full shrink-0"
+                    className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center shadow-sm"
                     style={{ backgroundColor: editTagColor }}
-                  />
-                  <span className="font-medium text-sm">
-                    {editTagName || "Tag Name"}
-                  </span>
+                  >
+                    {editingTag && isProtectedTag(editingTag) ? (
+                      <Shield className="h-5 w-5 text-white" />
+                    ) : (
+                      <Briefcase className="h-5 w-5 text-white" />
+                    )}
+                  </div>
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-sm">
+                      {editTagName || "Role Name"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {editTagDescription || "No description"}
+                    </p>
+                  </div>
                 </div>
-                {editTagDescription && (
-                  <p className="text-xs text-muted-foreground mt-1 ml-6">
-                    {editTagDescription}
-                  </p>
-                )}
               </div>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button
               variant="outline"
               onClick={() => {
@@ -656,26 +702,28 @@ export default function TagManagement({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Delete Tag
+              <div className="h-8 w-8 rounded-lg bg-destructive/10 flex items-center justify-center">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+              </div>
+              Delete Role
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this tag? This action cannot be undone.
+              This action cannot be undone. The role will be permanently deleted.
             </DialogDescription>
           </DialogHeader>
 
           {deletingTag && (
             <div className="py-4">
-              <div className="p-4 rounded-lg border border-destructive/20 bg-destructive/5">
+              <div className="p-4 rounded-xl border border-destructive/20 bg-destructive/5">
                 <div className="flex items-center gap-3">
                   <div
-                    className="h-6 w-6 rounded-full shrink-0"
-                    style={{
-                      backgroundColor: deletingTag.tag_color || "#6366f1",
-                    }}
-                  />
+                    className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center"
+                    style={{ backgroundColor: deletingTag.tag_color || "#6366f1" }}
+                  >
+                    <Briefcase className="h-5 w-5 text-white" />
+                  </div>
                   <div>
-                    <p className="font-medium">{deletingTag.tag_name}</p>
+                    <p className="font-semibold">{deletingTag.tag_name}</p>
                     {deletingTag.description && (
                       <p className="text-xs text-muted-foreground">
                         {deletingTag.description}
@@ -683,15 +731,17 @@ export default function TagManagement({
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  All members with this tag will have it removed.
-                </p>
+                <div className="mt-3 p-2 rounded-lg bg-destructive/10 border border-destructive/20">
+                  <p className="text-xs text-destructive flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    All team members with this role will have it removed.
+                  </p>
+                </div>
               </div>
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button
               variant="outline"
               onClick={() => {
@@ -712,7 +762,7 @@ export default function TagManagement({
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              {deleteLoading ? "Deleting..." : "Delete Tag"}
+              {deleteLoading ? "Deleting..." : "Delete Role"}
             </Button>
           </DialogFooter>
         </DialogContent>
