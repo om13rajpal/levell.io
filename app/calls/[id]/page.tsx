@@ -864,11 +864,16 @@ export default function CallDetailPage() {
 
               <div className="space-y-3">
                 {effectiveWhatWorked.map((item: any, i: number) => {
-                  // Handle V1 (string or object) and V2 (moment/quote/why_effective) formats
+                  // Handle V1 (string), V2 (moment/quote/why_effective), and V3 (point/detail/highlighted_sentence) formats
                   const isString = typeof item === "string";
-                  const content = isString ? item : item.moment || item.behavior_skill || item.text || "";
-                  const explanation = isString ? null : item.why_effective || item.explanation;
+                  const content = isString ? item : item.point || item.moment || item.behavior_skill || item.text || "";
+                  const explanation = isString ? null : item.detail || item.why_effective || item.explanation;
                   const quote = isString ? null : item.quote;
+                  // V3 highlighted_sentence support
+                  const highlightedSentence = isString ? null : item.highlighted_sentence;
+                  const highlightText = highlightedSentence?.text || quote;
+                  const highlightSpeaker = highlightedSentence?.speaker;
+                  const highlightSentiment = highlightedSentence?.sentiment;
 
                   return (
                     <Card
@@ -880,15 +885,33 @@ export default function CallDetailPage() {
                           <div className="h-6 w-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5">
                             <IconCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                           </div>
-                          <div className="space-y-2">
-                            <p className="text-sm leading-relaxed">{content}</p>
-                            {quote && (
-                              <blockquote className="text-xs text-muted-foreground italic border-l-2 border-emerald-300 pl-3">
-                                "{quote}"
-                              </blockquote>
+                          <div className="space-y-2 flex-1">
+                            <p className="text-sm font-medium leading-relaxed">{content}</p>
+                            {highlightText && (
+                              <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200/50 dark:border-emerald-800/50">
+                                {highlightSpeaker && (
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-[10px] px-1.5 py-0.5 ${
+                                        highlightSentiment === 'positive'
+                                          ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                          : highlightSentiment === 'negative'
+                                          ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                          : 'border-slate-400 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      {highlightSpeaker}
+                                    </Badge>
+                                  </div>
+                                )}
+                                <blockquote className="text-xs text-muted-foreground italic border-l-2 border-emerald-400 pl-3">
+                                  "{highlightText}"
+                                </blockquote>
+                              </div>
                             )}
                             {explanation && (
-                              <p className="text-xs text-muted-foreground">{explanation}</p>
+                              <p className="text-sm text-muted-foreground leading-relaxed">{explanation}</p>
                             )}
                           </div>
                         </div>
@@ -911,48 +934,94 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="space-y-4">
-                {aiImprovement.map((item: any, i: number) => (
-                  <Card
-                    key={i}
-                    className="border-amber-200/50 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-950/10"
-                  >
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base text-amber-700 dark:text-amber-300">
-                        {item.area || item.category_skill || `Improvement ${i + 1}`}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                      {(item.what_happened || item.what_you_did) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            What Happened
-                          </p>
-                          <p>{item.what_happened || item.what_you_did}</p>
-                        </div>
-                      )}
-                      {(item.what_to_do_instead || item.do_this_instead) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            What To Do Instead
-                          </p>
-                          <p className="text-amber-800 dark:text-amber-200">
-                            {item.what_to_do_instead || item.do_this_instead}
-                          </p>
-                        </div>
-                      )}
-                      {(item.why_it_was_not_effective || item.why_this_didnt_work) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            Why It Wasn't Effective
-                          </p>
-                          <p className="text-muted-foreground">
-                            {item.why_it_was_not_effective || item.why_this_didnt_work}
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                {aiImprovement.map((item: any, i: number) => {
+                  // V3 highlighted_sentence support for improvement areas
+                  const highlightedSentence = item.highlighted_sentence;
+                  const highlightText = highlightedSentence?.text;
+                  const highlightSpeaker = highlightedSentence?.speaker;
+                  const highlightSentiment = highlightedSentence?.sentiment;
+
+                  return (
+                    <Card
+                      key={i}
+                      className="border-amber-200/50 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-950/10"
+                    >
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base text-amber-700 dark:text-amber-300">
+                          {item.area || item.category_skill || `Improvement ${i + 1}`}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        {(item.what_happened || item.what_you_did) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              What Happened
+                            </p>
+                            <p>{item.what_happened || item.what_you_did}</p>
+                          </div>
+                        )}
+                        {/* V3: Display highlighted sentence from the call */}
+                        {highlightText && (
+                          <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 border border-amber-200/50 dark:border-amber-800/50">
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                              From the Call
+                            </p>
+                            {highlightSpeaker && (
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0.5 ${
+                                    highlightSentiment === 'positive'
+                                      ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                      : highlightSentiment === 'negative'
+                                      ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                      : 'border-slate-400 text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {highlightSpeaker}
+                                </Badge>
+                              </div>
+                            )}
+                            <blockquote className="text-xs text-muted-foreground italic border-l-2 border-amber-400 pl-3">
+                              "{highlightText}"
+                            </blockquote>
+                          </div>
+                        )}
+                        {(item.what_to_do_instead || item.do_this_instead) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              What To Do Instead
+                            </p>
+                            <p className="text-amber-800 dark:text-amber-200">
+                              {item.what_to_do_instead || item.do_this_instead}
+                            </p>
+                          </div>
+                        )}
+                        {(item.why_it_was_not_effective || item.why_this_didnt_work) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              Why It Wasn't Effective
+                            </p>
+                            <p className="text-muted-foreground">
+                              {item.why_it_was_not_effective || item.why_this_didnt_work}
+                            </p>
+                          </div>
+                        )}
+                        {/* V3: Display practice framework if available */}
+                        {item.practice_framework && (
+                          <div className="bg-amber-100/50 dark:bg-amber-900/20 rounded-lg p-3 border border-amber-300/50 dark:border-amber-700/50">
+                            <p className="font-medium text-amber-700 dark:text-amber-300 text-xs uppercase tracking-wide mb-1">
+                              Practice Framework
+                            </p>
+                            <p className="text-sm text-amber-900 dark:text-amber-100">
+                              {item.practice_framework}
+                            </p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -968,38 +1037,73 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="space-y-4">
-                {effectiveMissed.map((item: any, i: number) => (
-                  <Card
-                    key={i}
-                    className="border-purple-200/50 dark:border-purple-500/20 bg-purple-50/30 dark:bg-purple-950/10"
-                  >
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base text-purple-700 dark:text-purple-300">
-                        {item.moment || item.moment_in_call || `Opportunity ${i + 1}`}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                      {item.why_it_matters && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            Why It Matters
-                          </p>
-                          <p>{item.why_it_matters}</p>
-                        </div>
-                      )}
-                      {(item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            What You Should Have Said
-                          </p>
-                          <p className="text-purple-800 dark:text-purple-200 italic">
-                            "{item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done}"
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                {effectiveMissed.map((item: any, i: number) => {
+                  // V3 highlighted_sentence support for missed opportunities
+                  const highlightedSentence = item.highlighted_sentence;
+                  const highlightText = highlightedSentence?.text;
+                  const highlightSpeaker = highlightedSentence?.speaker;
+                  const highlightSentiment = highlightedSentence?.sentiment;
+
+                  return (
+                    <Card
+                      key={i}
+                      className="border-purple-200/50 dark:border-purple-500/20 bg-purple-50/30 dark:bg-purple-950/10"
+                    >
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base text-purple-700 dark:text-purple-300">
+                          {item.moment || item.moment_in_call || `Opportunity ${i + 1}`}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        {item.why_it_matters && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              Why It Matters
+                            </p>
+                            <p>{item.why_it_matters}</p>
+                          </div>
+                        )}
+                        {/* V3: Display highlighted sentence from the call */}
+                        {highlightText && (
+                          <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 border border-purple-200/50 dark:border-purple-800/50">
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                              Moment in the Call
+                            </p>
+                            {highlightSpeaker && (
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0.5 ${
+                                    highlightSentiment === 'positive'
+                                      ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                      : highlightSentiment === 'negative'
+                                      ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                      : 'border-slate-400 text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {highlightSpeaker}
+                                </Badge>
+                              </div>
+                            )}
+                            <blockquote className="text-xs text-muted-foreground italic border-l-2 border-purple-400 pl-3">
+                              "{highlightText}"
+                            </blockquote>
+                          </div>
+                        )}
+                        {(item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              What You Should Have Said
+                            </p>
+                            <p className="text-purple-800 dark:text-purple-200 italic">
+                              "{item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done}"
+                            </p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1052,38 +1156,90 @@ export default function CallDetailPage() {
               </h2>
 
               <div className="grid md:grid-cols-2 gap-4">
-                {aiQualGaps.map((item: any, i: number) => (
-                  <Card
-                    key={i}
-                    className="border-indigo-200/50 dark:border-indigo-500/20 bg-indigo-50/30 dark:bg-indigo-950/10"
-                  >
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">
-                        {item.element || item.framework_element || `Gap ${i + 1}`}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                      {(item.what_is_missing || item.whats_missing) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            What's Missing
-                          </p>
-                          <p>{item.what_is_missing || item.whats_missing}</p>
+                {aiQualGaps.map((item: any, i: number) => {
+                  // V3 highlighted_sentence support for qualification gaps
+                  const highlightedSentence = item.highlighted_sentence;
+                  const highlightText = highlightedSentence?.text;
+                  const highlightSpeaker = highlightedSentence?.speaker;
+                  const highlightSentiment = highlightedSentence?.sentiment;
+                  const riskLevel = item.risk_level;
+
+                  return (
+                    <Card
+                      key={i}
+                      className="border-indigo-200/50 dark:border-indigo-500/20 bg-indigo-50/30 dark:bg-indigo-950/10"
+                    >
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+                            {item.element || item.framework_element || `Gap ${i + 1}`}
+                          </CardTitle>
+                          {riskLevel && (
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-1.5 py-0.5 ${
+                                riskLevel === 'high'
+                                  ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                  : riskLevel === 'medium'
+                                  ? 'border-amber-400 text-amber-700 dark:text-amber-300'
+                                  : 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                              }`}
+                            >
+                              {riskLevel} risk
+                            </Badge>
+                          )}
                         </div>
-                      )}
-                      {(item.how_to_get_it || item.how_to_get_it_next_conversation) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            How to Get It
-                          </p>
-                          <p className="text-indigo-800 dark:text-indigo-200">
-                            {item.how_to_get_it || item.how_to_get_it_next_conversation}
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardHeader>
+                      <CardContent className="space-y-2 text-sm">
+                        {(item.what_is_missing || item.whats_missing) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              What's Missing
+                            </p>
+                            <p>{item.what_is_missing || item.whats_missing}</p>
+                          </div>
+                        )}
+                        {/* V3: Display highlighted sentence from the call */}
+                        {highlightText && (
+                          <div className="bg-indigo-50 dark:bg-indigo-950/30 rounded-lg p-3 border border-indigo-200/50 dark:border-indigo-800/50">
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                              Evidence from Call
+                            </p>
+                            {highlightSpeaker && (
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0.5 ${
+                                    highlightSentiment === 'positive'
+                                      ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                      : highlightSentiment === 'negative'
+                                      ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                      : 'border-slate-400 text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {highlightSpeaker}
+                                </Badge>
+                              </div>
+                            )}
+                            <blockquote className="text-xs text-muted-foreground italic border-l-2 border-indigo-400 pl-3">
+                              "{highlightText}"
+                            </blockquote>
+                          </div>
+                        )}
+                        {(item.how_to_get_it || item.how_to_get_it_next_conversation) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              How to Get It
+                            </p>
+                            <p className="text-indigo-800 dark:text-indigo-200">
+                              {item.how_to_get_it || item.how_to_get_it_next_conversation}
+                            </p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1106,6 +1262,9 @@ export default function CallDetailPage() {
                     medium: "border-amber-300 bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400",
                     low: "border-slate-300 bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-400",
                   };
+                  // V3 format has specific_questions and success_criteria
+                  const specificQuestions = item.specific_questions || [];
+                  const successCriteria = item.success_criteria;
 
                   return (
                     <Card
@@ -1117,7 +1276,7 @@ export default function CallDetailPage() {
                           <div className="h-6 w-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 text-xs font-bold text-emerald-700 dark:text-emerald-300">
                             {i + 1}
                           </div>
-                          <div className="space-y-2 flex-1">
+                          <div className="space-y-3 flex-1">
                             <div className="flex items-start justify-between gap-2">
                               <p className="font-medium">{item.action}</p>
                               {item.priority && (
@@ -1131,6 +1290,32 @@ export default function CallDetailPage() {
                             </div>
                             {item.why && (
                               <p className="text-sm text-muted-foreground">{item.why}</p>
+                            )}
+                            {/* V3: Display specific questions */}
+                            {specificQuestions.length > 0 && (
+                              <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200/50 dark:border-emerald-800/50">
+                                <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                                  What to Say
+                                </p>
+                                <ul className="space-y-1">
+                                  {specificQuestions.map((q: string, qi: number) => (
+                                    <li key={qi} className="text-sm text-emerald-800 dark:text-emerald-200 italic flex items-start gap-2">
+                                      <span className="text-emerald-500 shrink-0">•</span>
+                                      <span>"{q}"</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {/* V3: Display success criteria */}
+                            {successCriteria && (
+                              <div className="flex items-start gap-2 text-sm">
+                                <IconCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                                <div>
+                                  <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Success looks like: </span>
+                                  <span className="text-muted-foreground">{successCriteria}</span>
+                                </div>
+                              </div>
                             )}
                           </div>
                         </div>
