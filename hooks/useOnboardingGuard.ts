@@ -12,7 +12,6 @@ const STEP_PATHS: Record<number, string> = {
   3: "/onboarding/step3",
   4: "/onboarding/step4",
   5: "/onboarding/step5",
-  6: "/onboarding/step6",
 };
 
 // Map of path to step number
@@ -22,7 +21,6 @@ const PATH_TO_STEP: Record<string, number> = {
   "/onboarding/step3": 3,
   "/onboarding/step4": 4,
   "/onboarding/step5": 5,
-  "/onboarding/step6": 6,
 };
 
 export function useOnboardingGuard() {

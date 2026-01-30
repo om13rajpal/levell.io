@@ -1,5 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  successResponse,
+  createdResponse,
+  validationError,
+  serverError,
+} from "@/lib/api-response";
 
 // Initialize Supabase admin client
 function getSupabaseAdmin() {
@@ -72,13 +78,10 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error("[Agent Runs API] Error fetching runs:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch agent runs", details: error.message },
-        { status: 500 }
-      );
+      return serverError(error, "GET /api/agent-runs");
     }
 
-    return NextResponse.json({
+    return successResponse({
       runs: data,
       pagination: {
         page,
@@ -89,11 +92,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[Agent Runs API] Unexpected error:", error);
-    return NextResponse.json(
-      { error: "An unexpected error occurred" },
-      { status: 500 }
-    );
+    return serverError(error, "GET /api/agent-runs");
   }
 }
 
@@ -126,10 +125,9 @@ export async function POST(request: NextRequest) {
 
     // Validation - prompt_id is required by DB schema (NOT NULL)
     if (!agent_type || !prompt_sent || !model || !prompt_id) {
-      return NextResponse.json(
-        { error: "Missing required fields: agent_type, prompt_sent, model, prompt_id" },
-        { status: 400 }
-      );
+      return validationError({
+        required: "Missing required fields: agent_type, prompt_sent, model, prompt_id",
+      });
     }
 
     // Fetch prompt version from the prompt if not provided in metadata
@@ -174,18 +172,11 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("[Agent Runs API] Error creating run:", error);
-      return NextResponse.json(
-        { error: "Failed to log agent run", details: error.message },
-        { status: 500 }
-      );
+      return serverError(error, "POST /api/agent-runs");
     }
 
-    return NextResponse.json({ run: data }, { status: 201 });
+    return createdResponse({ run: data });
   } catch (error) {
-    console.error("[Agent Runs API] Unexpected error:", error);
-    return NextResponse.json(
-      { error: "An unexpected error occurred" },
-      { status: 500 }
-    );
+    return serverError(error, "POST /api/agent-runs");
   }
 }

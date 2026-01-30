@@ -34,7 +34,7 @@ interface AgentRunInput {
   user_id?: string;
 }
 
-// POST - Batch insert multiple agent runs (for n8n workflows)
+// POST - Batch insert multiple agent runs (for Inngest workflows)
 export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
       completion_tokens: run.completion_tokens || run.output_tokens || 0,
       transcript_id: run.transcript_id || null,
       user_id: run.user_id || null,
-      context_type: run.run_type || "n8n",
+      context_type: run.run_type || "inngest",
       status: run.status || "completed",
       error_message: run.error_message || null,
       is_test_run: run.is_test_run || false,

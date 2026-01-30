@@ -70,7 +70,34 @@ export default function ConnectTools({
     loadKeys();
   }, [onFirefliesStatusChange, onOpenAIStatusChange]);
 
-  // 🔥 Save key to Supabase
+  // Helper to rollback DB changes on failure
+  const rollbackApiKey = async (userId: string, type: "fireflies" | "openai", previousKey: string | null) => {
+    try {
+      if (previousKey === null) {
+        // No previous key existed - remove the newly inserted key
+        const updatePayload = type === "fireflies"
+          ? { fireflies: null }
+          : { openapi: null };
+        await supabase
+          .from("api_keys")
+          .update(updatePayload)
+          .eq("user_id", userId);
+      } else {
+        // Restore the previous key
+        const updatePayload = type === "fireflies"
+          ? { fireflies: previousKey }
+          : { openapi: previousKey };
+        await supabase
+          .from("api_keys")
+          .update(updatePayload)
+          .eq("user_id", userId);
+      }
+    } catch (rollbackError) {
+      console.error("Rollback failed:", rollbackError);
+    }
+  };
+
+  // Save key to Supabase with proper error handling and rollback
   const saveKeyToSupabase = async (
     type: "fireflies" | "openai",
     key: string
@@ -80,67 +107,74 @@ export default function ConnectTools({
       return;
     }
 
-    try {
-      setIsSaving(true);
-      onSavingChange?.(true);
+    setIsSaving(true);
+    onSavingChange?.(true);
 
+    try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
         toast.error("No authenticated user found.");
-        setIsSaving(false);
-        onSavingChange?.(false);
         return;
       }
 
+      // Fetch the current key before making changes (for rollback capability)
+      const { data: existingData } = await supabase
+        .from("api_keys")
+        .select("fireflies, openapi")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      const previousKey = type === "fireflies"
+        ? (existingData?.fireflies ?? null)
+        : (existingData?.openapi ?? null);
+
+      // Step 1: Save to database
       const now = new Date().toISOString();
       const payload =
         type === "fireflies"
           ? { user_id: user.id, created_at: now, fireflies: key }
           : { user_id: user.id, created_at: now, openapi: key };
 
-      const { error } = await supabase
+      const { error: dbError } = await supabase
         .from("api_keys")
         .upsert(payload, { onConflict: "user_id" });
 
-      if (error) {
-        console.error(error);
-        toast.error(`Failed to save ${type} key: ${error.message}`);
-        setIsSaving(false);
-        onSavingChange?.(false);
+      if (dbError) {
+        console.error(dbError);
+        toast.error(`Failed to save ${type} key: ${dbError.message}`);
         return;
       }
 
-      // If saving Fireflies key, make POST request to webhook
+      // Step 2: For Fireflies, trigger the webhook BEFORE updating local state
       if (type === "fireflies") {
         try {
-          await axiosClient.post(
-            "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89",
-            {
+          await axiosClient.post("/api/inngest/trigger", {
+            event: "transcripts/sync.requested",
+            data: {
               token: key,
-              userid: user.id,
+              user_id: user.id,
               skip: 0,
-            }
-          );
+            },
+          });
         } catch (webhookError) {
           console.error("Webhook error:", webhookError);
-          toast.error("Failed to sync with webhook. Please try again.");
-          setIsSaving(false);
-          onSavingChange?.(false);
+          // Rollback the database change since webhook failed
+          await rollbackApiKey(user.id, type, previousKey);
+          toast.error("Failed to sync with Fireflies. Connection was not saved. Please try again.");
           return;
         }
       }
 
-      // Success - update state and close dialog
+      // Step 3: Only update localStorage and state AFTER all operations succeed
       if (type === "fireflies") {
         setFirefliesKey(key);
         localStorage.setItem("onboarding_fireflies_connected", "true");
-        localStorage.setItem("fireflies_syncing", "true"); // Track syncing state for animations
+        localStorage.setItem("fireflies_syncing", "true");
         onFirefliesStatusChange?.(true);
         setIsFirefliesDialogOpen(false);
-      }
-      if (type === "openai") {
+      } else {
         setOpenAIKey(key);
         localStorage.setItem("onboarding_openai_connected", "true");
         onOpenAIStatusChange?.(true);

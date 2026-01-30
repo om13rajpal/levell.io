@@ -154,11 +154,11 @@ export async function createTeamInvitation(
     // Get inviter's name for the email
     const { data: inviterData } = await supabase
       .from("users")
-      .select("full_name, email")
+      .select("name, email")
       .eq("id", invitedBy)
       .single();
 
-    const inviterDisplayName = inviterData?.full_name || inviterData?.email || "A team member";
+    const inviterDisplayName = inviterData?.name || inviterData?.email || "A team member";
 
     // Get team name for the email
     const { data: teamData } = await supabase

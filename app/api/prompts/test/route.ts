@@ -95,11 +95,9 @@ function buildContext(transcript: Record<string, unknown>, user: Record<string, 
   const userName = (user?.name as string) || "Sales Rep";
   const userEmail = (user?.email as string) || "";
   const salesMotion = (user?.sales_motion as string) || "consultative";
-  const framework = (user?.framework as string) || "SPICED";
 
   return `## SALES CONTEXT
 Sales Motion: ${salesMotion}
-Qualification Framework: ${framework}
 
 ## CALL PARTICIPANTS
 Rep Name: ${userName}
@@ -226,7 +224,6 @@ export async function POST(request: NextRequest) {
           name: testTranscript.user_name,
           email: testTranscript.user_email,
           sales_motion: testTranscript.sales_motion,
-          framework: testTranscript.framework,
         });
 
         // Replace variables in prompts

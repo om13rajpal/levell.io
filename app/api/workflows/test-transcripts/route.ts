@@ -13,7 +13,7 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-// GET - Fetch test transcripts for n8n workflow
+// GET - Fetch test transcripts for workflows
 // Returns full transcript data including sentences for processing
 export async function GET(request: NextRequest) {
   try {
@@ -40,14 +40,14 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.limit(limit);
 
     if (error) {
-      console.error("[n8n Test Transcripts API] Error fetching:", error);
+      console.error("[Test Transcripts API] Error fetching:", error);
       return NextResponse.json(
         { error: "Failed to fetch test transcripts", details: error.message },
         { status: 500 }
       );
     }
 
-    // Format for n8n consumption
+    // Format for consumption
     const formattedTranscripts = data?.map(t => ({
       test_id: t.test_id,
       transcript_id: t.transcript_id,
@@ -68,7 +68,6 @@ export async function GET(request: NextRequest) {
       prospects: t.prospects,
       talk_ratio: t.talk_ratio,
       sales_motion: t.sales_motion,
-      framework: t.framework,
     })) || [];
 
     return NextResponse.json({
@@ -77,7 +76,7 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("[n8n Test Transcripts API] Unexpected error:", error);
+    console.error("[Test Transcripts API] Unexpected error:", error);
     return NextResponse.json(
       { error: "An unexpected error occurred" },
       { status: 500 }

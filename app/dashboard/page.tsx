@@ -5,7 +5,16 @@ import { supabase } from "@/lib/supabaseClient";
 import { getTranscriptsPaginated, getUserIdFromCache } from "@/lib/supabaseCache";
 
 import { AppSidebar } from "@/components/app-sidebar";
-import { ChartAreaInteractive } from "@/components/chart-area-interactive";
+import dynamic from "next/dynamic";
+const ChartAreaInteractive = dynamic(
+  () => import("@/components/chart-area-interactive").then(mod => ({ default: mod.ChartAreaInteractive })),
+  { ssr: false, loading: () => <div className="h-[300px] w-full animate-pulse rounded-lg bg-muted" /> }
+);
+const TranscriptSyncModal = dynamic(
+  () => import("@/components/TranscriptSyncModal"),
+  { ssr: false }
+);
+import { AskAICoach } from "@/components/AskAICoach";
 import { SectionCards } from "@/components/section-cards";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -42,7 +51,12 @@ import {
   ChevronsRight,
   RefreshCw,
   MessageSquare,
+  MessageCircle,
+  Loader2,
+  ListChecks,
+  X,
 } from "lucide-react";
+import { IconFileText, IconRefresh } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import axiosClient from "@/lib/axiosClient";
@@ -90,6 +104,9 @@ export default function Page() {
   const [hasFetched, setHasFetched] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+
+  // AI Agent panel state
 
   // Coaching notes state
   const [coachingNotes, setCoachingNotes] = useState<any[]>([]);
@@ -130,7 +147,7 @@ export default function Page() {
           if (coachIds.length > 0) {
             const { data: coaches } = await supabase
               .from("users")
-              .select("id, full_name, email")
+              .select("id, name, email")
               .in("id", coachIds);
 
             if (coaches) {
@@ -287,13 +304,14 @@ export default function Page() {
       // Get current transcript count for skip parameter
       const skip = totalCount;
 
-      // Make request to n8n webhook
-      const webhookUrl = "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89";
-
-      const response = await axiosClient.post(webhookUrl, {
-        userid: userId,
-        skip: skip,
-        token: apiKeyData.fireflies,
+      // Send Inngest event to sync transcripts
+      const response = await axiosClient.post("/api/inngest/trigger", {
+        event: "transcripts/sync.requested",
+        data: {
+          user_id: userId,
+          skip: skip,
+          token: apiKeyData.fireflies,
+        },
       });
 
       if (response.status >= 200 && response.status < 300) {
@@ -354,7 +372,7 @@ export default function Page() {
                               <p className="text-xs text-muted-foreground">
                                 Added by{" "}
                                 <span className="font-medium text-foreground/80">
-                                  {note.coach?.full_name || note.coach?.email || "Admin"}
+                                  {note.coach?.name || note.coach?.email || "Admin"}
                                 </span>
                               </p>
                               <p className="text-xs text-muted-foreground">
@@ -377,18 +395,29 @@ export default function Page() {
                       <CardTitle className="text-base font-medium">
                         Recent Calls
                       </CardTitle>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex items-center gap-2 border-primary/30 text-primary hover:bg-primary/10"
-                        onClick={handleSync}
-                        disabled={syncLoading}
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${syncLoading ? "animate-spin" : ""}`}
-                        />
-                        {syncLoading ? "Syncing..." : "Sync"}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex items-center gap-2 border-violet-500/30 text-violet-600 hover:bg-violet-500/10"
+                          onClick={() => setSyncModalOpen(true)}
+                        >
+                          <ListChecks className="h-4 w-4" />
+                          Sync All & Select
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex items-center gap-2 border-primary/30 text-primary hover:bg-primary/10"
+                          onClick={handleSync}
+                          disabled={syncLoading}
+                        >
+                          <RefreshCw
+                            className={`h-4 w-4 ${syncLoading ? "animate-spin" : ""}`}
+                          />
+                          {syncLoading ? "Syncing..." : "Sync New"}
+                        </Button>
+                      </div>
                     </CardHeader>
 
                     <CardContent>
@@ -450,8 +479,18 @@ export default function Page() {
                       </Table>
 
                       {!isTableLoading && hasFetched && transcripts.length === 0 && (
-                        <div className="text-center text-sm text-muted-foreground py-6">
-                          No transcripts found.
+                        <div className="flex flex-col items-center justify-center py-16 px-4">
+                          <div className="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                            <IconFileText className="h-8 w-8 text-muted-foreground/50" />
+                          </div>
+                          <h3 className="font-semibold text-lg mb-1">No transcripts yet</h3>
+                          <p className="text-muted-foreground text-sm text-center max-w-sm mb-4">
+                            Connect your meeting tools and sync your call recordings to see transcripts here.
+                          </p>
+                          <Button variant="outline" size="sm" onClick={handleSync} disabled={syncLoading}>
+                            {syncLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <IconRefresh className="h-4 w-4 mr-2" />}
+                            Sync Transcripts
+                          </Button>
                         </div>
                       )}
                     </CardContent>
@@ -538,6 +577,44 @@ export default function Page() {
           </div>
         </div>
       </SidebarInset>
+
+      {/* Transcript Sync Modal */}
+      <TranscriptSyncModal
+        open={syncModalOpen}
+        onOpenChange={setSyncModalOpen}
+        onImportComplete={() => {
+          // Refresh transcript list after import
+          setHasFetched(false);
+          setIsVisible(false);
+          setTimeout(() => setIsVisible(true), 100);
+        }}
+      />
+
+      {/* Ask AI Coach - Global Component */}
+      <AskAICoach
+        context={{
+          type: "dashboard",
+          totalCalls: totalCount,
+          avgScore: transcripts.length > 0
+            ? Math.round(
+                transcripts
+                  .filter((t) => t.ai_overall_score != null)
+                  .reduce((acc, t) => acc + (t.ai_overall_score || 0), 0) /
+                (transcripts.filter((t) => t.ai_overall_score != null).length || 1)
+              )
+            : 0,
+          trend: 0,
+          recentActivity: transcripts.slice(0, 5).map((t) => t.title || "Untitled Call"),
+        }}
+        panelTitle="Dashboard Coach"
+        placeholder="Ask about your performance..."
+        quickActions={[
+          "How am I doing this week?",
+          "What should I focus on?",
+          "Show my best performing calls",
+          "Areas to improve",
+        ]}
+      />
     </SidebarProvider>
   );
 }

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { AskAICoach } from "@/components/AskAICoach";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -75,6 +76,7 @@ import {
   UserCircle,
   Link2,
   MessageSquare,
+  MessageCircle,
   Phone,
   TrendingUp,
   Tag,
@@ -156,6 +158,7 @@ export default function TeamPage() {
   const [tagAssignmentMember, setTagAssignmentMember] = useState<UserRow | null>(null);
 
   const [loading, setLoading] = useState(true);
+
 
   // Coaching notes and stats for current user
   const [coachingNotes, setCoachingNotes] = useState<any[]>([]);
@@ -385,7 +388,7 @@ export default function TeamPage() {
           if (coachIds.length > 0) {
             const { data: coaches } = await supabase
               .from("users")
-              .select("id, full_name, email, name")
+              .select("id, email, name")
               .in("id", coachIds);
             if (coaches) {
               coachMap = Object.fromEntries(coaches.map((c) => [c.id, c]));
@@ -1691,7 +1694,7 @@ export default function TeamPage() {
                                   <UserCircle className="h-3 w-3 text-indigo-600" />
                                 </div>
                                 <span className="text-xs text-muted-foreground">
-                                  {note.coach?.full_name || note.coach?.name || note.coach?.email || "Admin"}
+                                  {note.coach?.name || note.coach?.email || "Admin"}
                                 </span>
                               </div>
                               <span className="text-xs text-muted-foreground/70">
@@ -1791,6 +1794,42 @@ export default function TeamPage() {
           )}
           onSave={handleTagsChange}
           isOwner={team.owner === tagAssignmentMember.id}
+        />
+      )}
+
+      {/* AI Coach */}
+      {team && (
+        <AskAICoach
+          context={{
+            type: "team",
+            teamId: team.id,
+            teamName: team.team_name,
+            memberCount: members.length,
+            members: members.map((m) => ({
+              id: m.id,
+              name: m.name,
+              email: m.email,
+              role: memberTags.some(
+                (mt) =>
+                  mt.user_id === m.id &&
+                  mt.team_id === team.id &&
+                  tags.find((t) => t.id === mt.tag_id)?.tag_name.toLowerCase() === "admin"
+              )
+                ? "admin"
+                : "member",
+            })),
+            pendingInvitations: pendingInvitations.length,
+            myStats: myStats,
+            coachingNotes: coachingNotes.length,
+          }}
+          panelTitle="Team Coach"
+          placeholder="Ask about your team performance, members, coaching..."
+          quickActions={[
+            "How is my team performing?",
+            "Who needs coaching?",
+            "Show team statistics",
+            "Suggest improvements",
+          ]}
         />
       )}
     </SidebarProvider>

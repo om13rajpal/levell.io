@@ -93,7 +93,7 @@ function CallbackContent() {
           const { error: insertError } = await supabase.from("users").insert([
             {
               id,
-              full_name: name,
+              name, // Column is 'name', not 'full_name'
               email,
               last_login_time,
               created_at: new Date().toISOString(),
@@ -127,8 +127,8 @@ function CallbackContent() {
           is_logged_in: true,
         };
 
-        // Also update full_name, email, and avatar if they come from OAuth
-        if (name) updateData.full_name = name;
+        // Also update name, email, and avatar if they come from OAuth
+        if (name) updateData.name = name;
         if (email) updateData.email = email;
         if (avatar_url) updateData.avatar_url = avatar_url;
 

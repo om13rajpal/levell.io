@@ -4,7 +4,7 @@
 
 import type React from "react";
 import { useParams } from "next/navigation";
-import { useEffect, useState, useMemo, memo, lazy, Suspense } from "react";
+import { useEffect, useState, useMemo, memo, lazy, Suspense, useCallback } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,12 +55,21 @@ import {
   IconRocket,
   IconEye,
   IconRepeat,
+  IconFocus2,
+  IconBrain,
+  IconNotes,
+  IconBook,
+  IconPhone,
+  IconMinus,
+  IconClock,
 } from "@tabler/icons-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { supabase } from "@/lib/supabaseClient";
+import dynamic from "next/dynamic";
+import { AskAICoach } from "@/components/AskAICoach";
 /* ------------------------------------------------------------- */
 /* Helpers */
 /* ------------------------------------------------------------- */
@@ -107,20 +116,25 @@ const CATEGORY_LABELS: Record<string, string> = {
   next_steps_and_momentum: "Next Steps & Momentum",
   next_steps_momentum: "Next Steps & Momentum",
   objection_handling: "Objection Handling",
-  // V2 categories
-  pain_points: "Pain Points",
-  objections: "Objections",
-  engagement: "Engagement",
-  next_steps: "Next Steps",
-  call_structure: "Call Structure",
-  rep_technique: "Rep Technique",
+  // V2 categories - improved labels
+  pain_points: "Pain Point Discovery",
+  objections: "Objection Handling",
+  engagement: "Prospect Engagement",
+  next_steps: "Next Steps & Follow-up",
+  call_structure: "Call Flow & Structure",
+  rep_technique: "Sales Technique",
 };
 
-const DEAL_SIGNAL_CONFIG = {
+const DEAL_SIGNAL_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
   healthy: {
     label: "Healthy",
     color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400 border-emerald-300",
     icon: IconCheck,
+  },
+  neutral: {
+    label: "Neutral",
+    color: "bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-400 border-slate-300",
+    icon: IconMinus,
   },
   at_risk: {
     label: "At Risk",
@@ -131,6 +145,39 @@ const DEAL_SIGNAL_CONFIG = {
     label: "Critical",
     color: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400 border-rose-300",
     icon: IconAlertTriangle,
+  },
+};
+
+const CALL_TYPE_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
+  discovery: {
+    label: "Discovery",
+    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400 border-blue-300",
+    icon: IconSearch,
+  },
+  demo: {
+    label: "Demo",
+    color: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-400 border-purple-300",
+    icon: IconEye,
+  },
+  coaching: {
+    label: "Coaching",
+    color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-400 border-indigo-300",
+    icon: IconBrain,
+  },
+  negotiation: {
+    label: "Negotiation",
+    color: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 border-amber-300",
+    icon: IconTarget,
+  },
+  follow_up: {
+    label: "Follow-up",
+    color: "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-400 border-teal-300",
+    icon: IconPhone,
+  },
+  closing: {
+    label: "Closing",
+    color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400 border-emerald-300",
+    icon: IconCheck,
   },
 };
 
@@ -169,22 +216,37 @@ const CallHeader = memo(({
   firefliesId,
   aiOverallScore,
   dealSignal,
+  callType,
+  analyzedAt,
 }: {
   title: string;
   createdAt: string;
   duration: string;
   firefliesId?: string;
   aiOverallScore: number | null;
-  dealSignal?: "healthy" | "at_risk" | "critical" | null;
+  dealSignal?: string | null;
+  callType?: string | null;
+  analyzedAt?: string | null;
 }) => {
   const signalConfig = dealSignal ? DEAL_SIGNAL_CONFIG[dealSignal] : null;
   const SignalIcon = signalConfig?.icon;
+  const typeConfig = callType ? CALL_TYPE_CONFIG[callType] : null;
+  const TypeIcon = typeConfig?.icon;
 
   return (
     <div className="flex items-start justify-between flex-wrap gap-6">
       <div className="space-y-2">
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+          {typeConfig && TypeIcon && (
+            <Badge
+              variant="outline"
+              className={`${typeConfig.color} border flex items-center gap-1.5 px-2.5 py-1`}
+            >
+              <TypeIcon className="h-3.5 w-3.5" />
+              {typeConfig.label}
+            </Badge>
+          )}
           {signalConfig && SignalIcon && (
             <Badge
               variant="outline"
@@ -199,6 +261,15 @@ const CallHeader = memo(({
           <span>{createdAt}</span>
           <span>·</span>
           <span>{duration}</span>
+          {analyzedAt && (
+            <>
+              <span>·</span>
+              <span className="flex items-center gap-1">
+                <IconClock className="h-3.5 w-3.5" />
+                Analyzed {new Date(analyzedAt).toLocaleDateString()}
+              </span>
+            </>
+          )}
         </div>
         {firefliesId && (
           <p className="text-xs text-muted-foreground/60">
@@ -249,27 +320,28 @@ const CategoryBreakdown = memo(({ categoryEntries }: { categoryEntries: [string,
   if (categoryEntries.length === 0) return null;
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold flex items-center gap-2">
-        <IconTrendingUp className="h-5 w-5 text-indigo-500" />
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold flex items-center gap-2">
+        <IconTrendingUp className="h-6 w-6 text-indigo-500" />
         Performance Breakdown
       </h2>
 
-      <Accordion type="multiple" className="space-y-3">
+      <Accordion type="multiple" className="space-y-4">
         {categoryEntries.map(([key, value]: any, index: number) => {
           const score = value.score ?? 0;
-          const reason = value.reason ?? "";
+          // Support both V1 format (reason) and V2 format (one_liner)
+          const reason = value.one_liner ?? value.reason ?? "";
 
           return (
             <AccordionItem
               key={index}
               value={`category-${index}`}
-              className="border border-border/60 rounded-lg px-4 bg-card/50 hover:bg-card/80 transition-colors"
+              className="border border-border/60 rounded-xl px-5 py-1 bg-card/50 hover:bg-card/80 transition-colors"
             >
-              <AccordionTrigger className="hover:no-underline py-4">
+              <AccordionTrigger className="hover:no-underline py-5">
                 <div className="flex items-center justify-between w-full pr-4">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold ${
+                  <div className="flex items-center gap-4">
+                    <div className={`h-12 w-12 rounded-full flex items-center justify-center text-base font-bold ${
                       score >= 80
                         ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400"
                         : score >= 60
@@ -278,25 +350,25 @@ const CategoryBreakdown = memo(({ categoryEntries }: { categoryEntries: [string,
                     }`}>
                       {score}
                     </div>
-                    <span className="font-medium text-sm">
+                    <span className="font-semibold text-base">
                       {formatCategoryLabel(key)}
                     </span>
                   </div>
                   <Progress
                     value={score}
-                    className={`h-2 w-32 hidden sm:block ${score >= 80 ? "[&>div]:bg-emerald-500" : score >= 60 ? "[&>div]:bg-amber-500" : "[&>div]:bg-rose-500"}`}
+                    className={`h-2.5 w-36 hidden sm:block ${score >= 80 ? "[&>div]:bg-emerald-500" : score >= 60 ? "[&>div]:bg-amber-500" : "[&>div]:bg-rose-500"}`}
                   />
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="pb-4">
+              <AccordionContent className="pb-5">
                 {reason ? (
-                  <div className="pt-2 pl-13">
-                    <p className="text-sm text-muted-foreground leading-relaxed">
+                  <div className="pt-2 pl-16">
+                    <p className="text-base text-muted-foreground leading-relaxed">
                       {reason}
                     </p>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground italic pt-2">
+                  <p className="text-base text-muted-foreground italic pt-2 pl-16">
                     No detailed feedback available for this category.
                   </p>
                 )}
@@ -392,41 +464,41 @@ const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null;
 
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <IconHelp className="h-5 w-5 text-indigo-500" />
-          <h2 className="text-lg font-semibold">Call Score Breakdown</h2>
+        <div className="flex items-center gap-3">
+          <IconHelp className="h-6 w-6 text-indigo-500" />
+          <h2 className="text-xl font-bold">Call Score Breakdown</h2>
         </div>
-        <Badge variant="outline" className={`${scoreInfo.color} border-current`}>
+        <Badge variant="outline" className={`${scoreInfo.color} border-current text-sm px-3 py-1`}>
           {scoreInfo.level}
         </Badge>
       </div>
-      <p className="text-sm text-muted-foreground">
+      <p className="text-base text-muted-foreground">
         Understanding how your call is scored
       </p>
 
       {/* Score Display */}
-      <div className="flex items-center gap-4">
-        <div className={`h-20 w-20 rounded-2xl ${scoreInfo.bgColor} flex items-center justify-center`}>
-          <span className={`text-3xl font-bold ${scoreInfo.color}`}>{score ?? "—"}</span>
+      <div className="flex items-center gap-5">
+        <div className={`h-24 w-24 rounded-2xl ${scoreInfo.bgColor} flex items-center justify-center`}>
+          <span className={`text-4xl font-bold ${scoreInfo.color}`}>{score ?? "—"}</span>
         </div>
         <div className="flex-1">
-          <p className="font-medium">Overall Call Score</p>
-          <p className="text-sm text-muted-foreground">Based on AI analysis of this call</p>
+          <p className="font-semibold text-lg">Overall Call Score</p>
+          <p className="text-base text-muted-foreground">Based on AI analysis of this call</p>
         </div>
       </div>
 
       {/* Score Reason Section */}
       {scoreReason && (
         <Card className="bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800">
-          <CardContent className="pt-4">
-            <div className="flex items-start gap-3">
-              <IconSparkles className="h-5 w-5 text-indigo-500 shrink-0 mt-0.5" />
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-start gap-4">
+              <IconSparkles className="h-6 w-6 text-indigo-500 shrink-0 mt-0.5" />
               <div>
-                <h4 className="text-sm font-semibold mb-2">Score Analysis</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <h4 className="text-base font-semibold mb-2">Score Analysis</h4>
+                <p className="text-base text-muted-foreground leading-relaxed">
                   {scoreReason}
                 </p>
               </div>
@@ -436,42 +508,42 @@ const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null;
       )}
 
       {/* Scoring Criteria */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
+      <div className="space-y-4">
+        <h3 className="text-base font-semibold flex items-center gap-2">
+          <IconInfoCircle className="h-5 w-5 text-muted-foreground" />
           Scoring Criteria
-          <span className="text-xs font-normal text-muted-foreground/70 ml-1">(hover for details)</span>
+          <span className="text-sm font-normal text-muted-foreground/70 ml-1">(hover for details)</span>
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {scoringCriteria.map((criteria, index) => {
             const IconComponent = criteria.icon;
             return (
               <Tooltip key={index} delayDuration={100}>
                 <TooltipTrigger asChild>
-                  <div className={`group relative p-4 rounded-xl bg-gradient-to-br ${criteria.color} border ${criteria.borderColor} hover:shadow-lg hover:scale-[1.02] transition-all duration-200 cursor-help overflow-hidden`}>
+                  <div className={`group relative p-5 rounded-xl bg-gradient-to-br ${criteria.color} border ${criteria.borderColor} hover:shadow-lg hover:scale-[1.02] transition-all duration-200 cursor-help overflow-hidden`}>
                     {/* Background decoration */}
                     <div className="absolute top-0 right-0 opacity-[0.08] transform translate-x-2 -translate-y-2">
-                      <IconComponent className="h-16 w-16" />
+                      <IconComponent className="h-20 w-20" />
                     </div>
 
                     <div className="relative z-10">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2.5">
-                          <span className={`flex items-center justify-center w-9 h-9 rounded-lg ${criteria.iconBg}`}>
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className={`flex items-center justify-center w-10 h-10 rounded-lg ${criteria.iconBg}`}>
                             <IconComponent className={`h-5 w-5 ${criteria.iconColor}`} />
                           </span>
-                          <span className="text-sm font-semibold leading-tight">{criteria.name}</span>
+                          <span className="text-sm font-bold leading-tight">{criteria.name}</span>
                         </div>
-                        <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-bold shrink-0 bg-background/80">
+                        <Badge variant="secondary" className="text-xs px-2.5 py-1 font-bold shrink-0 bg-background/80">
                           {criteria.weight}%
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed pl-[46px]">{criteria.description}</p>
+                      <p className="text-sm text-muted-foreground leading-relaxed pl-[52px]">{criteria.description}</p>
                     </div>
 
                     {/* Hover indicator */}
                     <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50" />
+                      <IconInfoCircle className="h-4 w-4 text-muted-foreground/50" />
                     </div>
                   </div>
                 </TooltipTrigger>
@@ -480,17 +552,17 @@ const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null;
                   className="max-w-sm p-0 bg-popover border shadow-xl rounded-xl overflow-hidden"
                   sideOffset={8}
                 >
-                  <div className={`px-4 py-2.5 bg-gradient-to-r ${criteria.color} border-b`}>
+                  <div className={`px-4 py-3 bg-gradient-to-r ${criteria.color} border-b`}>
                     <div className="flex items-center gap-2">
                       <IconComponent className={`h-5 w-5 ${criteria.iconColor}`} />
-                      <span className="font-semibold text-sm">{criteria.name}</span>
-                      <Badge variant="outline" className="ml-auto text-[10px] px-1.5 py-0 border-current">
+                      <span className="font-semibold text-base">{criteria.name}</span>
+                      <Badge variant="outline" className="ml-auto text-xs px-2 py-0.5 border-current">
                         {criteria.weight}% weight
                       </Badge>
                     </div>
                   </div>
-                  <div className="px-4 py-3">
-                    <p className="text-sm leading-relaxed text-muted-foreground">{criteria.tooltip}</p>
+                  <div className="px-4 py-4">
+                    <p className="text-base leading-relaxed text-muted-foreground">{criteria.tooltip}</p>
                   </div>
                 </TooltipContent>
               </Tooltip>
@@ -500,9 +572,9 @@ const ScoreExplainerCard = memo(({ score, scoreReason }: { score: number | null;
       </div>
 
       {/* Footer Note */}
-      <div className="pt-2 border-t border-border/50">
-        <div className="flex items-start gap-2 text-xs text-muted-foreground">
-          <IconCircleCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+      <div className="pt-4 border-t border-border/50">
+        <div className="flex items-start gap-3 text-sm text-muted-foreground">
+          <IconCircleCheck className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
           <p>Scores are calculated using AI analysis of call transcripts, evaluating sales methodology adherence, customer engagement, and conversion potential.</p>
         </div>
       </div>
@@ -527,22 +599,22 @@ const TranscriptDisplay = memo(({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Full Transcript</h2>
+      <h2 className="text-xl font-bold">Full Transcript</h2>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {displaySentences.map((s: any, i: number) => (
           <div
             key={i}
-            className="flex gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+            className="flex gap-4 p-4 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors"
           >
-            <span className="text-[10px] px-2 py-1 rounded bg-muted text-muted-foreground shrink-0 h-fit">
+            <span className="text-xs px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground shrink-0 h-fit font-medium">
               {formatTimestamp(s.start_time)}
             </span>
             <div className="min-w-0">
-              <span className="font-medium text-sm text-primary">
+              <span className="font-semibold text-base text-primary">
                 {s.speaker_name}
               </span>
-              <p className="text-sm text-muted-foreground mt-0.5">
+              <p className="text-base text-muted-foreground mt-1 leading-relaxed">
                 {s.text}
               </p>
             </div>
@@ -551,19 +623,20 @@ const TranscriptDisplay = memo(({
       </div>
 
       {sentences.length > 15 && (
-        <div className="flex justify-center pt-3">
+        <div className="flex justify-center pt-4">
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             onClick={onToggle}
+            className="text-base px-6"
           >
             {expanded ? (
               <>
-                Show Less <IconChevronUp className="ml-1 h-4 w-4" />
+                Show Less <IconChevronUp className="ml-2 h-5 w-5" />
               </>
             ) : (
               <>
-                Show All {sentences.length} Messages <IconChevronDown className="ml-1 h-4 w-4" />
+                Show All {sentences.length} Messages <IconChevronDown className="ml-2 h-5 w-5" />
               </>
             )}
           </Button>
@@ -573,6 +646,180 @@ const TranscriptDisplay = memo(({
   );
 });
 TranscriptDisplay.displayName = "TranscriptDisplay";
+
+// Key Insights Panel - prominent summary of coaching insights
+const KeyInsightsPanel = memo(({
+  whatWorked,
+  missedOpportunities,
+  dealRisks,
+  nextCallPlan,
+  categoryScores,
+}: {
+  whatWorked: any[];
+  missedOpportunities: any[];
+  dealRisks: any[];
+  nextCallPlan: any[];
+  categoryScores: Record<string, any> | null;
+}) => {
+  const hasAnyContent = whatWorked.length > 0 || missedOpportunities.length > 0 || dealRisks.length > 0 || nextCallPlan.length > 0;
+  if (!hasAnyContent) return null;
+
+  // Extract pain point score from category scores
+  const painScore = categoryScores?.pain_points ?? categoryScores?.discovery_qualification ?? null;
+  const objectionScore = categoryScores?.objections ?? categoryScores?.objection_handling ?? null;
+  const nextStepsScore = categoryScores?.next_steps ?? categoryScores?.next_steps_momentum ?? null;
+
+  const getSeverityBadge = (score: number | null) => {
+    if (score === null) return null;
+    if (score >= 80) return <Badge variant="outline" className="text-[10px] border-emerald-400 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30">Strong</Badge>;
+    if (score >= 60) return <Badge variant="outline" className="text-[10px] border-amber-400 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30">Moderate</Badge>;
+    return <Badge variant="outline" className="text-[10px] border-rose-400 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/30">Needs Work</Badge>;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <IconEye className="h-6 w-6 text-indigo-500" />
+        <h2 className="text-2xl font-bold tracking-tight">Key Insights at a Glance</h2>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* What Worked - Green */}
+        {whatWorked.length > 0 && (
+          <Card className="border-l-4 border-l-emerald-500 border-emerald-200/50 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/10">
+            <CardHeader className="pb-3 pt-5">
+              <CardTitle className="flex items-center gap-3 text-base font-bold text-emerald-700 dark:text-emerald-300">
+                <div className="h-9 w-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center">
+                  <IconCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                What Worked
+                <Badge variant="secondary" className="ml-auto text-xs bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">{whatWorked.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-5">
+              <ul className="space-y-2.5">
+                {whatWorked.slice(0, 3).map((item: any, i: number) => {
+                  const text = typeof item === "string" ? item : item.point || item.moment || item.behavior_skill || item.text || "";
+                  return (
+                    <li key={i} className="text-sm text-emerald-800 dark:text-emerald-200 flex items-start gap-2.5">
+                      <span className="text-emerald-500 shrink-0 mt-0.5 text-base">&#10003;</span>
+                      <span className="line-clamp-2">{text}</span>
+                    </li>
+                  );
+                })}
+                {whatWorked.length > 3 && (
+                  <li className="text-xs text-emerald-600 dark:text-emerald-400 pl-6">+{whatWorked.length - 3} more below</li>
+                )}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Missed Opportunities - Amber */}
+        {missedOpportunities.length > 0 && (
+          <Card className="border-l-4 border-l-amber-500 border-amber-200/50 dark:border-amber-500/20 bg-amber-50/40 dark:bg-amber-950/10">
+            <CardHeader className="pb-3 pt-5">
+              <CardTitle className="flex items-center gap-3 text-base font-bold text-amber-700 dark:text-amber-300">
+                <div className="h-9 w-9 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center">
+                  <IconBulb className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                Missed Opportunities
+                {getSeverityBadge(painScore)}
+                <Badge variant="secondary" className="ml-auto text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300">{missedOpportunities.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-5">
+              <ul className="space-y-2.5">
+                {missedOpportunities.slice(0, 3).map((item: any, i: number) => {
+                  const text = typeof item === "string" ? item : item.moment || item.moment_in_call || "";
+                  return (
+                    <li key={i} className="text-sm text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+                      <span className="text-amber-500 shrink-0 mt-0.5 text-base font-bold">!</span>
+                      <span className="line-clamp-2">{text}</span>
+                    </li>
+                  );
+                })}
+                {missedOpportunities.length > 3 && (
+                  <li className="text-xs text-amber-600 dark:text-amber-400 pl-6">+{missedOpportunities.length - 3} more below</li>
+                )}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Deal Risk Alerts - Red */}
+        {dealRisks.length > 0 && (
+          <Card className="border-l-4 border-l-rose-500 border-rose-200/50 dark:border-rose-500/20 bg-rose-50/40 dark:bg-rose-950/10">
+            <CardHeader className="pb-3 pt-5">
+              <CardTitle className="flex items-center gap-3 text-base font-bold text-rose-700 dark:text-rose-300">
+                <div className="h-9 w-9 rounded-lg bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center">
+                  <IconAlertTriangle className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                Deal Risk Alerts
+                <Badge variant="secondary" className="ml-auto text-xs bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300">{dealRisks.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-5">
+              <ul className="space-y-2.5">
+                {dealRisks.slice(0, 3).map((item: any, i: number) => {
+                  const text = typeof item === "string" ? item : item.risk_type || item.risk_description || "";
+                  return (
+                    <li key={i} className="text-sm text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+                      <IconAlertTriangle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                      <span className="line-clamp-2">{text}</span>
+                    </li>
+                  );
+                })}
+                {dealRisks.length > 3 && (
+                  <li className="text-xs text-rose-600 dark:text-rose-400 pl-6">+{dealRisks.length - 3} more below</li>
+                )}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Next Call Actions - Blue */}
+        {nextCallPlan.length > 0 && (
+          <Card className="border-l-4 border-l-blue-500 border-blue-200/50 dark:border-blue-500/20 bg-blue-50/40 dark:bg-blue-950/10">
+            <CardHeader className="pb-3 pt-5">
+              <CardTitle className="flex items-center gap-3 text-base font-bold text-blue-700 dark:text-blue-300">
+                <div className="h-9 w-9 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+                  <IconRocket className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                Next Call Actions
+                {getSeverityBadge(nextStepsScore)}
+                <Badge variant="secondary" className="ml-auto text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">{nextCallPlan.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-5">
+              <ul className="space-y-2.5">
+                {nextCallPlan.slice(0, 3).map((item: any, i: number) => {
+                  const text = typeof item === "string" ? item : item.action || "";
+                  const priority = typeof item === "string" ? null : item.priority;
+                  return (
+                    <li key={i} className="text-sm text-blue-800 dark:text-blue-200 flex items-start gap-2.5">
+                      <span className="text-blue-500 shrink-0 mt-0.5 font-semibold">{i + 1}.</span>
+                      <span className="line-clamp-2 flex-1">{text}</span>
+                      {priority && (
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0.5 shrink-0 ${
+                          priority === "high" ? "border-rose-300 text-rose-600" : priority === "medium" ? "border-amber-300 text-amber-600" : "border-slate-300 text-slate-600"
+                        }`}>{priority}</Badge>
+                      )}
+                    </li>
+                  );
+                })}
+                {nextCallPlan.length > 3 && (
+                  <li className="text-xs text-blue-600 dark:text-blue-400 pl-6">+{nextCallPlan.length - 3} more below</li>
+                )}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+});
+KeyInsightsPanel.displayName = "KeyInsightsPanel";
 
 /* ------------------------------------------------------------- */
 
@@ -596,29 +843,106 @@ export default function CallDetailPage() {
   const timeline = useMemo(() => (row?.meeting_attendance as any[]) ?? [], [row?.meeting_attendance]);
   const sentences = useMemo(() => (row?.sentences as any[]) ?? [], [row?.sentences]);
 
+  // Helper to safely parse JSON from database (handles string JSON, objects, and invalid values)
+  const parseJSON = <T,>(data: unknown, fallback: T): T => {
+    if (!data) return fallback;
+    if (typeof data === 'string') {
+      try {
+        return JSON.parse(data) as T;
+      } catch {
+        return fallback;
+      }
+    }
+    return data as T;
+  };
+
+  // Helper to ensure array type (handles string JSON, objects, and non-array values)
+  const ensureArray = (data: unknown): any[] => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (typeof data === "string") {
+      try {
+        const parsed = JSON.parse(data);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   const aiOverallScore = useMemo(() => row?.ai_overall_score ?? null, [row?.ai_overall_score]);
   const aiScoreReason = useMemo(() => row?.ai_score_reason ?? null, [row?.ai_score_reason]);
   const aiSummary = useMemo(() => row?.ai_summary ?? null, [row?.ai_summary]);
-  const aiCategoryBreakdown = useMemo(() => row?.ai_category_breakdown ?? {}, [row?.ai_category_breakdown]);
-  const aiWhatWorked = useMemo(() => row?.ai_what_worked ?? [], [row?.ai_what_worked]);
-  const aiImprovement = useMemo(() => row?.ai_improvement_areas ?? [], [row?.ai_improvement_areas]);
-  const aiMissed = useMemo(() => row?.ai_missed_opportunities ?? [], [row?.ai_missed_opportunities]);
-  const aiQuestions = useMemo(() => row?.ai_questions ?? [], [row?.ai_questions]);
-  const aiQualGaps = useMemo(() => row?.ai_qualification_gaps ?? [], [row?.ai_qualification_gaps]);
-  const aiNextPlan = useMemo(() => row?.ai_next_call_game_plan ?? [], [row?.ai_next_call_game_plan]);
-  const aiRisks = useMemo(() => row?.ai_deal_risk_alerts ?? [], [row?.ai_deal_risk_alerts]);
+  const aiCategoryBreakdown = useMemo(() => parseJSON<Record<string, any>>(row?.ai_category_breakdown, {}), [row?.ai_category_breakdown]);
+
+  const aiWhatWorked = useMemo(() => ensureArray(row?.ai_what_worked), [row?.ai_what_worked]);
+  const aiImprovement = useMemo(() => ensureArray(row?.ai_improvement_areas), [row?.ai_improvement_areas]);
+  const aiMissed = useMemo(() => ensureArray(row?.ai_missed_opportunities), [row?.ai_missed_opportunities]);
+  const aiQuestions = useMemo(() => ensureArray(row?.ai_questions), [row?.ai_questions]);
+  const aiQualGaps = useMemo(() => ensureArray(row?.ai_qualification_gaps), [row?.ai_qualification_gaps]);
+  const aiNextPlan = useMemo(() => ensureArray(row?.ai_next_call_game_plan), [row?.ai_next_call_game_plan]);
+  const aiRisks = useMemo(() => ensureArray(row?.ai_deal_risk_alerts), [row?.ai_deal_risk_alerts]);
 
   // V2 fields (with V1 fallbacks for backward compatibility)
-  const dealSignal = useMemo(() => row?.deal_signal ?? null, [row?.deal_signal]);
-  const aiAnalysis = useMemo(() => row?.ai_analysis ?? null, [row?.ai_analysis]);
-  const aiCategoryScores = useMemo(() => row?.ai_category_scores ?? null, [row?.ai_category_scores]);
+  const dealSignal = useMemo(() => row?.ai_deal_signal ?? row?.deal_signal ?? null, [row?.ai_deal_signal, row?.deal_signal]);
+  const dealSignalReason = useMemo(() => row?.ai_deal_signal_reason ?? null, [row?.ai_deal_signal_reason]);
+  const aiAnalysis = useMemo(() => {
+    const data = row?.ai_analysis;
+    if (!data) return null;
+    // Parse if it's a JSON string
+    if (typeof data === "string") {
+      try { return JSON.parse(data); } catch { return null; }
+    }
+    return data;
+  }, [row?.ai_analysis]);
+  const aiCategoryScores = useMemo(() => {
+    const data = row?.ai_category_scores;
+    if (!data) return null;
+    // Parse if it's a JSON string
+    if (typeof data === "string") {
+      try { return JSON.parse(data); } catch { return null; }
+    }
+    return data;
+  }, [row?.ai_category_scores]);
+
+  // V3 fields - New coaching enhancements
+  const callType = useMemo(() => row?.ai_call_type ?? null, [row?.ai_call_type]);
+  const analyzedAt = useMemo(() => row?.ai_analyzed_at ?? null, [row?.ai_analyzed_at]);
+  const theOneThing = useMemo(() => {
+    const data = row?.ai_the_one_thing;
+    if (!data) return null;
+    // Parse if it's a string
+    if (typeof data === "string") {
+      try { return JSON.parse(data); } catch { return null; }
+    }
+    return data;
+  }, [row?.ai_the_one_thing]);
+  const behavioralPatterns = useMemo(() => {
+    const data = row?.ai_behavioral_patterns;
+    if (!data) return [];
+    // Parse if it's a string
+    if (typeof data === "string") {
+      try { return JSON.parse(data); } catch { return []; }
+    }
+    return Array.isArray(data) ? data : [];
+  }, [row?.ai_behavioral_patterns]);
+  const coachingNotes = useMemo(() => {
+    const data = row?.ai_coaching_notes;
+    if (!data) return null;
+    // Parse if it's a string
+    if (typeof data === "string") {
+      try { return JSON.parse(data); } catch { return null; }
+    }
+    return data;
+  }, [row?.ai_coaching_notes]);
 
   // V2 coaching sections from ai_analysis (with V1 fallbacks)
-  const patternsToWatch = useMemo(() => aiAnalysis?.patterns_to_watch ?? [], [aiAnalysis]);
-  const v2WhatWorked = useMemo(() => aiAnalysis?.what_worked ?? [], [aiAnalysis]);
-  const v2MissedOpportunities = useMemo(() => aiAnalysis?.missed_opportunities ?? [], [aiAnalysis]);
-  const v2DealRisks = useMemo(() => aiAnalysis?.deal_risk_alerts ?? [], [aiAnalysis]);
-  const v2NextCallPlan = useMemo(() => aiAnalysis?.next_call_game_plan ?? [], [aiAnalysis]);
+  const patternsToWatch = useMemo(() => ensureArray(aiAnalysis?.patterns_to_watch), [aiAnalysis]);
+  const v2WhatWorked = useMemo(() => ensureArray(aiAnalysis?.what_worked), [aiAnalysis]);
+  const v2MissedOpportunities = useMemo(() => ensureArray(aiAnalysis?.missed_opportunities), [aiAnalysis]);
+  const v2DealRisks = useMemo(() => ensureArray(aiAnalysis?.deal_risk_alerts), [aiAnalysis]);
+  const v2NextCallPlan = useMemo(() => ensureArray(aiAnalysis?.next_call_game_plan), [aiAnalysis]);
 
   // Use V2 data if available, otherwise fall back to V1
   const effectiveWhatWorked = useMemo(() =>
@@ -646,6 +970,14 @@ export default function CallDetailPage() {
     }
     return Object.entries(aiCategoryBreakdown);
   }, [aiCategoryScores, aiCategoryBreakdown]);
+
+  // Full transcript text for the inline AI coach panel
+  const transcriptFullText = useMemo(() => {
+    if (!sentences || sentences.length === 0) return undefined;
+    return sentences
+      .map((s: any) => `${s.speaker_name || "Unknown"}: ${s.text || ""}`)
+      .join("\n");
+  }, [sentences]);
 
   /* ------------------------------------------------------------- */
   /* Data loading - always fetch live to avoid localStorage quota issues */
@@ -697,7 +1029,7 @@ export default function CallDetailPage() {
         <AppSidebar variant="inset" />
         <SidebarInset>
           <SiteHeader />
-          <div className="mx-auto max-w-6xl p-6 space-y-10">
+          <div className="mx-auto max-w-6xl p-6 space-y-6">
             {/* Header skeleton */}
             <div className="flex items-start justify-between flex-wrap gap-6">
               <div className="space-y-3 flex-1">
@@ -763,7 +1095,7 @@ export default function CallDetailPage() {
       <SidebarInset>
         <SiteHeader />
 
-        <div className="mx-auto max-w-6xl p-6 space-y-10">
+        <div className="mx-auto max-w-6xl p-6 space-y-6">
           {/* ============================================================
               HEADER WITH SCORE (Memoized)
           ============================================================ */}
@@ -774,6 +1106,8 @@ export default function CallDetailPage() {
             firefliesId={row.fireflies_id}
             aiOverallScore={aiOverallScore}
             dealSignal={dealSignal}
+            callType={callType}
+            analyzedAt={analyzedAt}
           />
 
           {/* ============================================================
@@ -781,14 +1115,14 @@ export default function CallDetailPage() {
           ============================================================ */}
           {aiSummary ? (
             <Card className="border-indigo-200/50 dark:border-indigo-500/20 bg-gradient-to-br from-indigo-50/50 to-transparent dark:from-indigo-950/20">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <IconSparkles className="h-5 w-5 text-indigo-500" />
+              <CardHeader className="pb-4 pt-6">
+                <CardTitle className="flex items-center gap-3 text-xl font-bold">
+                  <IconSparkles className="h-6 w-6 text-indigo-500" />
                   AI Summary
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm leading-relaxed text-muted-foreground">
+              <CardContent className="pb-6">
+                <p className="text-base leading-relaxed text-muted-foreground">
                   {aiSummary}
                 </p>
               </CardContent>
@@ -843,32 +1177,273 @@ export default function CallDetailPage() {
           )}
 
           {/* ============================================================
-              CATEGORY BREAKDOWN (Memoized)
+              DEAL SIGNAL REASON
+          ============================================================ */}
+          {dealSignalReason && (
+            <Card className="border-slate-200/50 dark:border-slate-500/20 bg-gradient-to-br from-slate-50/50 to-transparent dark:from-slate-950/20">
+              <CardContent className="pt-4">
+                <div className="flex items-start gap-3">
+                  <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800/50 flex items-center justify-center shrink-0">
+                    <IconTarget className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold mb-1">Deal Signal Analysis</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      {dealSignalReason}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ============================================================
+              SCORE EXPLAINER CARD (Call Score Breakdown) - MOVED UP
+          ============================================================ */}
+          <ScoreExplainerCard score={aiOverallScore} scoreReason={aiScoreReason} />
+
+          {/* ============================================================
+              CATEGORY BREAKDOWN / PERFORMANCE BREAKDOWN - MOVED UP
           ============================================================ */}
           <CategoryBreakdown categoryEntries={categoryEntries} />
 
           {/* ============================================================
-              SCORE EXPLAINER CARD
+              THE ONE THING - Priority Focus Area
           ============================================================ */}
-          <ScoreExplainerCard score={aiOverallScore} scoreReason={aiScoreReason} />
+          {theOneThing && (
+            <Card className="border-l-4 border-l-violet-500 border-violet-200/50 dark:border-violet-500/20 bg-gradient-to-br from-violet-50/50 to-transparent dark:from-violet-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <div className="h-8 w-8 rounded-lg bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center">
+                    <IconFocus2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                  </div>
+                  <span className="text-violet-700 dark:text-violet-300">The One Thing</span>
+                  <Badge variant="outline" className="ml-2 text-[10px] border-violet-300 text-violet-600 dark:text-violet-400">
+                    Priority Focus
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {theOneThing.focus && (
+                  <div className="bg-violet-100/50 dark:bg-violet-900/30 rounded-xl p-4 border border-violet-200/50 dark:border-violet-800/50">
+                    <p className="text-base font-semibold text-violet-800 dark:text-violet-200">
+                      {theOneThing.focus}
+                    </p>
+                  </div>
+                )}
+                <div className="grid md:grid-cols-3 gap-4">
+                  {theOneThing.why && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                        <IconBulb className="h-3.5 w-3.5 text-amber-500" />
+                        Why It Matters
+                      </h4>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        {theOneThing.why}
+                      </p>
+                    </div>
+                  )}
+                  {theOneThing.how && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                        <IconTarget className="h-3.5 w-3.5 text-blue-500" />
+                        How To Do It
+                      </h4>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        {theOneThing.how}
+                      </p>
+                    </div>
+                  )}
+                  {theOneThing.measure && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                        <IconCheck className="h-3.5 w-3.5 text-emerald-500" />
+                        Success Looks Like
+                      </h4>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        {theOneThing.measure}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ============================================================
+              BEHAVIORAL PATTERNS
+          ============================================================ */}
+          {behavioralPatterns.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-orange-50/60 dark:bg-orange-950/20 border-l-4 border-l-orange-500">
+                <div className="h-8 w-8 rounded-lg bg-orange-100 dark:bg-orange-900/50 flex items-center justify-center">
+                  <IconRepeat className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                </div>
+                <h2 className="text-xl font-bold tracking-tight text-orange-800 dark:text-orange-200">Behavioral Patterns</h2>
+                <Badge variant="secondary" className="ml-auto text-xs bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300">{behavioralPatterns.length} patterns</Badge>
+              </div>
+
+              <div className="space-y-3">
+                {behavioralPatterns.map((pattern: any, i: number) => (
+                  <Card
+                    key={i}
+                    className="border-orange-200/50 dark:border-orange-500/20 bg-orange-50/30 dark:bg-orange-950/10"
+                  >
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base text-orange-700 dark:text-orange-300">
+                        {pattern.pattern}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      {pattern.instances && (
+                        <div>
+                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                            When It Happened
+                          </p>
+                          <p className="text-muted-foreground">{pattern.instances}</p>
+                        </div>
+                      )}
+                      {pattern.impact && (
+                        <div>
+                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                            Impact
+                          </p>
+                          <p className="text-orange-800 dark:text-orange-200">{pattern.impact}</p>
+                        </div>
+                      )}
+                      {pattern.fix && (
+                        <div className="bg-orange-100/50 dark:bg-orange-900/20 rounded-lg p-3 border border-orange-200/50 dark:border-orange-800/50">
+                          <p className="font-medium text-orange-700 dark:text-orange-300 text-xs uppercase tracking-wide mb-1">
+                            How to Fix
+                          </p>
+                          <p className="text-sm text-orange-900 dark:text-orange-100">
+                            {pattern.fix}
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================
+              COACHING NOTES - For Managers
+          ============================================================ */}
+          {coachingNotes && (
+            <Card className="border-l-4 border-l-indigo-500 border-indigo-200/50 dark:border-indigo-500/20 bg-gradient-to-br from-indigo-50/50 to-transparent dark:from-indigo-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <div className="h-8 w-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center">
+                    <IconNotes className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <span className="text-indigo-700 dark:text-indigo-300">Coaching Notes</span>
+                  <Badge variant="outline" className="ml-2 text-[10px] border-indigo-300 text-indigo-600 dark:text-indigo-400">
+                    For Managers
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {/* Positive Reinforcement */}
+                {coachingNotes.positive_reinforcement && (
+                  <div className="bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl p-4 border border-emerald-200/50 dark:border-emerald-800/50">
+                    <h4 className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-2 flex items-center gap-2">
+                      <IconCheck className="h-4 w-4" />
+                      Positive Reinforcement
+                    </h4>
+                    <p className="text-sm text-emerald-800 dark:text-emerald-200">
+                      {coachingNotes.positive_reinforcement}
+                    </p>
+                  </div>
+                )}
+
+                {/* Development Focus */}
+                {coachingNotes.development_focus && (
+                  <div className="bg-amber-50/50 dark:bg-amber-950/20 rounded-xl p-4 border border-amber-200/50 dark:border-amber-800/50">
+                    <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-2 flex items-center gap-2">
+                      <IconTarget className="h-4 w-4" />
+                      Development Focus
+                    </h4>
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      {coachingNotes.development_focus}
+                    </p>
+                  </div>
+                )}
+
+                {/* Manager Talking Points */}
+                {coachingNotes.manager_talking_points && coachingNotes.manager_talking_points.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-indigo-700 dark:text-indigo-300 mb-3 flex items-center gap-2">
+                      <IconMessageQuestion className="h-4 w-4" />
+                      Discussion Points for 1:1
+                    </h4>
+                    <ul className="space-y-2">
+                      {coachingNotes.manager_talking_points.map((point: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                          <span className="text-indigo-500 font-medium shrink-0 mt-0.5">{i + 1}.</span>
+                          <span>{point}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Recommended Resources */}
+                {coachingNotes.recommended_resources && coachingNotes.recommended_resources.length > 0 && (
+                  <div className="bg-blue-50/50 dark:bg-blue-950/20 rounded-xl p-4 border border-blue-200/50 dark:border-blue-800/50">
+                    <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-3 flex items-center gap-2">
+                      <IconBook className="h-4 w-4" />
+                      Recommended Resources
+                    </h4>
+                    <ul className="space-y-2">
+                      {coachingNotes.recommended_resources.map((resource: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-blue-800 dark:text-blue-200">
+                          <span className="text-blue-500 shrink-0 mt-0.5">•</span>
+                          <span>{resource}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ============================================================
+              KEY INSIGHTS PANEL - At-a-glance coaching summary
+          ============================================================ */}
+          <KeyInsightsPanel
+            whatWorked={effectiveWhatWorked}
+            missedOpportunities={effectiveMissed}
+            dealRisks={effectiveRisks}
+            nextCallPlan={effectiveNextPlan}
+            categoryScores={aiCategoryScores}
+          />
 
           {/* ============================================================
               WHAT WORKED
           ============================================================ */}
           {effectiveWhatWorked.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconCheck className="text-emerald-500 h-5 w-5" />
-                What Worked Well
-              </h2>
+              <div className="flex items-center gap-4 px-5 py-4 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border-l-4 border-l-emerald-500">
+                <div className="h-10 w-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center">
+                  <IconCheck className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-emerald-800 dark:text-emerald-200">What Worked Well</h2>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">{effectiveWhatWorked.length} items</Badge>
+              </div>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {effectiveWhatWorked.map((item: any, i: number) => {
-                  // Handle V1 (string), V2 (moment/quote/why_effective), and V3 (point/detail/highlighted_sentence) formats
+                  // Handle V1 (string), V2 (moment/quote/why_effective), and V3 (skill/moment/quote/why_effective/reinforcement) formats
                   const isString = typeof item === "string";
-                  const content = isString ? item : item.point || item.moment || item.behavior_skill || item.text || "";
-                  const explanation = isString ? null : item.detail || item.why_effective || item.explanation;
+                  // V3 format uses "skill" as the category/title
+                  const skillLabel = isString ? null : item.skill;
+                  const content = isString ? item : item.moment || item.point || item.behavior_skill || item.text || "";
+                  const explanation = isString ? null : item.why_effective || item.detail || item.explanation;
                   const quote = isString ? null : item.quote;
+                  const reinforcement = isString ? null : item.reinforcement;
                   // V3 highlighted_sentence support
                   const highlightedSentence = isString ? null : item.highlighted_sentence;
                   const highlightText = highlightedSentence?.text || quote;
@@ -880,20 +1455,25 @@ export default function CallDetailPage() {
                       key={i}
                       className="border-emerald-200/50 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
                     >
-                      <CardContent className="pt-4">
-                        <div className="flex gap-3">
-                          <div className="h-6 w-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5">
-                            <IconCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <CardContent className="pt-4 pb-4">
+                        <div className="flex gap-4">
+                          <div className="h-8 w-8 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5">
+                            <IconCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                           </div>
-                          <div className="space-y-2 flex-1">
-                            <p className="text-sm font-medium leading-relaxed">{content}</p>
+                          <div className="space-y-3 flex-1">
+                            {skillLabel && (
+                              <Badge variant="outline" className="text-sm border-emerald-300 text-emerald-700 dark:text-emerald-300 mb-1 px-2.5 py-1">
+                                {skillLabel}
+                              </Badge>
+                            )}
+                            <p className="text-base font-medium leading-relaxed">{content}</p>
                             {highlightText && (
-                              <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200/50 dark:border-emerald-800/50">
+                              <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-4 border border-emerald-200/50 dark:border-emerald-800/50">
                                 {highlightSpeaker && (
                                   <div className="flex items-center gap-2 mb-2">
                                     <Badge
                                       variant="outline"
-                                      className={`text-[10px] px-1.5 py-0.5 ${
+                                      className={`text-xs px-2 py-0.5 ${
                                         highlightSentiment === 'positive'
                                           ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
                                           : highlightSentiment === 'negative'
@@ -905,13 +1485,23 @@ export default function CallDetailPage() {
                                     </Badge>
                                   </div>
                                 )}
-                                <blockquote className="text-xs text-muted-foreground italic border-l-2 border-emerald-400 pl-3">
+                                <blockquote className="text-sm text-muted-foreground italic border-l-2 border-emerald-400 pl-4">
                                   "{highlightText}"
                                 </blockquote>
                               </div>
                             )}
                             {explanation && (
-                              <p className="text-sm text-muted-foreground leading-relaxed">{explanation}</p>
+                              <p className="text-base text-muted-foreground leading-relaxed">{explanation}</p>
+                            )}
+                            {reinforcement && (
+                              <div className="bg-emerald-100/50 dark:bg-emerald-900/20 rounded-xl p-4 border border-emerald-200/50 dark:border-emerald-800/50 mt-2">
+                                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide mb-2">
+                                  Keep Doing This
+                                </p>
+                                <p className="text-base text-emerald-800 dark:text-emerald-200">
+                                  {reinforcement}
+                                </p>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -928,49 +1518,70 @@ export default function CallDetailPage() {
           ============================================================ */}
           {aiImprovement.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconBulb className="text-amber-500 h-5 w-5" />
-                Areas for Improvement
-              </h2>
+              <div className="flex items-center gap-4 px-5 py-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border-l-4 border-l-amber-500">
+                <div className="h-10 w-10 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center">
+                  <IconBulb className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-amber-800 dark:text-amber-200">Areas for Improvement</h2>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300">{aiImprovement.length} items</Badge>
+              </div>
 
               <div className="space-y-4">
                 {aiImprovement.map((item: any, i: number) => {
-                  // V3 highlighted_sentence support for improvement areas
+                  // V3 format support: priority, skill, what_happened, quote, impact, do_instead, practice_drill
+                  const priority = item.priority;
+                  const skillLabel = item.skill;
                   const highlightedSentence = item.highlighted_sentence;
-                  const highlightText = highlightedSentence?.text;
+                  const highlightText = highlightedSentence?.text || item.quote;
                   const highlightSpeaker = highlightedSentence?.speaker;
                   const highlightSentiment = highlightedSentence?.sentiment;
+
+                  const priorityColors: Record<number, string> = {
+                    1: "border-rose-300 bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400",
+                    2: "border-amber-300 bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400",
+                    3: "border-slate-300 bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-400",
+                  };
 
                   return (
                     <Card
                       key={i}
                       className="border-amber-200/50 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-950/10"
                     >
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base text-amber-700 dark:text-amber-300">
-                          {item.area || item.category_skill || `Improvement ${i + 1}`}
-                        </CardTitle>
+                      <CardHeader className="pb-3 pt-5">
+                        <div className="flex items-start justify-between gap-3">
+                          <CardTitle className="text-lg font-bold text-amber-700 dark:text-amber-300">
+                            {skillLabel || item.area || item.category_skill || `Improvement ${i + 1}`}
+                          </CardTitle>
+                          {priority && (
+                            <Badge
+                              variant="outline"
+                              className={`shrink-0 text-sm px-2.5 py-1 ${priorityColors[priority] || ""}`}
+                            >
+                              Priority {priority}
+                            </Badge>
+                          )}
+                        </div>
                       </CardHeader>
-                      <CardContent className="space-y-3 text-sm">
+                      <CardContent className="space-y-4 text-base pb-5">
                         {(item.what_happened || item.what_you_did) && (
                           <div>
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                            <p className="font-semibold text-muted-foreground text-sm uppercase tracking-wide mb-2">
                               What Happened
                             </p>
-                            <p>{item.what_happened || item.what_you_did}</p>
+                            <p className="leading-relaxed">{item.what_happened || item.what_you_did}</p>
                           </div>
                         )}
-                        {/* V3: Display highlighted sentence from the call */}
+                        {/* V3: Display quote from the call */}
                         {highlightText && (
-                          <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 border border-amber-200/50 dark:border-amber-800/50">
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                          <div className="bg-amber-50 dark:bg-amber-950/30 rounded-xl p-4 border border-amber-200/50 dark:border-amber-800/50">
+                            <p className="font-semibold text-muted-foreground text-sm uppercase tracking-wide mb-3">
                               From the Call
                             </p>
                             {highlightSpeaker && (
                               <div className="flex items-center gap-2 mb-2">
                                 <Badge
                                   variant="outline"
-                                  className={`text-[10px] px-1.5 py-0.5 ${
+                                  className={`text-xs px-2 py-0.5 ${
                                     highlightSentiment === 'positive'
                                       ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
                                       : highlightSentiment === 'negative'
@@ -982,18 +1593,26 @@ export default function CallDetailPage() {
                                 </Badge>
                               </div>
                             )}
-                            <blockquote className="text-xs text-muted-foreground italic border-l-2 border-amber-400 pl-3">
+                            <blockquote className="text-sm text-muted-foreground italic border-l-2 border-amber-400 pl-4">
                               "{highlightText}"
                             </blockquote>
                           </div>
                         )}
-                        {(item.what_to_do_instead || item.do_this_instead) && (
+                        {item.impact && (
                           <div>
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                            <p className="font-semibold text-muted-foreground text-sm uppercase tracking-wide mb-2">
+                              Impact
+                            </p>
+                            <p className="text-muted-foreground leading-relaxed">{item.impact}</p>
+                          </div>
+                        )}
+                        {(item.do_instead || item.what_to_do_instead || item.do_this_instead) && (
+                          <div>
+                            <p className="font-semibold text-muted-foreground text-sm uppercase tracking-wide mb-2">
                               What To Do Instead
                             </p>
-                            <p className="text-amber-800 dark:text-amber-200">
-                              {item.what_to_do_instead || item.do_this_instead}
+                            <p className="text-amber-800 dark:text-amber-200 leading-relaxed">
+                              {item.do_instead || item.what_to_do_instead || item.do_this_instead}
                             </p>
                           </div>
                         )}
@@ -1007,14 +1626,14 @@ export default function CallDetailPage() {
                             </p>
                           </div>
                         )}
-                        {/* V3: Display practice framework if available */}
-                        {item.practice_framework && (
+                        {/* V3: Display practice drill if available */}
+                        {(item.practice_drill || item.practice_framework) && (
                           <div className="bg-amber-100/50 dark:bg-amber-900/20 rounded-lg p-3 border border-amber-300/50 dark:border-amber-700/50">
                             <p className="font-medium text-amber-700 dark:text-amber-300 text-xs uppercase tracking-wide mb-1">
-                              Practice Framework
+                              Practice Drill
                             </p>
                             <p className="text-sm text-amber-900 dark:text-amber-100">
-                              {item.practice_framework}
+                              {item.practice_drill || item.practice_framework}
                             </p>
                           </div>
                         )}
@@ -1031,40 +1650,57 @@ export default function CallDetailPage() {
           ============================================================ */}
           {effectiveMissed.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconTarget className="h-5 w-5 text-purple-500" />
-                Missed Opportunities
-              </h2>
+              <div className="flex items-center gap-4 px-5 py-4 rounded-xl bg-purple-50/60 dark:bg-purple-950/20 border-l-4 border-l-purple-500">
+                <div className="h-10 w-10 rounded-lg bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
+                  <IconBulb className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-purple-800 dark:text-purple-200">Missed Opportunities</h2>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">{effectiveMissed.length} items</Badge>
+              </div>
 
               <div className="space-y-4">
                 {effectiveMissed.map((item: any, i: number) => {
-                  // V3 highlighted_sentence support for missed opportunities
+                  // V3 format: prospect_said, rep_did, should_have, why_it_matters/strategic_value
                   const highlightedSentence = item.highlighted_sentence;
                   const highlightText = highlightedSentence?.text;
                   const highlightSpeaker = highlightedSentence?.speaker;
                   const highlightSentiment = highlightedSentence?.sentiment;
+                  // V3 uses prospect_said instead of highlighted_sentence
+                  const prospectSaid = item.prospect_said;
 
                   return (
                     <Card
                       key={i}
                       className="border-purple-200/50 dark:border-purple-500/20 bg-purple-50/30 dark:bg-purple-950/10"
                     >
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base text-purple-700 dark:text-purple-300">
+                      <CardHeader className="pb-3 pt-5">
+                        <CardTitle className="text-lg font-bold text-purple-700 dark:text-purple-300">
                           {item.moment || item.moment_in_call || `Opportunity ${i + 1}`}
                         </CardTitle>
                       </CardHeader>
-                      <CardContent className="space-y-3 text-sm">
-                        {item.why_it_matters && (
-                          <div>
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                              Why It Matters
+                      <CardContent className="space-y-4 text-base pb-5">
+                        {/* V3: Display prospect_said as a quote */}
+                        {prospectSaid && (
+                          <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 border border-purple-200/50 dark:border-purple-800/50">
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                              Prospect Said
                             </p>
-                            <p>{item.why_it_matters}</p>
+                            <blockquote className="text-xs text-muted-foreground italic border-l-2 border-purple-400 pl-3">
+                              {prospectSaid}
+                            </blockquote>
                           </div>
                         )}
-                        {/* V3: Display highlighted sentence from the call */}
-                        {highlightText && (
+                        {/* V3: Display rep_did if available */}
+                        {item.rep_did && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              What Rep Did
+                            </p>
+                            <p className="text-muted-foreground">{item.rep_did}</p>
+                          </div>
+                        )}
+                        {/* Fallback: Display highlighted sentence from the call */}
+                        {!prospectSaid && highlightText && (
                           <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 border border-purple-200/50 dark:border-purple-800/50">
                             <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
                               Moment in the Call
@@ -1090,13 +1726,24 @@ export default function CallDetailPage() {
                             </blockquote>
                           </div>
                         )}
-                        {(item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done) && (
+                        {(item.should_have || item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done) && (
                           <div>
                             <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
                               What You Should Have Said
                             </p>
                             <p className="text-purple-800 dark:text-purple-200 italic">
-                              "{item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done}"
+                              "{item.should_have || item.what_to_say || item.what_you_should_have_done || item.what_you_could_have_done}"
+                            </p>
+                          </div>
+                        )}
+                        {/* V3: Display strategic_value or why_it_matters */}
+                        {(item.strategic_value || item.why_it_matters) && (
+                          <div className="bg-purple-100/50 dark:bg-purple-900/20 rounded-lg p-3 border border-purple-200/50 dark:border-purple-800/50">
+                            <p className="font-medium text-purple-700 dark:text-purple-300 text-xs uppercase tracking-wide mb-1">
+                              Why It Matters
+                            </p>
+                            <p className="text-sm text-purple-900 dark:text-purple-100">
+                              {item.strategic_value || item.why_it_matters}
                             </p>
                           </div>
                         )}
@@ -1113,28 +1760,28 @@ export default function CallDetailPage() {
           ============================================================ */}
           {aiQuestions.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconMessageQuestion className="h-5 w-5 text-sky-500" />
+              <h2 className="text-xl font-bold flex items-center gap-3">
+                <IconMessageQuestion className="h-6 w-6 text-sky-500" />
                 Questions to Ask
               </h2>
 
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid md:grid-cols-2 gap-5">
                 {aiQuestions.map((item: any, i: number) => (
                   <Card
                     key={i}
                     className="border-sky-200/50 dark:border-sky-500/20 bg-sky-50/30 dark:bg-sky-950/10"
                   >
-                    <CardHeader className="pb-2">
-                      <Badge variant="outline" className="w-fit text-xs border-sky-300 text-sky-700 dark:text-sky-300">
+                    <CardHeader className="pb-3 pt-5">
+                      <Badge variant="outline" className="w-fit text-sm px-2.5 py-1 border-sky-300 text-sky-700 dark:text-sky-300">
                         {item.category || item.spiced_framework_element || "Question"}
                       </Badge>
                     </CardHeader>
-                    <CardContent className="space-y-2">
-                      <p className="font-medium text-sky-800 dark:text-sky-200 italic">
+                    <CardContent className="space-y-3 pb-5">
+                      <p className="font-semibold text-base text-sky-800 dark:text-sky-200 italic leading-relaxed">
                         "{item.question || item.exact_question}"
                       </p>
                       {(item.why_to_ask || item.why_ask_this) && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-sm text-muted-foreground leading-relaxed">
                           {item.why_to_ask || item.why_ask_this}
                         </p>
                       )}
@@ -1146,101 +1793,156 @@ export default function CallDetailPage() {
           )}
 
           {/* ============================================================
-              QUALIFICATION GAPS
+              QUALIFICATION GAPS - Supports both V1/V2 (array) and V3 (object) formats
           ============================================================ */}
-          {aiQualGaps.length > 0 && (
+          {(Array.isArray(aiQualGaps) ? aiQualGaps.length > 0 : aiQualGaps && Object.keys(aiQualGaps).length > 0) && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconListCheck className="h-5 w-5 text-indigo-500" />
-                Qualification Gaps (BANT)
+              <h2 className="text-xl font-bold flex items-center gap-3">
+                <IconListCheck className="h-6 w-6 text-indigo-500" />
+                Qualification Gaps ({Array.isArray(aiQualGaps) ? "BANT" : (aiQualGaps as any)?.framework_used || "MEDDIC"})
               </h2>
 
-              <div className="grid md:grid-cols-2 gap-4">
-                {aiQualGaps.map((item: any, i: number) => {
-                  // V3 highlighted_sentence support for qualification gaps
-                  const highlightedSentence = item.highlighted_sentence;
-                  const highlightText = highlightedSentence?.text;
-                  const highlightSpeaker = highlightedSentence?.speaker;
-                  const highlightSentiment = highlightedSentence?.sentiment;
-                  const riskLevel = item.risk_level;
+              {/* V3 Object Format */}
+              {!Array.isArray(aiQualGaps) && aiQualGaps && (
+                <Card className="border-indigo-200/50 dark:border-indigo-500/20 bg-indigo-50/30 dark:bg-indigo-950/10">
+                  <CardContent className="pt-4 space-y-4">
+                    {/* Priority Element */}
+                    {(aiQualGaps as any).priority_element && (
+                      <div className="bg-rose-50/50 dark:bg-rose-950/20 rounded-xl p-4 border border-rose-200/50 dark:border-rose-800/50">
+                        <h4 className="text-sm font-semibold text-rose-700 dark:text-rose-300 mb-2 flex items-center gap-2">
+                          <IconAlertTriangle className="h-4 w-4" />
+                          Priority Gap to Address
+                        </h4>
+                        <p className="text-sm text-rose-800 dark:text-rose-200">
+                          {(aiQualGaps as any).priority_element}
+                        </p>
+                      </div>
+                    )}
 
-                  return (
-                    <Card
-                      key={i}
-                      className="border-indigo-200/50 dark:border-indigo-500/20 bg-indigo-50/30 dark:bg-indigo-950/10"
-                    >
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center gap-2">
-                          <CardTitle className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">
-                            {item.element || item.framework_element || `Gap ${i + 1}`}
-                          </CardTitle>
-                          {riskLevel && (
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] px-1.5 py-0.5 ${
-                                riskLevel === 'high'
-                                  ? 'border-rose-400 text-rose-700 dark:text-rose-300'
-                                  : riskLevel === 'medium'
-                                  ? 'border-amber-400 text-amber-700 dark:text-amber-300'
-                                  : 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
-                              }`}
-                            >
-                              {riskLevel} risk
+                    {/* Elements Covered */}
+                    {(aiQualGaps as any).elements_covered && (aiQualGaps as any).elements_covered.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-3 flex items-center gap-2">
+                          <IconCheck className="h-4 w-4" />
+                          Elements Covered
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                          {(aiQualGaps as any).elements_covered.map((element: string, i: number) => (
+                            <Badge key={i} variant="outline" className="text-xs border-emerald-300 text-emerald-700 dark:text-emerald-300">
+                              {element}
                             </Badge>
-                          )}
+                          ))}
                         </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm">
-                        {(item.what_is_missing || item.whats_missing) && (
-                          <div>
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                              What's Missing
-                            </p>
-                            <p>{item.what_is_missing || item.whats_missing}</p>
-                          </div>
-                        )}
-                        {/* V3: Display highlighted sentence from the call */}
-                        {highlightText && (
-                          <div className="bg-indigo-50 dark:bg-indigo-950/30 rounded-lg p-3 border border-indigo-200/50 dark:border-indigo-800/50">
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
-                              Evidence from Call
-                            </p>
-                            {highlightSpeaker && (
-                              <div className="flex items-center gap-2 mb-2">
-                                <Badge
-                                  variant="outline"
-                                  className={`text-[10px] px-1.5 py-0.5 ${
-                                    highlightSentiment === 'positive'
-                                      ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
-                                      : highlightSentiment === 'negative'
-                                      ? 'border-rose-400 text-rose-700 dark:text-rose-300'
-                                      : 'border-slate-400 text-slate-700 dark:text-slate-300'
-                                  }`}
-                                >
-                                  {highlightSpeaker}
-                                </Badge>
-                              </div>
+                      </div>
+                    )}
+
+                    {/* Elements Missing */}
+                    {(aiQualGaps as any).elements_missing && (aiQualGaps as any).elements_missing.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-3 flex items-center gap-2">
+                          <IconAlertTriangle className="h-4 w-4" />
+                          Elements Missing
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                          {(aiQualGaps as any).elements_missing.map((element: string, i: number) => (
+                            <Badge key={i} variant="outline" className="text-xs border-amber-300 text-amber-700 dark:text-amber-300">
+                              {element}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* V1/V2 Array Format */}
+              {Array.isArray(aiQualGaps) && (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {aiQualGaps.map((item: any, i: number) => {
+                    const highlightedSentence = item.highlighted_sentence;
+                    const highlightText = highlightedSentence?.text;
+                    const highlightSpeaker = highlightedSentence?.speaker;
+                    const highlightSentiment = highlightedSentence?.sentiment;
+                    const riskLevel = item.risk_level;
+
+                    return (
+                      <Card
+                        key={i}
+                        className="border-indigo-200/50 dark:border-indigo-500/20 bg-indigo-50/30 dark:bg-indigo-950/10"
+                      >
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center gap-2">
+                            <CardTitle className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+                              {item.element || item.framework_element || `Gap ${i + 1}`}
+                            </CardTitle>
+                            {riskLevel && (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] px-1.5 py-0.5 ${
+                                  riskLevel === 'high'
+                                    ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                    : riskLevel === 'medium'
+                                    ? 'border-amber-400 text-amber-700 dark:text-amber-300'
+                                    : 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                }`}
+                              >
+                                {riskLevel} risk
+                              </Badge>
                             )}
-                            <blockquote className="text-xs text-muted-foreground italic border-l-2 border-indigo-400 pl-3">
-                              "{highlightText}"
-                            </blockquote>
                           </div>
-                        )}
-                        {(item.how_to_get_it || item.how_to_get_it_next_conversation) && (
-                          <div>
-                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                              How to Get It
-                            </p>
-                            <p className="text-indigo-800 dark:text-indigo-200">
-                              {item.how_to_get_it || item.how_to_get_it_next_conversation}
-                            </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-sm">
+                          {(item.what_is_missing || item.whats_missing) && (
+                            <div>
+                              <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                                What's Missing
+                              </p>
+                              <p>{item.what_is_missing || item.whats_missing}</p>
+                            </div>
+                          )}
+                          {highlightText && (
+                            <div className="bg-indigo-50 dark:bg-indigo-950/30 rounded-lg p-3 border border-indigo-200/50 dark:border-indigo-800/50">
+                              <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                                Evidence from Call
+                              </p>
+                              {highlightSpeaker && (
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] px-1.5 py-0.5 ${
+                                      highlightSentiment === 'positive'
+                                        ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                        : highlightSentiment === 'negative'
+                                        ? 'border-rose-400 text-rose-700 dark:text-rose-300'
+                                        : 'border-slate-400 text-slate-700 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    {highlightSpeaker}
+                                  </Badge>
+                                </div>
+                              )}
+                              <blockquote className="text-xs text-muted-foreground italic border-l-2 border-indigo-400 pl-3">
+                                "{highlightText}"
+                              </blockquote>
+                            </div>
+                          )}
+                          {(item.how_to_get_it || item.how_to_get_it_next_conversation) && (
+                            <div>
+                              <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                                How to Get It
+                              </p>
+                              <p className="text-indigo-800 dark:text-indigo-200">
+                                {item.how_to_get_it || item.how_to_get_it_next_conversation}
+                              </p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1249,12 +1951,15 @@ export default function CallDetailPage() {
           ============================================================ */}
           {effectiveNextPlan.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconShieldCheck className="h-5 w-5 text-emerald-500" />
-                Next Call Game Plan
-              </h2>
+              <div className="flex items-center gap-4 px-5 py-4 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border-l-4 border-l-blue-500">
+                <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+                  <IconRocket className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-blue-800 dark:text-blue-200">Next Call Game Plan</h2>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">{effectiveNextPlan.length} actions</Badge>
+              </div>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {effectiveNextPlan.map((item: any, i: number) => {
                   // V2 format has priority field
                   const priorityColors: Record<string, string> = {
@@ -1265,42 +1970,69 @@ export default function CallDetailPage() {
                   // V3 format has specific_questions and success_criteria
                   const specificQuestions = item.specific_questions || [];
                   const successCriteria = item.success_criteria;
+                  // Get the action text - handle various field names
+                  const actionText = item.action || item.objective || item.text || item.description || item.recommendation || "";
+                  // Category colors
+                  const categoryColors: Record<string, string> = {
+                    question: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
+                    topic: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300",
+                    avoid: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300",
+                  };
 
                   return (
                     <Card
                       key={i}
-                      className="border-emerald-200/50 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
+                      className="border-blue-200/50 dark:border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/10"
                     >
-                      <CardContent className="pt-4">
-                        <div className="flex gap-3">
-                          <div className="h-6 w-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                      <CardContent className="pt-4 pb-4">
+                        <div className="flex gap-4">
+                          <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 text-base font-bold text-blue-700 dark:text-blue-300">
                             {i + 1}
                           </div>
                           <div className="space-y-3 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="font-medium">{item.action}</p>
-                              {item.priority && (
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="font-semibold text-base leading-relaxed">
+                                {actionText || `Action ${i + 1}`}
+                              </p>
+                              <div className="flex gap-2 shrink-0">
+                                {item.category && (
+                                  <Badge variant="secondary" className={`text-xs ${categoryColors[item.category] || ""}`}>
+                                    {item.category}
+                                  </Badge>
+                                )}
+                                {(item.priority !== undefined && item.priority !== null) && (
                                 <Badge
                                   variant="outline"
-                                  className={`shrink-0 text-xs ${priorityColors[item.priority] || ""}`}
+                                  className={`shrink-0 text-sm px-2.5 py-1 ${
+                                    typeof item.priority === 'number'
+                                      ? (item.priority === 1 ? priorityColors.high : item.priority === 2 ? priorityColors.medium : priorityColors.low)
+                                      : (priorityColors[item.priority] || "")
+                                  }`}
                                 >
-                                  {item.priority}
+                                  {typeof item.priority === 'number' ? `Priority ${item.priority}` : item.priority}
                                 </Badge>
                               )}
+                              </div>
                             </div>
-                            {item.why && (
-                              <p className="text-sm text-muted-foreground">{item.why}</p>
+                            {(item.approach || item.why) && (
+                              <p className="text-base text-muted-foreground leading-relaxed">{item.approach || item.why}</p>
+                            )}
+                            {item.key_question && (
+                              <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 border border-blue-200/50 dark:border-blue-800/50">
+                                <p className="font-semibold text-muted-foreground text-xs uppercase tracking-wide mb-1">Key Question</p>
+                                <p className="text-base text-blue-800 dark:text-blue-200 italic">"{item.key_question}"</p>
+                              </div>
                             )}
                             {/* V3: Display specific questions */}
                             {specificQuestions.length > 0 && (
-                              <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200/50 dark:border-emerald-800/50">
-                                <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-2">
+                              <div className="bg-blue-50 dark:bg-blue-950/30 rounded-xl p-4 border border-blue-200/50 dark:border-blue-800/50">
+                                <p className="font-semibold text-muted-foreground text-sm uppercase tracking-wide mb-3">
                                   What to Say
                                 </p>
-                                <ul className="space-y-1">
+                                <ul className="space-y-2">
                                   {specificQuestions.map((q: string, qi: number) => (
-                                    <li key={qi} className="text-sm text-emerald-800 dark:text-emerald-200 italic flex items-start gap-2">
-                                      <span className="text-emerald-500 shrink-0">•</span>
+                                    <li key={qi} className="text-base text-blue-800 dark:text-blue-200 italic flex items-start gap-2">
+                                      <span className="text-blue-500 shrink-0">•</span>
                                       <span>"{q}"</span>
                                     </li>
                                   ))}
@@ -1309,11 +2041,11 @@ export default function CallDetailPage() {
                             )}
                             {/* V3: Display success criteria */}
                             {successCriteria && (
-                              <div className="flex items-start gap-2 text-sm">
-                                <IconCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                              <div className="flex items-start gap-3 text-base">
+                                <IconCheck className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
                                 <div>
-                                  <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Success looks like: </span>
-                                  <span className="text-muted-foreground">{successCriteria}</span>
+                                  <span className="font-semibold text-muted-foreground text-sm uppercase tracking-wide">Success looks like: </span>
+                                  <span className="text-muted-foreground leading-relaxed">{successCriteria}</span>
                                 </div>
                               </div>
                             )}
@@ -1332,10 +2064,13 @@ export default function CallDetailPage() {
           ============================================================ */}
           {patternsToWatch.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconRepeat className="h-5 w-5 text-orange-500" />
-                Patterns to Watch
-              </h2>
+              <div className="flex items-center gap-4 px-5 py-4 rounded-xl bg-orange-50/60 dark:bg-orange-950/20 border-l-4 border-l-orange-500">
+                <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/50 flex items-center justify-center">
+                  <IconRepeat className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-orange-800 dark:text-orange-200">Patterns to Watch</h2>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300">{patternsToWatch.length} patterns</Badge>
+              </div>
 
               <div className="space-y-4">
                 {patternsToWatch.map((item: any, i: number) => (
@@ -1343,25 +2078,25 @@ export default function CallDetailPage() {
                     key={i}
                     className="border-orange-200/50 dark:border-orange-500/20 bg-orange-50/30 dark:bg-orange-950/10"
                   >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <CardTitle className="text-base text-orange-700 dark:text-orange-300">
+                    <CardHeader className="pb-3 pt-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <CardTitle className="text-lg font-bold text-orange-700 dark:text-orange-300">
                           {item.pattern}
                         </CardTitle>
                         {item.occurrences && (
                           <Badge
                             variant="outline"
-                            className="shrink-0 text-xs border-orange-300 text-orange-700 dark:text-orange-400"
+                            className="shrink-0 text-sm px-2.5 py-1 border-orange-300 text-orange-700 dark:text-orange-400"
                           >
                             {item.occurrences}x
                           </Badge>
                         )}
                       </div>
                     </CardHeader>
-                    <CardContent className="space-y-3 text-sm">
+                    <CardContent className="space-y-4 text-base pb-5">
                       {item.impact && (
                         <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                          <p className="font-semibold text-muted-foreground text-sm uppercase tracking-wide mb-2">
                             Impact
                           </p>
                           <p>{item.impact}</p>
@@ -1389,53 +2124,97 @@ export default function CallDetailPage() {
           ============================================================ */}
           {effectiveRisks.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconAlertTriangle className="h-5 w-5 text-rose-500" />
-                Deal Risk Alerts
-              </h2>
+              <div className="flex items-center gap-4 px-5 py-4 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 border-l-4 border-l-rose-500">
+                <div className="h-10 w-10 rounded-lg bg-rose-100 dark:bg-rose-900/50 flex items-center justify-center">
+                  <IconAlertTriangle className="h-6 w-6 text-rose-600 dark:text-rose-400" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-rose-800 dark:text-rose-200">Deal Risk Alerts</h2>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300">{effectiveRisks.length} risks</Badge>
+              </div>
 
               <div className="space-y-4">
-                {effectiveRisks.map((item: any, i: number) => (
-                  <Card
-                    key={i}
-                    className="border-rose-200/50 dark:border-rose-500/20 bg-rose-50/30 dark:bg-rose-950/10"
-                  >
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-base text-rose-700 dark:text-rose-300">
-                        <IconAlertTriangle className="h-4 w-4" />
-                        {item.risk_type || item.risk_description || `Risk ${i + 1}`}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                      {item.what_happened && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            What Happened
-                          </p>
-                          <p>{item.what_happened}</p>
+                {effectiveRisks.map((item: any, i: number) => {
+                  // V3 format: risk_type, evidence, severity, mitigation
+                  const severity = item.severity;
+                  const severityColors: Record<string, string> = {
+                    high: "border-rose-400 bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400",
+                    medium: "border-amber-400 bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400",
+                    low: "border-slate-400 bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-400",
+                  };
+
+                  return (
+                    <Card
+                      key={i}
+                      className="border-rose-200/50 dark:border-rose-500/20 bg-rose-50/30 dark:bg-rose-950/10"
+                    >
+                      <CardHeader className="pb-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <CardTitle className="flex items-center gap-2 text-base text-rose-700 dark:text-rose-300">
+                            <IconAlertTriangle className="h-4 w-4" />
+                            {item.risk_type || item.risk_description || `Risk ${i + 1}`}
+                          </CardTitle>
+                          {severity && (
+                            <Badge
+                              variant="outline"
+                              className={`shrink-0 text-xs ${severityColors[severity] || ""}`}
+                            >
+                              {severity} severity
+                            </Badge>
+                          )}
                         </div>
-                      )}
-                      {(item.why_risky || item.why_it_is_a_risk || item.what_this_means) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            Why It's a Risk
-                          </p>
-                          <p>{item.why_risky || item.why_it_is_a_risk || item.what_this_means}</p>
-                        </div>
-                      )}
-                      {(item.question_to_ask || item.how_to_fix_it || item.how_to_address_it) && (
-                        <div>
-                          <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
-                            How to Address
-                          </p>
-                          <p className="text-rose-800 dark:text-rose-200">
-                            {item.question_to_ask || item.how_to_fix_it || item.how_to_address_it}
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        {/* V3: Display evidence */}
+                        {item.evidence && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              Evidence
+                            </p>
+                            <p className="text-muted-foreground">{item.evidence}</p>
+                          </div>
+                        )}
+                        {item.what_happened && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              What Happened
+                            </p>
+                            <p>{item.what_happened}</p>
+                          </div>
+                        )}
+                        {(item.why_risky || item.why_it_is_a_risk || item.what_this_means) && (
+                          <div>
+                            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide mb-1">
+                              Why It's a Risk
+                            </p>
+                            <p>{item.why_risky || item.why_it_is_a_risk || item.what_this_means}</p>
+                          </div>
+                        )}
+                        {/* Display how to address / mitigation */}
+                        {(item.how_to_address || item.mitigation || item.how_to_fix_it || item.how_to_address_it) && (
+                          <div className="bg-rose-100/50 dark:bg-rose-900/20 rounded-lg p-3 border border-rose-200/50 dark:border-rose-800/50">
+                            <p className="font-medium text-rose-700 dark:text-rose-300 text-xs uppercase tracking-wide mb-1">
+                              How to Address
+                            </p>
+                            <p className="text-sm text-rose-900 dark:text-rose-100">
+                              {item.how_to_address || item.mitigation || item.how_to_fix_it || item.how_to_address_it}
+                            </p>
+                          </div>
+                        )}
+                        {/* Display suggested question if available */}
+                        {(item.suggested_question || item.question_to_ask) && (
+                          <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 border border-blue-200/50 dark:border-blue-800/50">
+                            <p className="font-medium text-blue-700 dark:text-blue-300 text-xs uppercase tracking-wide mb-1">
+                              Suggested Question
+                            </p>
+                            <p className="text-sm text-blue-900 dark:text-blue-100 italic">
+                              "{item.suggested_question || item.question_to_ask}"
+                            </p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1446,18 +2225,18 @@ export default function CallDetailPage() {
               PARTICIPANTS
           ============================================================ */}
           {attendees.length > 0 && (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <IconUsers className="h-5 w-5 text-indigo-500" />
+            <div className="space-y-4">
+              <h2 className="text-xl font-bold flex items-center gap-3">
+                <IconUsers className="h-6 w-6 text-indigo-500" />
                 Participants
               </h2>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3">
                 {attendees.map((p: any, i: number) => (
                   <Badge
                     key={i}
                     variant="outline"
-                    className="border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300"
+                    className="border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-sm px-3 py-1.5"
                   >
                     {p.displayName || p.email || p.name}
                   </Badge>
@@ -1469,18 +2248,19 @@ export default function CallDetailPage() {
           {/* ============================================================
               CALL ASSETS
           ============================================================ */}
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold">Call Assets</h2>
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold">Call Assets</h2>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-3">
               {row.transcript_url && (
                 <Button
                   asChild
                   variant="outline"
-                  size="sm"
+                  size="default"
+                  className="text-base"
                 >
                   <a href={row.transcript_url} target="_blank" rel="noopener noreferrer">
-                    <IconExternalLink className="h-4 w-4 mr-2" />
+                    <IconExternalLink className="h-5 w-5 mr-2" />
                     Fireflies Transcript
                   </a>
                 </Button>
@@ -1490,10 +2270,11 @@ export default function CallDetailPage() {
                 <Button
                   asChild
                   variant="outline"
-                  size="sm"
+                  size="default"
+                  className="text-base"
                 >
                   <a href={row.audio_url} target="_blank" rel="noopener noreferrer">
-                    <IconPlayerPlay className="h-4 w-4 mr-2" />
+                    <IconPlayerPlay className="h-5 w-5 mr-2" />
                     Audio Recording
                   </a>
                 </Button>
@@ -1503,10 +2284,11 @@ export default function CallDetailPage() {
                 <Button
                   asChild
                   variant="outline"
-                  size="sm"
+                  size="default"
+                  className="text-base"
                 >
                   <a href={row.video_url} target="_blank" rel="noopener noreferrer">
-                    <IconVideo className="h-4 w-4 mr-2" />
+                    <IconVideo className="h-5 w-5 mr-2" />
                     Video Recording
                   </a>
                 </Button>
@@ -1516,10 +2298,11 @@ export default function CallDetailPage() {
                 <Button
                   asChild
                   variant="outline"
-                  size="sm"
+                  size="default"
+                  className="text-base"
                 >
                   <a href={row.meeting_link} target="_blank" rel="noopener noreferrer">
-                    <IconExternalLink className="h-4 w-4 mr-2" />
+                    <IconExternalLink className="h-5 w-5 mr-2" />
                     Meeting Link
                   </a>
                 </Button>
@@ -1532,18 +2315,18 @@ export default function CallDetailPage() {
           ============================================================ */}
           {timeline.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Attendance Timeline</h2>
+              <h2 className="text-xl font-bold">Attendance Timeline</h2>
 
-              <div className="relative pl-6 border-l-2 border-indigo-200 dark:border-indigo-500/30 space-y-6">
+              <div className="relative pl-8 border-l-2 border-indigo-200 dark:border-indigo-500/30 space-y-6">
                 {timeline.map((t: any, i: number) => (
                   <div key={i} className="relative group">
                     {/* Dot */}
-                    <div className="absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-indigo-500 bg-background"></div>
+                    <div className="absolute -left-[11px] top-1 h-5 w-5 rounded-full border-2 border-indigo-500 bg-background"></div>
 
                     {/* Box */}
-                    <div className="rounded-lg bg-muted/50 p-4 transition-all duration-200 group-hover:bg-muted">
-                      <p className="font-medium">{t.name}</p>
-                      <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+                    <div className="rounded-xl bg-muted/50 p-5 transition-all duration-200 group-hover:bg-muted">
+                      <p className="font-semibold text-base">{t.name}</p>
+                      <div className="mt-2 flex flex-col gap-1.5 text-sm text-muted-foreground">
                         <span>
                           <strong>Joined:</strong> {formatDate(t.join_time)}
                         </span>
@@ -1569,6 +2352,22 @@ export default function CallDetailPage() {
             onToggle={() => setExpanded(!expanded)}
           />
         </div>
+
+        {/* Ask AI Coach - Global Component */}
+        <AskAICoach
+          context={{
+            type: "transcript",
+            transcriptId: row.id,
+            transcriptTitle: row.title || "Untitled Call",
+            score: aiOverallScore ?? undefined,
+            duration: duration ?? undefined,
+          }}
+          panelTitle={row.title || "Untitled Call"}
+          transcriptId={row.id}
+          transcriptTitle={row.title || "Untitled Call"}
+          transcriptText={transcriptFullText}
+          aiSummary={aiSummary ?? undefined}
+        />
       </SidebarInset>
     </SidebarProvider>
   );

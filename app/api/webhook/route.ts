@@ -1,14 +1,34 @@
 import { supabase } from "@/lib/supabaseClient";
 import { NextResponse } from "next/server";
 
+// Webhook secret for authentication (set in environment variables)
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
 export async function POST(req: Request) {
   try {
+    // Verify webhook secret if configured
+    if (WEBHOOK_SECRET) {
+      const authHeader = req.headers.get("x-webhook-secret") || req.headers.get("authorization");
+      const providedSecret = authHeader?.replace("Bearer ", "");
+
+      if (providedSecret !== WEBHOOK_SECRET) {
+        console.error("❌ Webhook authentication failed - invalid secret");
+        return NextResponse.json(
+          { success: false, error: "Unauthorized" },
+          { status: 401 }
+        );
+      }
+    } else {
+      // Log warning if no secret configured (for development awareness)
+      console.warn("⚠️ WEBHOOK_SECRET not configured - webhook is unprotected");
+    }
+
     const data = await req.json();
 
     const company_id = data?.company_id ?? null;
 
     // Extract markdown safely
-    // Response structure from n8n: { data: { markdown, analysis } }
+    // Response structure: { data: { markdown, analysis } }
     const markdown =
       data?.data?.markdown ||
       data?.markdown ||
@@ -17,7 +37,7 @@ export async function POST(req: Request) {
       "";
 
     // Extract analysis/json_val safely
-    // The analysis data comes as "analysis" from n8n webhook
+    // The analysis data comes as "analysis" from the webhook
     let json_val =
       data?.data?.analysis ||
       data?.analysis ||

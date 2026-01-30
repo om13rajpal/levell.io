@@ -21,8 +21,8 @@ export async function GET(
   try {
     const { id } = await params;
 
-    // Handle undefined, null, or invalid IDs gracefully (for n8n test mode)
-    // n8n renders undefined variables as "[undefined]" with brackets
+    // Handle undefined, null, or invalid IDs gracefully (for test mode)
+    // Some systems render undefined variables as "[undefined]" with brackets
     if (!id || id === "undefined" || id === "[undefined]" || id === "null" || id === "[null]" || id === "") {
       return NextResponse.json({
         id: null,
@@ -63,7 +63,7 @@ export async function GET(
     if (error) {
       console.error("[Transcripts API] Error fetching:", error);
 
-      // Return empty response instead of error for n8n compatibility
+      // Return empty response instead of error for workflow compatibility
       if (error.code === "PGRST116") {
         return NextResponse.json({
           id: null,

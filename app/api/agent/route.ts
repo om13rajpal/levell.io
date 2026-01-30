@@ -7,6 +7,7 @@ import { getOpenAIModel } from "@/lib/openai";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { trackAgentRequest } from "@/lib/openmeter";
 import { getRelevantContext } from "@/lib/embeddings";
+import { getSystemPromptForPage, type PageType } from "@/lib/agent-prompts";
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -78,6 +79,29 @@ function getSupabaseAdmin() {
   return supabaseAdminInstance;
 }
 
+// Simple in-memory TTL cache for context data
+const contextCache = new Map<string, { data: string; expiry: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCachedContext(key: string): string | null {
+  const entry = contextCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    contextCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedContext(key: string, data: string): void {
+  // Limit cache size to prevent memory leaks
+  if (contextCache.size >= 100) {
+    const oldestKey = contextCache.keys().next().value;
+    if (oldestKey) contextCache.delete(oldestKey);
+  }
+  contextCache.set(key, { data, expiry: Date.now() + CACHE_TTL_MS });
+}
+
 // Helper function to format duration
 function formatDuration(minutes: number | null): string {
   if (!minutes) return "Unknown";
@@ -92,6 +116,13 @@ function formatDuration(minutes: number | null): string {
 // Fetch call/transcript context
 async function fetchCallContext(callId: string): Promise<string> {
   try {
+    const cacheKey = `call:${callId}`;
+    const cached = getCachedContext(cacheKey);
+    if (cached) {
+      console.log("[Agent] Cache hit for call context:", callId);
+      return cached;
+    }
+
     console.log("[Agent] Fetching call context for ID:", callId);
     const { data: transcript, error } = await getSupabaseAdmin()
       .from("transcripts")
@@ -225,6 +256,7 @@ async function fetchCallContext(callId: string): Promise<string> {
       }
     }
 
+    setCachedContext(cacheKey, context);
     return context;
   } catch (error) {
     console.error("Error fetching call context:", error);
@@ -235,6 +267,13 @@ async function fetchCallContext(callId: string): Promise<string> {
 // Fetch company context
 async function fetchCompanyContext(companyId: string): Promise<string> {
   try {
+    const cacheKey = `company:${companyId}`;
+    const cached = getCachedContext(cacheKey);
+    if (cached) {
+      console.log("[Agent] Cache hit for company context:", companyId);
+      return cached;
+    }
+
     console.log("[Agent] Fetching company context for ID:", companyId);
 
     const { data: company, error } = await getSupabaseAdmin()
@@ -344,6 +383,7 @@ async function fetchCompanyContext(companyId: string): Promise<string> {
       }
     }
 
+    setCachedContext(cacheKey, context);
     return context;
   } catch (error) {
     console.error("Error fetching company context:", error);
@@ -426,6 +466,388 @@ ${contextData}
 `;
 }
 
+// Fetch comprehensive database context for a user based on page type
+async function fetchUserDatabaseContext(
+  userId: string,
+  pageType: PageType,
+  pageContext?: { transcriptId?: number; companyId?: number; teamId?: number }
+): Promise<string> {
+  const supabase = getSupabaseAdmin();
+  const parts: string[] = [];
+
+  try {
+    // Page-specific data fetching
+    switch (pageType) {
+      case "dashboard": {
+        // Fetch recent calls with scores
+        const { data: recentCalls } = await supabase
+          .from("transcripts")
+          .select("id, title, ai_overall_score, duration, created_at, deal_signal, call_type")
+          .eq("user_id", userId)
+          .not("duration", "is", null)
+          .gte("duration", 5)
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (recentCalls && recentCalls.length > 0) {
+          parts.push("### Recent Calls (Last 20)");
+          let totalScore = 0;
+          let scoredCount = 0;
+          recentCalls.forEach((call) => {
+            parts.push(`- **${call.title || "Untitled"}** (ID: ${call.id}) - Score: ${call.ai_overall_score ?? "N/A"}/100 - ${call.duration ? Math.round(call.duration) : "?"}min - ${call.deal_signal || "no signal"} - ${new Date(call.created_at).toLocaleDateString()}`);
+            if (call.ai_overall_score != null) {
+              totalScore += call.ai_overall_score;
+              scoredCount++;
+            }
+          });
+          if (scoredCount > 0) {
+            parts.push(`\n**Average Score**: ${Math.round(totalScore / scoredCount)}/100`);
+          }
+        }
+
+        // Fetch coaching notes
+        const { data: notes } = await supabase
+          .from("coaching_notes")
+          .select("note, created_at")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (notes && notes.length > 0) {
+          parts.push("\n### Recent Coaching Notes");
+          notes.forEach((note) => {
+            parts.push(`- ${note.note} (${new Date(note.created_at).toLocaleDateString()})`);
+          });
+        }
+        break;
+      }
+
+      case "calls": {
+        // Fetch all calls with analysis data
+        const { data: allCalls } = await supabase
+          .from("transcripts")
+          .select("id, title, ai_overall_score, ai_category_breakdown, ai_improvement_areas, duration, created_at, deal_signal")
+          .eq("user_id", userId)
+          .not("duration", "is", null)
+          .gte("duration", 5)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (allCalls && allCalls.length > 0) {
+          parts.push(`### All Calls (${allCalls.length} calls)`);
+
+          // Score distribution
+          const high = allCalls.filter((c) => c.ai_overall_score && c.ai_overall_score >= 80).length;
+          const medium = allCalls.filter((c) => c.ai_overall_score && c.ai_overall_score >= 60 && c.ai_overall_score < 80).length;
+          const low = allCalls.filter((c) => c.ai_overall_score && c.ai_overall_score < 60).length;
+          parts.push(`**Score Distribution**: High (80+): ${high}, Medium (60-79): ${medium}, Low (<60): ${low}`);
+
+          // List calls
+          allCalls.forEach((call) => {
+            parts.push(`- **${call.title || "Untitled"}** (ID: ${call.id}) - ${call.ai_overall_score ?? "N/A"}/100 - ${call.deal_signal || "-"} - ${new Date(call.created_at).toLocaleDateString()}`);
+          });
+        }
+        break;
+      }
+
+      case "call_detail": {
+        if (pageContext?.transcriptId) {
+          // Fetch full transcript data
+          const { data: transcript } = await supabase
+            .from("transcripts")
+            .select("*")
+            .eq("id", pageContext.transcriptId)
+            .single();
+
+          if (transcript) {
+            parts.push(`### Call: ${transcript.title || "Untitled"}`);
+            parts.push(`- **Score**: ${transcript.ai_overall_score ?? "N/A"}/100`);
+            parts.push(`- **Duration**: ${transcript.duration ? Math.round(transcript.duration) : "?"}min`);
+            parts.push(`- **Date**: ${new Date(transcript.created_at).toLocaleDateString()}`);
+            parts.push(`- **Deal Signal**: ${transcript.deal_signal || "Not set"}`);
+            parts.push(`- **Call Type**: ${transcript.call_type || "Not classified"}`);
+
+            // Parse and add category breakdown
+            const categoryBreakdown = parseJSON(transcript.ai_category_breakdown);
+            if (categoryBreakdown && typeof categoryBreakdown === "object") {
+              parts.push("\n### Score Breakdown by Category");
+              Object.entries(categoryBreakdown).forEach(([key, value]) => {
+                parts.push(`- **${key}**: ${value}`);
+              });
+            }
+
+            // Parse and add AI analysis
+            const aiAnalysis = parseJSON(transcript.ai_analysis);
+            if (aiAnalysis && typeof aiAnalysis === "object") {
+              parts.push("\n### AI Analysis");
+              if (aiAnalysis.deal_signal_reason) parts.push(`**Deal Signal Reason**: ${aiAnalysis.deal_signal_reason}`);
+              if (aiAnalysis.call_context_for_next_call) parts.push(`**Context for Next Call**: ${aiAnalysis.call_context_for_next_call}`);
+              if (aiAnalysis.strengths && Array.isArray(aiAnalysis.strengths)) {
+                parts.push("**Strengths**:");
+                aiAnalysis.strengths.forEach((s: any) => parts.push(`- ${typeof s === "string" ? s : s.point || s.description || JSON.stringify(s)}`));
+              }
+              if (aiAnalysis.weaknesses && Array.isArray(aiAnalysis.weaknesses)) {
+                parts.push("**Weaknesses**:");
+                aiAnalysis.weaknesses.forEach((w: any) => parts.push(`- ${typeof w === "string" ? w : w.point || w.description || JSON.stringify(w)}`));
+              }
+            }
+
+            // Deal risk alerts
+            const riskAlerts = parseJSON(transcript.ai_deal_risk_alerts);
+            if (riskAlerts && Array.isArray(riskAlerts) && riskAlerts.length > 0) {
+              parts.push("\n### Deal Risk Alerts");
+              riskAlerts.forEach((alert: any) => {
+                const alertType = typeof alert === "string" ? alert : alert.type || alert.alert || "Alert";
+                const desc = typeof alert === "object" ? alert.description || alert.how_to_address || "" : "";
+                parts.push(`- **${alertType}**${desc ? `: ${desc}` : ""}`);
+              });
+            }
+
+            // Next call game plan
+            const gamePlan = parseJSON(transcript.ai_next_call_game_plan);
+            if (gamePlan && Array.isArray(gamePlan) && gamePlan.length > 0) {
+              parts.push("\n### Next Call Game Plan");
+              gamePlan.forEach((item: any, i: number) => {
+                const action = typeof item === "string" ? item : item.action || item.objective || item.text || JSON.stringify(item);
+                parts.push(`${i + 1}. ${action}`);
+              });
+            }
+
+            // Summary
+            if (transcript.summary) {
+              const summary = typeof transcript.summary === "string" ? transcript.summary : transcript.summary.overview || "";
+              if (summary) {
+                parts.push(`\n### Summary\n${summary}`);
+              }
+            }
+
+            // Transcript sentences (limited)
+            if (transcript.sentences && Array.isArray(transcript.sentences)) {
+              parts.push(`\n### Conversation (${Math.min(transcript.sentences.length, 100)} of ${transcript.sentences.length} exchanges)`);
+              transcript.sentences.slice(0, 100).forEach((s: any) => {
+                parts.push(`**${s.speaker_name || "Unknown"}**: ${s.text || ""}`);
+              });
+            }
+          }
+        }
+        break;
+      }
+
+      case "companies": {
+        // Fetch user's company ID first
+        const { data: userCompany } = await supabase
+          .from("company")
+          .select("id")
+          .eq("user_id", userId)
+          .single();
+
+        if (userCompany) {
+          // Fetch all companies
+          const { data: companies } = await supabase
+            .from("companies")
+            .select("*")
+            .eq("company_id", userCompany.id)
+            .order("created_at", { ascending: false });
+
+          if (companies && companies.length > 0) {
+            // Get call counts
+            const companyIds = companies.map((c) => c.id);
+            const { data: callCounts } = await supabase
+              .from("company_calls")
+              .select("company_id")
+              .in("company_id", companyIds);
+
+            const countMap: Record<number, number> = {};
+            (callCounts || []).forEach((cc: any) => {
+              countMap[cc.company_id] = (countMap[cc.company_id] || 0) + 1;
+            });
+
+            parts.push(`### Companies (${companies.length} total)`);
+
+            // Aggregate pain points
+            const allPainPoints: string[] = [];
+            companies.forEach((company) => {
+              const painPoints = parseJSON(company.pain_points);
+              if (painPoints && Array.isArray(painPoints)) {
+                allPainPoints.push(...painPoints);
+              }
+            });
+
+            if (allPainPoints.length > 0) {
+              parts.push("\n### Aggregated Pain Points");
+              allPainPoints.slice(0, 20).forEach((pp) => parts.push(`- ${pp}`));
+            }
+
+            parts.push("\n### Company List");
+            companies.forEach((company) => {
+              const calls = countMap[company.id] || 0;
+              const risks = parseJSON(company.ai_deal_risk_alerts);
+              const hasRisks = risks && Array.isArray(risks) && risks.length > 0;
+              parts.push(`- **${company.company_name}** (ID: ${company.id}) - ${calls} calls - ${hasRisks ? "AT RISK" : "OK"}`);
+
+              const painPoints = parseJSON(company.pain_points);
+              if (painPoints && Array.isArray(painPoints) && painPoints.length > 0) {
+                parts.push(`  Pain points: ${painPoints.slice(0, 3).join(", ")}`);
+              }
+            });
+          }
+        }
+        break;
+      }
+
+      case "company_detail": {
+        if (pageContext?.companyId) {
+          const { data: company } = await supabase
+            .from("companies")
+            .select("*")
+            .eq("id", pageContext.companyId)
+            .single();
+
+          if (company) {
+            parts.push(`### Company: ${company.company_name}`);
+            parts.push(`- **Domain**: ${company.domain || "N/A"}`);
+            if (company.company_goal_objective) {
+              parts.push(`- **Goal/Objective**: ${company.company_goal_objective}`);
+            }
+
+            // Pain points
+            const painPoints = parseJSON(company.pain_points);
+            if (painPoints && Array.isArray(painPoints) && painPoints.length > 0) {
+              parts.push("\n### Pain Points");
+              painPoints.forEach((pp: string) => parts.push(`- ${pp}`));
+            }
+
+            // Contacts
+            const contacts = parseJSON(company.company_contacts);
+            if (contacts && Array.isArray(contacts) && contacts.length > 0) {
+              parts.push("\n### Contacts");
+              contacts.forEach((c: any) => {
+                parts.push(`- **${c.name || "Unknown"}** - ${c.title || "N/A"} (${c.email || "no email"})`);
+              });
+            }
+
+            // Risk alerts
+            const risks = parseJSON(company.ai_deal_risk_alerts);
+            if (risks && Array.isArray(risks) && risks.length > 0) {
+              parts.push("\n### Deal Risk Alerts");
+              risks.forEach((r: any) => {
+                const type = typeof r === "string" ? r : r.type || r.alert || "Risk";
+                const desc = typeof r === "object" ? r.description || r.how_to_address || "" : "";
+                parts.push(`- **${type}**${desc ? `: ${desc}` : ""}`);
+              });
+            }
+
+            // AI recommendations
+            const recommendations = parseJSON(company.ai_recommendations);
+            if (recommendations && Array.isArray(recommendations) && recommendations.length > 0) {
+              parts.push("\n### AI Recommendations");
+              recommendations.forEach((r: string) => parts.push(`- ${r}`));
+            }
+
+            // Relationship insights
+            const relationship = parseJSON(company.ai_relationship);
+            if (relationship && Array.isArray(relationship) && relationship.length > 0) {
+              parts.push("\n### Relationship Insights");
+              relationship.forEach((r: string) => parts.push(`- ${r}`));
+            }
+
+            // Fetch related calls
+            const { data: companyCalls } = await supabase
+              .from("company_calls")
+              .select("transcript_id, created_at")
+              .eq("company_id", pageContext.companyId)
+              .order("created_at", { ascending: false })
+              .limit(10);
+
+            if (companyCalls && companyCalls.length > 0) {
+              const transcriptIds = companyCalls.map((cc) => cc.transcript_id);
+              const { data: transcripts } = await supabase
+                .from("transcripts")
+                .select("id, title, ai_overall_score, duration, created_at")
+                .in("id", transcriptIds);
+
+              if (transcripts && transcripts.length > 0) {
+                parts.push(`\n### Recent Calls (${transcripts.length})`);
+                transcripts.forEach((t) => {
+                  parts.push(`- **${t.title || "Untitled"}** (ID: ${t.id}) - ${t.ai_overall_score ?? "N/A"}/100 - ${new Date(t.created_at).toLocaleDateString()}`);
+                });
+              }
+            }
+          }
+        }
+        break;
+      }
+
+      case "team": {
+        // Fetch user's team
+        const { data: userTeam } = await supabase
+          .from("teams")
+          .select("*")
+          .contains("members", [userId])
+          .single();
+
+        if (userTeam) {
+          parts.push(`### Team: ${userTeam.team_name}`);
+          parts.push(`- **Members**: ${userTeam.members?.length || 0}`);
+
+          // Fetch member details
+          if (userTeam.members && userTeam.members.length > 0) {
+            const { data: members } = await supabase
+              .from("users")
+              .select("id, name, email")
+              .in("id", userTeam.members);
+
+            if (members) {
+              // For each member, get their call stats
+              parts.push("\n### Team Members Performance");
+              for (const member of members) {
+                const { data: memberCalls } = await supabase
+                  .from("transcripts")
+                  .select("ai_overall_score")
+                  .eq("user_id", member.id)
+                  .not("duration", "is", null)
+                  .gte("duration", 5);
+
+                const callCount = memberCalls?.length || 0;
+                const avgScore = callCount > 0
+                  ? Math.round(
+                      (memberCalls || [])
+                        .filter((c) => c.ai_overall_score != null)
+                        .reduce((sum, c) => sum + (c.ai_overall_score || 0), 0) /
+                      (memberCalls || []).filter((c) => c.ai_overall_score != null).length
+                    )
+                  : 0;
+
+                parts.push(`- **${member.name || member.email}** - ${callCount} calls - Avg score: ${avgScore}/100`);
+              }
+            }
+          }
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    console.error("[Agent] Error fetching database context:", error);
+    parts.push("Error fetching some data from database.");
+  }
+
+  return parts.join("\n");
+}
+
+// Helper to safely parse JSON fields
+function parseJSON(data: unknown): any {
+  if (!data) return null;
+  if (typeof data === "object") return data;
+  if (typeof data === "string") {
+    try {
+      return JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
   const startTime = Date.now();
 
@@ -438,7 +860,9 @@ export async function POST(req: Request) {
       contextType,
       contextId,
       userId,
-      useSemanticSearch = false, // New: Enable semantic search mode
+      useSemanticSearch = false,
+      pageType, // NEW: Page type for enhanced context
+      pageContext, // NEW: Page-specific context (transcriptId, companyId, etc.)
     }: {
       messages: UIMessage[];
       model?: string;
@@ -446,12 +870,15 @@ export async function POST(req: Request) {
       contextId?: string;
       userId?: string;
       useSemanticSearch?: boolean;
+      pageType?: PageType;
+      pageContext?: { transcriptId?: number; companyId?: number; teamId?: number };
     } = body;
 
     console.log("[Agent] Request received:", {
       modelId,
       contextType,
       contextId,
+      pageType,
       messageCount: messages?.length,
       useSemanticSearch,
       bodyKeys: Object.keys(body),
@@ -461,35 +888,55 @@ export async function POST(req: Request) {
     let contextData = "";
     let systemPrompt = "";
 
-    // NEW: Workspace mode with semantic search
-    if (useSemanticSearch || contextType === "workspace") {
-      if (!userId) {
-        throw new Error("userId is required for semantic search mode");
+    // Extract the user's query from the last message (needed for semantic search)
+    const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+    let userQuery = "";
+    if (lastMessage) {
+      if ('content' in lastMessage && typeof (lastMessage as { content?: unknown }).content === "string") {
+        userQuery = (lastMessage as { content: string }).content;
+      } else if ('parts' in lastMessage && Array.isArray(lastMessage.parts)) {
+        const textParts = lastMessage.parts.filter(
+          (p): p is { type: 'text'; text: string } =>
+            p !== null && typeof p === 'object' && 'type' in p && p.type === 'text' && 'text' in p
+        );
+        userQuery = textParts.map(p => p.text).join(" ");
+      } else {
+        userQuery = JSON.stringify(lastMessage);
+      }
+    }
+
+    // NEW: Enhanced page-specific mode with full database access
+    if (pageType && userId) {
+      console.log("[Agent] Using enhanced page-specific mode:", pageType);
+
+      // 1. Fetch direct database context for the page
+      const dbContext = await fetchUserDatabaseContext(userId, pageType, pageContext);
+      console.log("[Agent] Database context length:", dbContext.length);
+
+      // 2. Also fetch semantic search results for additional context
+      let semanticContext = "";
+      try {
+        semanticContext = await getRelevantContext(userId, userQuery, 5);
+        console.log("[Agent] Semantic context length:", semanticContext.length);
+      } catch (err) {
+        console.warn("[Agent] Semantic search unavailable:", err);
       }
 
-      // Extract the user's query from the last message
-      const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
-      let userQuery = "";
-      if (lastMessage) {
-        // Handle different message content types
-        if ('content' in lastMessage && typeof (lastMessage as { content?: unknown }).content === "string") {
-          userQuery = (lastMessage as { content: string }).content;
-        } else if ('parts' in lastMessage && Array.isArray(lastMessage.parts)) {
-          // Handle parts-based messages - filter for text parts only
-          const textParts = lastMessage.parts.filter(
-            (p): p is { type: 'text'; text: string } =>
-              p !== null && typeof p === 'object' && 'type' in p && p.type === 'text' && 'text' in p
-          );
-          userQuery = textParts.map(p => p.text).join(" ");
-        } else {
-          userQuery = JSON.stringify(lastMessage);
-        }
+      // 3. Combine contexts
+      const combinedContext = [dbContext, semanticContext].filter(Boolean).join("\n\n---\n\n");
+
+      // 4. Get page-specific system prompt
+      systemPrompt = getSystemPromptForPage(pageType, pageContext, combinedContext);
+    }
+    // Workspace mode with semantic search
+    else if (useSemanticSearch || contextType === "workspace") {
+      if (!userId) {
+        throw new Error("userId is required for semantic search mode");
       }
 
       console.log("[Agent] Using semantic search for query:", userQuery.slice(0, 100));
 
       try {
-        // Fetch relevant context using semantic search
         contextData = await getRelevantContext(userId, userQuery, 8);
         console.log("[Agent] Semantic search returned context length:", contextData.length);
       } catch (searchError) {
@@ -510,15 +957,24 @@ export async function POST(req: Request) {
       console.log("[Agent] Context data length:", contextData.length);
       systemPrompt = buildSystemPrompt(contextData, contextType);
     }
-    // No context provided
+    // No context provided - try to use userId for basic workspace access
+    else if (userId) {
+      console.log("[Agent] No specific context, using basic workspace mode for user:", userId);
+      try {
+        contextData = await getRelevantContext(userId, userQuery, 8);
+      } catch {
+        contextData = "Limited context available. Try asking about specific calls or companies.";
+      }
+      systemPrompt = buildWorkspaceSystemPrompt(contextData);
+    }
+    // Truly no context
     else {
       console.log("[Agent] No context provided - contextType:", contextType, "contextId:", contextId);
-      contextData = `No context selected. Please select a call or company to analyze, or enable workspace mode for full access.`;
+      contextData = `No context selected. Please select a call or company to analyze.`;
       systemPrompt = buildSystemPrompt(contextData, "call");
     }
 
-    // Get the last user message for logging
-    const lastMessage = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+    // Get the last user message for logging - reuses lastMessage defined above
     const lastUserMessage = lastMessage
       ? ('content' in lastMessage ? lastMessage.content : JSON.stringify(lastMessage))
       : "";

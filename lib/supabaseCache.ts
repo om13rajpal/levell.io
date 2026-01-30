@@ -296,8 +296,8 @@ export async function getTranscriptsPaginated(
 ): Promise<PaginatedTranscriptsResult> {
   const offset = (page - 1) * pageSize;
 
-  // Get duration filter - use filters object if provided, otherwise default to 5 min
-  const durationMin = filters?.durationMin ?? 5;
+  // Get duration filter - use filters object if provided, otherwise no default filter (show all)
+  const durationMin = filters?.durationMin ?? 0;
   const durationMax = filters?.durationMax;
   const onlyScoredCalls = filters?.onlyScoredCalls ?? false;
 
@@ -306,11 +306,12 @@ export async function getTranscriptsPaginated(
     .from('transcripts')
     .select('*', { count: 'exact' })
     .eq('user_id', userId)
-    .not('duration', 'is', null)
     .order('created_at', { ascending: false });
 
-  // Apply duration min filter
+  // Apply duration min filter only if explicitly set (> 0)
+  // This allows imported transcripts with NULL or short duration to appear
   if (durationMin > 0) {
+    query = query.not('duration', 'is', null);
     query = query.gte('duration', durationMin);
   }
 

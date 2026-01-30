@@ -24,6 +24,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
@@ -332,7 +333,7 @@ function PromptsPageContent() {
       console.log("[Run Prompt] transcript_id:", transcriptId);
       console.log("[Run Prompt] Has content:", !!transcriptContent);
 
-      const response = await fetch("/api/prompts/trigger-n8n", {
+      const response = await fetch("/api/prompts/trigger-workflow", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -356,7 +357,7 @@ function PromptsPageContent() {
         setRunResult({
           success: true,
           message: data.message || "Workflow triggered successfully",
-          run_id: data.n8n_response?.run_id,
+          run_id: data.event_id,
         });
         toast.success("Prompt run triggered successfully!");
       } else {
@@ -470,7 +471,7 @@ function PromptsPageContent() {
               <div className="flex-1">
                 <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
                   <CodeIcon className="size-4" />
-                  n8n Workflow Variables
+                  Workflow Variables
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                   <div className="space-y-1">
@@ -499,8 +500,34 @@ function PromptsPageContent() {
       {/* Content */}
       <div className="container mx-auto px-4 py-8">
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <RefreshCwIcon className="size-8 animate-spin text-muted-foreground" />
+          <div className="grid gap-4">
+            {[...Array(3)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <Skeleton className="mt-1 h-6 w-6 rounded" />
+                      <div className="space-y-2">
+                        <Skeleton className="h-5 w-48" />
+                        <Skeleton className="h-4 w-32" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-6 w-16 rounded-full" />
+                      <Skeleton className="h-8 w-8" />
+                      <Skeleton className="h-8 w-8" />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 pt-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         ) : prompts.length === 0 ? (
           <Card className="border-dashed">
@@ -667,7 +694,7 @@ function PromptsPageContent() {
               Run Prompt
             </DialogTitle>
             <DialogDescription>
-              Trigger the n8n workflow to run this prompt
+              Trigger the workflow to run this prompt
             </DialogDescription>
           </DialogHeader>
 

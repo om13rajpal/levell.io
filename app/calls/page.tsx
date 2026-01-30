@@ -58,6 +58,8 @@ import {
   FileText,
   Trash2,
   AlertTriangle,
+  MessageCircle,
+  X,
 } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
@@ -72,7 +74,12 @@ import {
   clearTranscriptPageCache,
 } from "@/lib/supabaseCache";
 import { toast } from "sonner";
-import { ChartAreaInteractive } from "@/components/chart-area-interactive";
+import dynamic from "next/dynamic";
+const ChartAreaInteractive = dynamic(
+  () => import("@/components/chart-area-interactive").then(mod => ({ default: mod.ChartAreaInteractive })),
+  { ssr: false, loading: () => <div className="h-[300px] w-full animate-pulse rounded-lg bg-muted" /> }
+);
+import { AskAICoach } from "@/components/AskAICoach";
 
 // Format duration (stored in minutes) to human readable format
 function formatDuration(minutes?: number | null): string {
@@ -120,7 +127,7 @@ function CallsDashboard() {
   const [isSearching, setIsSearching] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [scoreRange, setScoreRange] = useState([0, 100]);
-  const [durationMin, setDurationMin] = useState<string>("5"); // Default to 5 minutes minimum
+  const [durationMin, setDurationMin] = useState<string>(""); // No default filter - show all calls including imports
   const [durationMax, setDurationMax] = useState<string>("");
   const [onlyScoredCalls, setOnlyScoredCalls] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -148,6 +155,8 @@ function CallsDashboard() {
   // Track score range values separately to avoid array reference issues
   const [scoreMin, setScoreMin] = useState(0);
   const [scoreMax, setScoreMax] = useState(100);
+
+  // AI Agent panel state
 
   // Debounce search input with loading state for smooth UX
   useEffect(() => {
@@ -1001,6 +1010,35 @@ function CallsDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Ask AI Coach - Global Component */}
+      <AskAICoach
+        context={{
+          type: "calls_list",
+          totalCalls: totalCount,
+          avgScore: stats.avgScore,
+          recentCalls: paginatedTranscripts.slice(0, 5).map((t) => ({
+            id: t.id,
+            title: t.title || "Untitled Call",
+            score: t.ai_overall_score,
+            date: t.created_at,
+            duration: t.duration || 0,
+          })),
+          scoreDistribution: {
+            high: paginatedTranscripts.filter((t) => t.ai_overall_score >= 80).length,
+            medium: paginatedTranscripts.filter((t) => t.ai_overall_score >= 50 && t.ai_overall_score < 80).length,
+            low: paginatedTranscripts.filter((t) => t.ai_overall_score < 50 && t.ai_overall_score != null).length,
+          },
+        }}
+        panelTitle="Calls Coach"
+        placeholder="Ask about your calls..."
+        quickActions={[
+          "Overview of my calls",
+          "Which calls need attention?",
+          "Show my best calls",
+          "Areas to improve",
+        ]}
+      />
     </SidebarProvider>
   );
 }

@@ -52,6 +52,14 @@ import {
   IconExternalLink,
   IconPlayerPlay,
   IconRefresh,
+  IconCheck,
+  IconMinus,
+  IconAlertTriangle,
+  IconSearch,
+  IconEye,
+  IconBrain,
+  IconTarget,
+  IconPhone,
 } from "@tabler/icons-react";
 
 import { Label } from "@/components/ui/label";
@@ -91,6 +99,66 @@ export type Transcript = {
   meeting_link?: string;
   created_at: string;
   ai_overall_score?: number | null;
+  ai_deal_signal?: string | null;
+  ai_call_type?: string | null;
+};
+
+// Deal signal configuration
+const DEAL_SIGNAL_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
+  healthy: {
+    label: "Healthy",
+    color: "border-emerald-500/50 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30",
+    icon: IconCheck,
+  },
+  neutral: {
+    label: "Neutral",
+    color: "border-slate-500/50 text-slate-700 dark:text-slate-400 bg-slate-50 dark:bg-slate-950/30",
+    icon: IconMinus,
+  },
+  at_risk: {
+    label: "At Risk",
+    color: "border-amber-500/50 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30",
+    icon: IconAlertTriangle,
+  },
+  critical: {
+    label: "Critical",
+    color: "border-rose-500/50 text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30",
+    icon: IconAlertTriangle,
+  },
+};
+
+// Call type configuration
+const CALL_TYPE_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
+  discovery: {
+    label: "Discovery",
+    color: "border-blue-500/50 text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30",
+    icon: IconSearch,
+  },
+  demo: {
+    label: "Demo",
+    color: "border-purple-500/50 text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30",
+    icon: IconEye,
+  },
+  coaching: {
+    label: "Coaching",
+    color: "border-indigo-500/50 text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/30",
+    icon: IconBrain,
+  },
+  negotiation: {
+    label: "Negotiation",
+    color: "border-amber-500/50 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30",
+    icon: IconTarget,
+  },
+  follow_up: {
+    label: "Follow-up",
+    color: "border-teal-500/50 text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/30",
+    icon: IconPhone,
+  },
+  closing: {
+    label: "Closing",
+    color: "border-emerald-500/50 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30",
+    icon: IconCheck,
+  },
 };
 
 // ========== DRAG HANDLE ========== //
@@ -174,6 +242,42 @@ export const transcriptColumns: ColumnDef<Transcript>[] = [
           }
         >
           {Math.round(score)}
+        </Badge>
+      );
+    },
+  },
+
+  {
+    accessorKey: "ai_deal_signal",
+    header: "Deal Signal",
+    cell: ({ row }) => {
+      const signal = row.original.ai_deal_signal;
+      if (!signal) return <span className="text-muted-foreground text-xs">—</span>;
+      const config = DEAL_SIGNAL_CONFIG[signal];
+      if (!config) return <span className="text-muted-foreground text-xs">{signal}</span>;
+      const Icon = config.icon;
+      return (
+        <Badge variant="outline" className={`${config.color} text-[10px] px-2 py-0.5 flex items-center gap-1 w-fit`}>
+          <Icon size={12} />
+          {config.label}
+        </Badge>
+      );
+    },
+  },
+
+  {
+    accessorKey: "ai_call_type",
+    header: "Call Type",
+    cell: ({ row }) => {
+      const callType = row.original.ai_call_type;
+      if (!callType) return <span className="text-muted-foreground text-xs">—</span>;
+      const config = CALL_TYPE_CONFIG[callType];
+      if (!config) return <Badge variant="outline" className="text-[10px]">{callType}</Badge>;
+      const Icon = config.icon;
+      return (
+        <Badge variant="outline" className={`${config.color} text-[10px] px-2 py-0.5 flex items-center gap-1 w-fit`}>
+          <Icon size={12} />
+          {config.label}
         </Badge>
       );
     },
@@ -329,14 +433,14 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
       // Get current transcript count for skip parameter
       const skip = data.length;
 
-      // Make request to n8n webhook using axios with extended timeout
-      const webhookUrl = "https://n8n.omrajpal.tech/webhook/d7d78fbd-4996-41df-8a37-00200cdb2f89";
-
-      // Wait for the request to complete and show appropriate feedback
-      const response = await axiosClient.post(webhookUrl, {
-        userid: userId,
-        skip: skip,
-        token: apiKeyData.fireflies,
+      // Send Inngest event to sync transcripts
+      const response = await axiosClient.post("/api/inngest/trigger", {
+        event: "transcripts/sync.requested",
+        data: {
+          user_id: userId,
+          skip: skip,
+          token: apiKeyData.fireflies,
+        },
       });
 
       if (response.status >= 200 && response.status < 300) {
@@ -463,14 +567,30 @@ export function TranscriptTable({ data: initialData }: { data: Transcript[] }) {
               </TableHeader>
 
               <TableBody>
-                <SortableContext
-                  items={dataIds}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {table.getRowModel().rows.map((row) => (
-                    <DraggableRow row={row} key={row.id} />
-                  ))}
-                </SortableContext>
+                {table.getRowModel().rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="h-48 text-center">
+                      <div className="flex flex-col items-center justify-center py-8">
+                        <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                          </svg>
+                        </div>
+                        <h3 className="font-semibold text-sm mb-1">No transcripts to display</h3>
+                        <p className="text-xs text-muted-foreground">Your call transcripts will appear here once processed</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <SortableContext
+                    items={dataIds}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {table.getRowModel().rows.map((row) => (
+                      <DraggableRow row={row} key={row.id} />
+                    ))}
+                  </SortableContext>
+                )}
               </TableBody>
             </Table>
           </DndContext>

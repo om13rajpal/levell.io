@@ -50,7 +50,6 @@ type UserData = {
   is_logged_in: boolean;
   is_onboarding_done: boolean | null;
   sales_motion: string | null;
-  framework: string | null;
   ai_recommendations: string[] | null;
 };
 
@@ -348,32 +347,19 @@ export default function AccountPage() {
               </div>
 
               {/* Sales Settings */}
-              {(userData.sales_motion || userData.framework) && (
+              {userData.sales_motion && (
                 <>
                   <Separator className="my-4" />
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    {userData.sales_motion && (
-                      <AccountField
-                        icon={<Settings className="h-4 w-4" />}
-                        label="Sales Motion"
-                        value={
-                          <Badge variant="secondary" className="capitalize">
-                            {userData.sales_motion.replace("-", " ")}
-                          </Badge>
-                        }
-                      />
-                    )}
-                    {userData.framework && (
-                      <AccountField
-                        icon={<Settings className="h-4 w-4" />}
-                        label="Sales Framework"
-                        value={
-                          <Badge variant="secondary" className="uppercase">
-                            {userData.framework}
-                          </Badge>
-                        }
-                      />
-                    )}
+                    <AccountField
+                      icon={<Settings className="h-4 w-4" />}
+                      label="Sales Motion"
+                      value={
+                        <Badge variant="secondary" className="capitalize">
+                          {userData.sales_motion.replace("-", " ")}
+                        </Badge>
+                      }
+                    />
                   </div>
                 </>
               )}

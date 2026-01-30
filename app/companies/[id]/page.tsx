@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import {
   Card,
@@ -60,6 +61,8 @@ import {
   Loader2,
   MessageSquareWarning,
   Trash2,
+  MessageCircle,
+  X,
 } from "lucide-react";
 import {
   Dialog,
@@ -90,6 +93,9 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+
+// Dynamic import for AI Agent Panel
+import { AskAICoach } from "@/components/AskAICoach";
 
 // Format duration (stored in minutes) to human readable format
 function formatDuration(minutes?: number | null): string {
@@ -202,6 +208,8 @@ export default function CompanyDetailsPage() {
   // Delete state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // AI Agent Panel
 
   // Stats - loaded separately for performance
   const [stats, setStats] = useState<{
@@ -458,15 +466,29 @@ export default function CompanyDetailsPage() {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [transcripts]);
 
+  // Helper to safely parse JSON arrays
+  const parseArrayField = (data: unknown): any[] => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (typeof data === 'string') {
+      try {
+        const parsed = JSON.parse(data);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   // Risk summary
   const riskSummary = useMemo(() => {
     const risks: any[] = [];
     transcripts.forEach((t) => {
-      if (t.ai_deal_risk_alerts) {
-        t.ai_deal_risk_alerts.forEach((r: any) => {
-          risks.push({ ...r, callTitle: t.title, date: t.created_at });
-        });
-      }
+      const dealRisks = parseArrayField(t.ai_deal_risk_alerts);
+      dealRisks.forEach((r: any) => {
+        risks.push({ ...r, callTitle: t.title, date: t.created_at });
+      });
     });
     return risks.slice(0, 5);
   }, [transcripts]);
@@ -475,15 +497,14 @@ export default function CompanyDetailsPage() {
   const recentTasks = useMemo(() => {
     const tasks: any[] = [];
     transcripts.slice(0, 3).forEach((t) => {
-      if (t.ai_qualification_gaps) {
-        t.ai_qualification_gaps.forEach((gap: any) => {
-          tasks.push({
-            task: gap.how_to_get_it_next_conversation,
-            element: gap.framework_element,
-            callTitle: t.title,
-          });
+      const qualGaps = parseArrayField(t.ai_qualification_gaps);
+      qualGaps.forEach((gap: any) => {
+        tasks.push({
+          task: gap.how_to_get_it_next_conversation,
+          element: gap.framework_element,
+          callTitle: t.title,
         });
-      }
+      });
     });
     return tasks.slice(0, 5);
   }, [transcripts]);
@@ -1315,6 +1336,35 @@ export default function CompanyDetailsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Ask AI Coach - Global Component */}
+      <AskAICoach
+        context={{
+          type: "company_detail",
+          companyId: company?.id,
+          companyName: company?.company_name,
+          domain: company?.domain,
+          industry: industry,
+          totalCalls: stats.totalCalls,
+          avgScore: stats.avgScore,
+          lastCall: stats.lastCall,
+          primaryContacts: contacts.length,
+          painPoints: company?.pain_points || [],
+          riskSummary: company?.risk_summary || riskSummary.map(r => r.risk_description),
+          aiRecommendations: company?.ai_recommendations || [],
+          aiRelationship: company?.ai_relationship || [],
+          recentTasks: recentTasks.map(t => t.task),
+          companyGoal: company?.company_goal_objective,
+        }}
+        panelTitle={company?.company_name || "Company"}
+        placeholder={`Ask anything about ${company?.company_name}...`}
+        quickActions={[
+          "Summarize this company",
+          "What are the key risks?",
+          "Suggest next steps",
+          "How can I improve the relationship?",
+        ]}
+      />
     </SidebarProvider>
   );
 }

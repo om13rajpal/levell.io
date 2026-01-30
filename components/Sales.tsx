@@ -13,108 +13,52 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
-// Scoring configuration based on sales motion and framework
+// Scoring configuration based on sales motion
 const SCORING_CONFIG = {
   smb: {
-    spiced: {
-      fit: 75,
-      painImpact: 70,
-      timelineUrgency: 80,
-      engagement: 85,
-      championStrength: 65,
-      dealEconomics: 70,
-    },
-    meddic: {
-      fit: 80,
-      painImpact: 75,
-      timelineUrgency: 70,
-      engagement: 85,
-      championStrength: 70,
-      dealEconomics: 80,
-    },
-    bant: {
-      fit: 85,
-      painImpact: 65,
-      timelineUrgency: 75,
-      engagement: 80,
-      championStrength: 60,
-      dealEconomics: 85,
-    },
+    fit: 80,
+    painImpact: 70,
+    timelineUrgency: 75,
+    engagement: 85,
+    championStrength: 65,
+    dealEconomics: 78,
   },
   "mid-market": {
-    spiced: {
-      fit: 80,
-      painImpact: 70,
-      timelineUrgency: 75,
-      engagement: 85,
-      championStrength: 75,
-      dealEconomics: 75,
-    },
-    meddic: {
-      fit: 80,
-      painImpact: 65,
-      timelineUrgency: 70,
-      engagement: 90,
-      championStrength: 85,
-      dealEconomics: 75,
-    },
-    bant: {
-      fit: 85,
-      painImpact: 70,
-      timelineUrgency: 80,
-      engagement: 85,
-      championStrength: 70,
-      dealEconomics: 80,
-    },
+    fit: 82,
+    painImpact: 68,
+    timelineUrgency: 75,
+    engagement: 87,
+    championStrength: 77,
+    dealEconomics: 77,
   },
   enterprise: {
-    spiced: {
-      fit: 85,
-      painImpact: 80,
-      timelineUrgency: 70,
-      engagement: 90,
-      championStrength: 80,
-      dealEconomics: 85,
-    },
-    meddic: {
-      fit: 85,
-      painImpact: 80,
-      timelineUrgency: 75,
-      engagement: 90,
-      championStrength: 90,
-      dealEconomics: 85,
-    },
-    bant: {
-      fit: 80,
-      painImpact: 70,
-      timelineUrgency: 65,
-      engagement: 85,
-      championStrength: 75,
-      dealEconomics: 80,
-    },
+    fit: 83,
+    painImpact: 77,
+    timelineUrgency: 70,
+    engagement: 88,
+    championStrength: 82,
+    dealEconomics: 83,
   },
 };
 
 type SalesMotion = keyof typeof SCORING_CONFIG;
-type Framework = "spiced" | "meddic" | "bant";
 
 export default function ConfigureSalesProcessStep({
   onChange,
 }: {
-  onChange: (values: { sales_motion: string; framework: string }) => void;
+  onChange: (value: string) => void;
 }) {
   const [salesMotion, setSalesMotion] = useState<SalesMotion>("mid-market");
-  const [framework, setFramework] = useState<Framework>("meddic");
 
   // Get current scores based on selection
   const scores = useMemo(() => {
-    return SCORING_CONFIG[salesMotion][framework];
-  }, [salesMotion, framework]);
+    return SCORING_CONFIG[salesMotion];
+  }, [salesMotion]);
 
   // Notify parent on every change
   useEffect(() => {
-    onChange({ sales_motion: salesMotion, framework });
-  }, [salesMotion, framework]);
+    onChange(salesMotion);
+  }, [salesMotion]);
 
   return (
     <div className="w-full max-w-6xl mx-auto p-6 bg-background flex flex-col lg:flex-row gap-8">
@@ -124,78 +68,42 @@ export default function ConfigureSalesProcessStep({
         <div>
           <h2 className="text-xl font-semibold">Configure Your Sales Process</h2>
           <p className="text-sm text-muted-foreground">
-            Choose your sales motion and qualification framework.
+            Choose your sales motion type.
           </p>
         </div>
 
-        {/* Sales Motion + Framework */}
-        <div className="space-y-6">
-          {/* Sales Motion */}
-          <Card className="border border-border rounded-xl shadow-xs">
-            <CardHeader>
-              <CardTitle className="text-base font-medium">Sales Motion</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RadioGroup
-                className="grid grid-cols-1 sm:grid-cols-3 gap-3"
-                value={salesMotion}
-                onValueChange={(value) => setSalesMotion(value as SalesMotion)}
-              >
-                <OptionCard
-                  id="smb"
-                  title="SMB"
-                  desc="High velocity, short cycles, lean teams."
-                  active={salesMotion === "smb"}
-                />
-                <OptionCard
-                  id="mid-market"
-                  title="Mid-Market"
-                  desc="Blend of velocity and depth, multi-stakeholder."
-                  active={salesMotion === "mid-market"}
-                />
-                <OptionCard
-                  id="enterprise"
-                  title="Enterprise"
-                  desc="Longer cycles, complex procurement."
-                  active={salesMotion === "enterprise"}
-                />
-              </RadioGroup>
-            </CardContent>
-          </Card>
-
-          {/* Framework */}
-          <Card className="border border-border rounded-xl shadow-xs">
-            <CardHeader>
-              <CardTitle className="text-base font-medium">Framework</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RadioGroup
-                className="grid grid-cols-1 sm:grid-cols-3 gap-3"
-                value={framework}
-                onValueChange={(value) => setFramework(value as Framework)}
-              >
-                <OptionCard
-                  id="spiced"
-                  title="SPICED"
-                  desc="Situation, Pain, Impact, Critical Event, Decision."
-                  active={framework === "spiced"}
-                />
-                <OptionCard
-                  id="meddic"
-                  title="MEDDIC"
-                  desc="Metrics, Buyer, Criteria, Pain, Champion."
-                  active={framework === "meddic"}
-                />
-                <OptionCard
-                  id="bant"
-                  title="BANT"
-                  desc="Budget, Authority, Need, Timeline."
-                  active={framework === "bant"}
-                />
-              </RadioGroup>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Sales Motion */}
+        <Card className="border border-border rounded-xl shadow-xs">
+          <CardHeader>
+            <CardTitle className="text-base font-medium">Sales Motion</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup
+              className="grid grid-cols-1 sm:grid-cols-3 gap-3"
+              value={salesMotion}
+              onValueChange={(value) => setSalesMotion(value as SalesMotion)}
+            >
+              <OptionCard
+                id="smb"
+                title="SMB"
+                desc="High velocity, short cycles, lean teams."
+                active={salesMotion === "smb"}
+              />
+              <OptionCard
+                id="mid-market"
+                title="Mid-Market"
+                desc="Blend of velocity and depth, multi-stakeholder."
+                active={salesMotion === "mid-market"}
+              />
+              <OptionCard
+                id="enterprise"
+                title="Enterprise"
+                desc="Longer cycles, complex procurement."
+                active={salesMotion === "enterprise"}
+              />
+            </RadioGroup>
+          </CardContent>
+        </Card>
       </div>
 
       {/* RIGHT SIDE */}
@@ -217,7 +125,7 @@ export default function ConfigureSalesProcessStep({
             <SliderGroup label="Deal Economics" value={scores.dealEconomics} />
 
             <p className="text-xs text-muted-foreground mt-4">
-              Based on <strong>{salesMotion} + {framework.toUpperCase()}</strong> defaults.
+              Based on <strong>{salesMotion}</strong> defaults.
             </p>
           </CardContent>
         </Card>

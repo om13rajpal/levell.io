@@ -215,12 +215,15 @@ export async function sendWebsiteToWebhook(website: string, companyName: string)
     }
 
     const response = await axiosClient.post(
-      "https://n8n.omrajpal.tech/webhook/c5b19b00-5069-4884-894a-9807e387555c",
+      "/api/inngest/trigger",
       {
-        website,
-        company_id: companyId,
-        company_name: companyName,
-        user_id: user.id,
+        event: "company/analyze.requested",
+        data: {
+          website,
+          company_id: companyId,
+          company_name: companyName,
+          user_id: user.id,
+        },
       },
       {
         headers: {
@@ -263,7 +266,7 @@ export async function sendWebsiteToWebhook(website: string, companyName: string)
   }
 }
 
-export async function updateSalesProcess(sales_motion: string, framework: string) {
+export async function updateSalesProcess(sales_motion: string) {
   try {
     const {
       data: { user },
@@ -272,14 +275,14 @@ export async function updateSalesProcess(sales_motion: string, framework: string
 
     await supabase
       .from("users")
-      .update({ sales_motion, framework })
+      .update({ sales_motion })
       .eq("id", user.id);
   } catch {}
 }
 
 /**
  * Copy company and user data from team owner to invited user
- * This function copies all the data from steps 3-6 of onboarding
+ * This function copies all the data from steps 3-5 of onboarding
  */
 export async function copyTeamOwnerDataToUser(
   userId: string,
@@ -300,10 +303,10 @@ export async function copyTeamOwnerDataToUser(
 
     const ownerId = team.owner;
 
-    // Get owner's user data (sales_motion, framework)
+    // Get owner's user data (sales_motion)
     const { data: ownerData, error: ownerError } = await supabase
       .from("users")
-      .select("sales_motion, framework")
+      .select("sales_motion")
       .eq("id", ownerId)
       .single();
 
@@ -329,9 +332,6 @@ export async function copyTeamOwnerDataToUser(
 
     if (ownerData?.sales_motion) {
       userUpdateData.sales_motion = ownerData.sales_motion;
-    }
-    if (ownerData?.framework) {
-      userUpdateData.framework = ownerData.framework;
     }
 
     // Update user with copied data
@@ -392,7 +392,7 @@ export async function completeInviteOnboarding(
     // Import team service functions dynamically to avoid circular deps
     const { acceptInvitation } = await import("./team");
 
-    // 1. Copy team owner data to user (steps 3-6 data)
+    // 1. Copy team owner data to user (steps 3-5 data)
     const copyResult = await copyTeamOwnerDataToUser(userId, teamId);
     if (!copyResult.success) {
       console.error("Warning: Failed to copy team data:", copyResult.error);

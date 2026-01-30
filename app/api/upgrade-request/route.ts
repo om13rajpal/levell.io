@@ -4,36 +4,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 interface UpgradeRequestBody {
   userName: string;
   userEmail: string;
   companyName?: string;
-}
-
-/**
- * Create nodemailer transporter using SMTP settings
- */
-function createTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || "587", 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: {
-      user,
-      pass,
-    },
-  });
 }
 
 /**
@@ -141,34 +117,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const transporter = createTransporter();
-
-    if (!transporter) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "SMTP not configured",
-        },
+        { success: false, error: "RESEND_API_KEY is not configured in environment." },
+        { status: 500 }
+      );
+    }
+
+    const resend = new Resend(apiKey);
+    const fromEmail = process.env.RESEND_FROM_EMAIL || "team@levvl.io";
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.RESEND_ADMIN_EMAIL;
+
+    if (!adminEmail) {
+      console.error("ADMIN_EMAIL not configured for upgrade requests");
+      return NextResponse.json(
+        { success: false, error: "Admin email not configured" },
         { status: 500 }
       );
     }
 
     const html = getUpgradeRequestTemplate(body);
-    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-    const fromName = process.env.SMTP_FROM_NAME || "Levvl";
 
-    // Send to Seb's email
-    const info = await transporter.sendMail({
-      from: `"${fromName}" <${fromEmail}>`,
-      to: "omrajpal.exe@gmail.com",
+    const { data, error } = await resend.emails.send({
+      from: fromEmail,
+      to: adminEmail,
       subject: `Plan Upgrade Request from ${body.userName}`,
       html,
       replyTo: body.userEmail,
     });
 
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
-      messageId: info.messageId,
+      messageId: data?.id,
     });
   } catch (error) {
     console.error("Upgrade request email error:", error);

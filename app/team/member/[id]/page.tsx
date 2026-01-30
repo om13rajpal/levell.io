@@ -376,7 +376,7 @@ export default function TeamMemberProfilePage() {
         if (coachIds.length > 0) {
           const { data: coaches } = await supabase
             .from("users")
-            .select("id, full_name, email")
+            .select("id, name, email")
             .in("id", coachIds);
 
           if (coaches) {
@@ -1302,7 +1302,7 @@ export default function TeamMemberProfilePage() {
                             <p className="text-xs text-muted-foreground">
                               Added by{" "}
                               <span className="font-medium text-foreground/80">
-                                {note.coach?.full_name || note.coach?.email || "Admin"}
+                                {note.coach?.name || note.coach?.email || "Admin"}
                               </span>
                             </p>
                             <p className="text-xs text-muted-foreground">

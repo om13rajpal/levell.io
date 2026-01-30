@@ -3,6 +3,8 @@ import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "sonner";
+import { PostHogProvider } from "./posthog-provider";
+import { PostHogPageView } from "./posthog-pageview";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -36,14 +38,17 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          enableSystem={true}
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        <PostHogProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="light"
+            enableSystem={true}
+            disableTransitionOnChange
+          >
+            <PostHogPageView />
+            {children}
+          </ThemeProvider>
+        </PostHogProvider>
 
         <Toaster richColors position="top-right" />
       </body>

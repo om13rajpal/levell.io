@@ -39,6 +39,8 @@ import {
   MessageSquareWarning,
   ChevronDown,
   CheckCircle,
+  MessageCircle,
+  X,
 } from "lucide-react";
 import {
   Dialog,
@@ -70,6 +72,8 @@ import { toast } from "sonner";
 import axiosClient from "@/lib/axiosClient";
 import Image from "next/image";
 import { getCompaniesPaginated, getCompanyStats, type CompanyStats } from "@/lib/supabaseCache";
+
+import { AskAICoach } from "@/components/AskAICoach";
 
 // --------------------------------------------------
 // Cache utilities
@@ -190,6 +194,7 @@ export default function CompaniesPage() {
   // Predict Companies
   const [predicting, setPredicting] = useState(false);
   const [predictionClicked, setPredictionClicked] = useState(false);
+
 
   // LocalStorage key for prediction state
   const PREDICTION_CLICKED_KEY = "prediction_companies_clicked";
@@ -546,7 +551,7 @@ export default function CompaniesPage() {
   }, [modalState.goal, modalState.selectedCompany]);
 
   // --------------------------------------------------
-  // Predict Companies (trigger n8n workflow)
+  // Predict Companies (trigger Inngest workflow)
   // --------------------------------------------------
   async function predictCompanies() {
     try {
@@ -564,10 +569,10 @@ export default function CompaniesPage() {
       localStorage.setItem(PREDICTION_CLICKED_KEY, "true");
       setPredictionClicked(true);
 
-      await axiosClient.post(
-        "https://n8n.omrajpal.tech/webhook/c7fd515a-cdcc-461f-9446-09cac79e73ea",
-        { user_id: user.id }
-      );
+      await axiosClient.post("/api/inngest/trigger", {
+        event: "companies/predict.requested",
+        data: { user_id: user.id },
+      });
 
       toast.success("Prediction workflow triggered successfully!");
     } catch (err: any) {
@@ -1503,6 +1508,33 @@ export default function CompaniesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* AI Coach */}
+      <AskAICoach
+        context={{
+          type: "companies",
+          totalCompanies: stats.totalCompanies,
+          totalCalls: stats.totalCalls,
+          avgScore: stats.avgScore,
+          atRisk: stats.atRisk,
+          painPoints: aggregatedPainPoints.map(p => p.painPoint).slice(0, 10),
+          companies: combinedData.slice(0, 10).map(c => ({
+            name: c.company_name,
+            calls: c.calls,
+            score: c.score,
+            risk: c.risk,
+            lastCall: c.lastCall,
+          })),
+        }}
+        panelTitle="Companies Coach"
+        placeholder="Ask about your companies, pain points, risk analysis..."
+        quickActions={[
+          "Which companies need attention?",
+          "Summarize pain points",
+          "Show at-risk accounts",
+          "Top performing companies",
+        ]}
+      />
     </SidebarProvider>
   );
 }

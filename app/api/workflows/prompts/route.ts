@@ -13,8 +13,8 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-// GET - Fetch prompts for n8n workflow
-// Returns all active prompts with their content for use in n8n agents
+// GET - Fetch prompts for workflows
+// Returns all active prompts with their content for use in agents
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
@@ -38,14 +38,14 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.order("agent_type", { ascending: true });
 
     if (error) {
-      console.error("[n8n Prompts API] Error fetching prompts:", error);
+      console.error("[Prompts API] Error fetching prompts:", error);
       return NextResponse.json(
         { error: "Failed to fetch prompts", details: error.message },
         { status: 500 }
       );
     }
 
-    // Format prompts for n8n consumption
+    // Format prompts for consumption
     const formattedPrompts: Record<string, {
       id: string;
       name: string;
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("[n8n Prompts API] Unexpected error:", error);
+    console.error("[Prompts API] Unexpected error:", error);
     return NextResponse.json(
       { error: "An unexpected error occurred" },
       { status: 500 }
@@ -97,7 +97,7 @@ function cleanNumber(value: unknown, defaultValue = 0): number {
   return isNaN(num) ? defaultValue : num;
 }
 
-// POST - Save agent run results from n8n
+// POST - Save agent run results
 export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
     const cleanedTestTranscriptId = cleanUuid(test_transcript_id);
 
     // Generate default prompt_sent if not provided
-    const defaultPromptSent = `[n8n workflow] Agent: ${agent_type}`;
+    const defaultPromptSent = `[inngest workflow] Agent: ${agent_type}`;
 
     // Save the run
     const { data, error } = await supabase
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      console.error("[n8n Prompts API] Error saving run:", error);
+      console.error("[Prompts API] Error saving run:", error);
       return NextResponse.json(
         { error: "Failed to save run", details: error.message },
         { status: 500 }
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
       created_at: data.created_at,
     });
   } catch (error) {
-    console.error("[n8n Prompts API] Unexpected error:", error);
+    console.error("[Prompts API] Unexpected error:", error);
     return NextResponse.json(
       { error: "An unexpected error occurred" },
       { status: 500 }
