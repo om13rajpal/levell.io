@@ -7,10 +7,15 @@ const ALLOWED_EVENTS = [
   "transcripts/fetch-all.requested",
   "transcripts/sync.requested",
   "transcript/score.requested",
+  "transcripts/score-batch.requested",
+  "transcripts/score-parallel.requested", // New: trigger parallel scoring via /api/calls/score
   "company/analyze.requested",
   "company/updated",
+  "companies/cluster.requested",
+  "companies/predict.requested",
   "prompt/test.requested",
   "user/ingest-all.requested",
+  "user/recommendations.requested",
 ];
 
 // Get admin client for auth verification
