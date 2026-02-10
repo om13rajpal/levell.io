@@ -118,15 +118,16 @@ interface TranscriptData {
   id: number;
   user_id: string;
   title: string | null;
-  sentences: Array<{ speaker_name?: string; text?: string }> | null;
+  sentences?: Array<{ speaker_name?: string; text?: string }> | null;
   ai_summary: string | null;
-  ai_what_worked: unknown[] | null;
-  ai_improvement_areas: unknown[] | null;
-  ai_deal_risk_alerts: unknown[] | null;
+  ai_what_worked?: unknown[] | null;
+  ai_improvement_areas?: unknown[] | null;
+  ai_deal_risk_alerts?: unknown[] | null;
+  ai_deal_signal?: string | null;
   ai_overall_score: number | null;
-  duration: number | null;
+  duration?: number | null;
   created_at: string | null;
-  participants: string[] | null;
+  participants?: string[] | null;
 }
 
 /**
@@ -280,10 +281,10 @@ export function prepareCompanyContent(company: CompanyData): string {
 export async function ingestTranscript(transcriptId: number): Promise<void> {
   const supabase = getSupabaseAdmin();
 
-  // Fetch transcript
+  // Fetch transcript - only select needed fields to avoid loading huge sentences array
   const { data: transcript, error: fetchError } = await supabase
     .from("transcripts")
-    .select("*")
+    .select("id, user_id, title, ai_overall_score, ai_summary, ai_what_worked, ai_improvement_areas, ai_deal_signal, ai_deal_risk_alerts, duration, participants, created_at")
     .eq("id", transcriptId)
     .single();
 
@@ -300,34 +301,42 @@ export async function ingestTranscript(transcriptId: number): Promise<void> {
     .eq("source_id", transcriptId.toString());
 
   // Prepare content and chunk it
-  const content = prepareTranscriptContent(transcript);
+  const content = prepareTranscriptContent(transcript as TranscriptData);
   const chunks = chunkText(content, {
     title: transcript.title,
     score: transcript.ai_overall_score,
     date: transcript.created_at,
   });
 
-  // Generate embeddings for all chunks
-  const embeddings = await generateEmbeddings(chunks.map((c) => c.content));
+  // Process in batches of 10 to avoid OOM
+  const EMBED_BATCH_SIZE = 10;
+  let totalInserted = 0;
 
-  // Insert into database
-  const rows = chunks.map((chunk, idx) => ({
-    user_id: transcript.user_id,
-    source_type: "transcript",
-    source_id: transcriptId.toString(),
-    chunk_index: chunk.chunkIndex,
-    content: chunk.content,
-    embedding: JSON.stringify(embeddings[idx]),
-    metadata: chunk.metadata,
-  }));
+  for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
+    const batchChunks = chunks.slice(i, i + EMBED_BATCH_SIZE);
+    const batchEmbeddings = await generateEmbeddings(batchChunks.map((c) => c.content));
 
-  const { error: insertError } = await supabase
-    .from("workspace_embeddings")
-    .insert(rows);
+    const rows = batchChunks.map((chunk, idx) => ({
+      user_id: transcript.user_id,
+      source_type: "transcript",
+      source_id: transcriptId.toString(),
+      chunk_index: chunk.chunkIndex,
+      content: chunk.content,
+      embedding: JSON.stringify(batchEmbeddings[idx]),
+      metadata: chunk.metadata,
+    }));
 
-  if (insertError) {
-    console.error("[Embeddings] Failed to insert embeddings:", insertError);
-    throw insertError;
+    const { error: insertError } = await supabase
+      .from("workspace_embeddings")
+      .insert(rows);
+
+    if (insertError) {
+      console.error("[Embeddings] Failed to insert batch:", insertError);
+      throw insertError;
+    }
+
+    totalInserted += batchChunks.length;
+    console.log(`[Embeddings] Transcript ${transcriptId}: batch ${Math.floor(i / EMBED_BATCH_SIZE) + 1} done (${totalInserted}/${chunks.length} chunks)`);
   }
 
   console.log(`[Embeddings] Ingested transcript ${transcriptId} with ${chunks.length} chunks`);
@@ -341,7 +350,7 @@ export async function ingestCompany(companyId: string, userId: string): Promise<
 
   // Fetch company
   const { data: company, error: fetchError } = await supabase
-    .from("companies")
+    .from("external_org")
     .select("*")
     .eq("id", companyId)
     .single();

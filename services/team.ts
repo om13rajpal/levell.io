@@ -2,6 +2,10 @@
 
 import { supabase } from "@/lib/supabaseClient";
 
+// ============================================================================
+// Types
+// ============================================================================
+
 export interface TeamInvitation {
   id: string;
   team_id: number;
@@ -13,13 +17,43 @@ export interface TeamInvitation {
   expires_at: string;
 }
 
+export type Team = {
+  id: number;
+  team_name: string;
+  created_at: string;
+  active: boolean;
+  internal_org_id?: string;
+};
+
+export interface TeamRole {
+  id: number;
+  role_name: string;
+  description: string | null;
+}
+
+export interface TeamMember {
+  id: string; // team_org.id
+  user_id: string;
+  team_id: number;
+  team_role_id: number;
+  role_name: string;
+  is_sales_manager: boolean;
+  active: boolean;
+  user_name: string | null;
+  user_email: string;
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
 /**
- * Generate a cryptographically secure invitation token
- * Uses Web Crypto API for secure random values
+ * Generate a cryptographically secure invitation token.
+ * Uses Web Crypto API for secure random values.
  */
 function generateToken(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const randomValues = new Uint32Array(48); // 48 characters for better entropy
+  const randomValues = new Uint32Array(48);
   crypto.getRandomValues(randomValues);
 
   let token = "";
@@ -29,57 +63,46 @@ function generateToken(): string {
   return token;
 }
 
+// ============================================================================
+// Core team membership functions
+// ============================================================================
+
 /**
- * Check if a user is already in a team
+ * Get the active team for a user via the team_org junction table.
  */
-export async function getUserTeam(userId: string): Promise<{ teamId: number | null; teamName: string | null }> {
-  // First try the members array contains query
-  const { data: teamRow } = await supabase
-    .from("teams")
-    .select("id, team_name")
-    .contains("members", [userId])
+export async function getUserTeam(
+  userId: string
+): Promise<{ teamId: number | null; teamName: string | null }> {
+  const { data, error } = await supabase
+    .from("team_org")
+    .select("team_id, teams(id, team_name)")
+    .eq("user_id", userId)
+    .eq("active", true)
     .limit(1)
     .maybeSingle();
 
-  if (teamRow) {
-    return {
-      teamId: teamRow.id,
-      teamName: teamRow.team_name,
-    };
+  if (error) {
+    console.error("Error fetching user team:", error);
+    return { teamId: null, teamName: null };
   }
 
-  // Fallback: check user's team_id field
-  const { data: userData } = await supabase
-    .from("users")
-    .select("team_id")
-    .eq("id", userId)
-    .single();
-
-  if (userData?.team_id) {
-    const { data: teamByUserId } = await supabase
-      .from("teams")
-      .select("id, team_name")
-      .eq("id", userData.team_id)
-      .single();
-
-    if (teamByUserId) {
-      return {
-        teamId: teamByUserId.id,
-        teamName: teamByUserId.team_name,
-      };
-    }
+  if (!data) {
+    return { teamId: null, teamName: null };
   }
 
-  return {
-    teamId: null,
-    teamName: null,
-  };
+  // Supabase returns the joined relation as an object (single) or array.
+  const teamName =
+    (data.teams as unknown as { team_name: string } | null)?.team_name ?? null;
+
+  return { teamId: data.team_id, teamName };
 }
 
 /**
- * Check if user can join a team (not already in one)
+ * Check if a user can join a team (i.e. has no active team_org entry).
  */
-export async function canUserJoinTeam(userId: string): Promise<{ canJoin: boolean; existingTeam: string | null }> {
+export async function canUserJoinTeam(
+  userId: string
+): Promise<{ canJoin: boolean; existingTeam: string | null }> {
   const { teamId, teamName } = await getUserTeam(userId);
   return {
     canJoin: teamId === null,
@@ -87,8 +110,106 @@ export async function canUserJoinTeam(userId: string): Promise<{ canJoin: boolea
   };
 }
 
+// ============================================================================
+// Team CRUD
+// ============================================================================
+
 /**
- * Create a team invitation and send email
+ * Create a new team. The creating user becomes Admin (role_id 1) and
+ * is_sales_manager = true.
+ */
+export async function createTeam(
+  teamName: string,
+  userId: string
+): Promise<{ success: boolean; team?: Team; error?: string }> {
+  try {
+    // Check if user is already in a team
+    const { canJoin, existingTeam } = await canUserJoinTeam(userId);
+    if (!canJoin) {
+      return {
+        success: false,
+        error: `You are already a member of "${existingTeam}". Leave that team first to create a new one.`,
+      };
+    }
+
+    // Insert the team (only team_name needed now)
+    const { data: newTeam, error: teamError } = await supabase
+      .from("teams")
+      .insert({ team_name: teamName.trim() })
+      .select("*")
+      .single();
+
+    if (teamError || !newTeam) {
+      console.error("Create team error:", teamError);
+      return { success: false, error: "Failed to create team." };
+    }
+
+    // Insert team_org entry for the creator as Admin + sales manager
+    const { error: orgError } = await supabase.from("team_org").insert({
+      team_id: newTeam.id,
+      user_id: userId,
+      team_role_id: 1, // Admin
+      is_sales_manager: true,
+      active: true,
+    });
+
+    if (orgError) {
+      console.error("Error creating team_org entry:", orgError);
+      // Attempt cleanup: remove the orphaned team
+      await supabase.from("teams").delete().eq("id", newTeam.id);
+      return { success: false, error: "Failed to assign team ownership." };
+    }
+
+    return { success: true, team: newTeam };
+  } catch (err) {
+    console.error("Create team error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Soft-delete a team by setting teams.active = false and deactivating all
+ * team_org entries for the team.
+ */
+export async function softDeleteTeam(
+  teamId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Deactivate the team itself
+    const { error: teamError } = await supabase
+      .from("teams")
+      .update({ active: false })
+      .eq("id", teamId);
+
+    if (teamError) {
+      console.error("Error deactivating team:", teamError);
+      return { success: false, error: "Failed to deactivate team." };
+    }
+
+    // Deactivate all team_org entries for this team
+    const { error: orgError } = await supabase
+      .from("team_org")
+      .update({ active: false })
+      .eq("team_id", teamId);
+
+    if (orgError) {
+      console.error("Error deactivating team_org entries:", orgError);
+      return { success: false, error: "Failed to deactivate team memberships." };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Soft delete team error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+// ============================================================================
+// Invitation functions
+// ============================================================================
+
+/**
+ * Create a team invitation and send an email.
  */
 export async function createTeamInvitation(
   teamId: number,
@@ -148,7 +269,10 @@ export async function createTeamInvitation(
     }
 
     // Generate invite URL
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || "";
+    const baseUrl =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : process.env.NEXT_PUBLIC_SITE_URL || "";
     const inviteUrl = `${baseUrl}/team/invite/${token}`;
 
     // Get inviter's name for the email
@@ -171,7 +295,6 @@ export async function createTeamInvitation(
 
     // Send invitation email via custom email service
     try {
-      // Import dynamically to avoid build issues
       const { sendTeamInvitationEmail } = await import("./email");
 
       const emailResult = await sendTeamInvitationEmail(
@@ -199,12 +322,12 @@ export async function createTeamInvitation(
 }
 
 /**
- * Validate an invitation token
+ * Validate an invitation token.
  */
 export async function validateInvitation(token: string): Promise<{
   valid: boolean;
   invitation?: TeamInvitation;
-  team?: { id: number; team_name: string; owner: string };
+  team?: { id: number; team_name: string };
   error?: string;
 }> {
   try {
@@ -216,9 +339,11 @@ export async function validateInvitation(token: string): Promise<{
 
     if (error) {
       console.error("Error validating invitation:", error);
-      // Check if table doesn't exist
       if (error.code === "42P01" || error.message?.includes("does not exist")) {
-        return { valid: false, error: "Team invitations are not configured. Please contact support." };
+        return {
+          valid: false,
+          error: "Team invitations are not configured. Please contact support.",
+        };
       }
       return { valid: false, error: "Invalid or expired invitation link." };
     }
@@ -245,10 +370,10 @@ export async function validateInvitation(token: string): Promise<{
       return { valid: false, error: "This invitation has expired." };
     }
 
-    // Get team details
+    // Get team details (no owner column)
     const { data: team } = await supabase
       .from("teams")
-      .select("id, team_name, owner")
+      .select("id, team_name")
       .eq("id", invitation.team_id)
       .single();
 
@@ -264,7 +389,7 @@ export async function validateInvitation(token: string): Promise<{
 }
 
 /**
- * Accept a team invitation
+ * Accept a team invitation by inserting a team_org entry for the user.
  */
 export async function acceptInvitation(
   token: string,
@@ -278,123 +403,27 @@ export async function acceptInvitation(
       return { success: false, error: error || "Invalid invitation." };
     }
 
-    // Check if user can join (not already in a team)
+    // Check if user can join (not already in an active team)
     const { canJoin, existingTeam } = await canUserJoinTeam(userId);
     if (!canJoin) {
-      return { success: false, error: `You are already a member of "${existingTeam}". You can only be in one team at a time.` };
+      return {
+        success: false,
+        error: `You are already a member of "${existingTeam}". You can only be in one team at a time.`,
+      };
     }
 
-    // Get current team members
-    const { data: teamData, error: fetchError } = await supabase
-      .from("teams")
-      .select("members")
-      .eq("id", team.id)
-      .single();
+    // Insert team_org entry as a Member (role_id 3)
+    const { error: orgError } = await supabase.from("team_org").insert({
+      team_id: team.id,
+      user_id: userId,
+      team_role_id: 3, // Member
+      is_sales_manager: false,
+      active: true,
+    });
 
-    if (fetchError || !teamData) {
-      console.error("Error fetching team:", fetchError);
-      return { success: false, error: "Team not found." };
-    }
-
-    // Add user to team
-    const currentMembers = teamData.members || [];
-    if (currentMembers.includes(userId)) {
-      // Already a member, just mark invitation as accepted
-      await supabase
-        .from("team_invitations")
-        .update({ status: "accepted" })
-        .eq("id", invitation.id);
-      return { success: true };
-    }
-
-    const newMembers = [...currentMembers, userId];
-
-    // Update team members
-    const { data: updatedTeam, error: updateError } = await supabase
-      .from("teams")
-      .update({ members: newMembers })
-      .eq("id", team.id)
-      .select("members")
-      .single();
-
-    if (updateError) {
-      console.error("Error updating team members:", updateError);
-      return { success: false, error: `Failed to join team: ${updateError.message}` };
-    }
-
-    // Verify the update actually worked
-    if (!updatedTeam?.members?.includes(userId)) {
-      console.error("Member was not added to team - update may have failed silently");
-      console.log("Expected userId:", userId);
-      console.log("Actual members:", updatedTeam?.members);
-      return { success: false, error: "Failed to join team. Please try again." };
-    }
-
-    // Update user's team_id BEFORE marking invitation as accepted
-    // This ensures user is linked to team even if invitation update fails
-    const { error: userUpdateError } = await supabase
-      .from("users")
-      .update({ team_id: team.id })
-      .eq("id", userId);
-
-    if (userUpdateError) {
-      console.error("Error updating user team_id:", userUpdateError);
-      // Don't fail - the important part (adding to members) worked
-    }
-
-    // Assign "Member" tag to the new user by default
-    try {
-      // Get the Member tag for this team
-      const { data: memberTag } = await supabase
-        .from("team_tags")
-        .select("id")
-        .eq("team_id", team.id)
-        .ilike("tag_name", "member")
-        .maybeSingle();
-
-      if (memberTag) {
-        // Check if user already has this tag
-        const { data: existingTag } = await supabase
-          .from("team_member_tags")
-          .select("id")
-          .eq("team_id", team.id)
-          .eq("user_id", userId)
-          .eq("tag_id", memberTag.id)
-          .maybeSingle();
-
-        if (!existingTag) {
-          // Assign the Member tag to the new user
-          await supabase.from("team_member_tags").insert({
-            team_id: team.id,
-            user_id: userId,
-            tag_id: memberTag.id,
-          });
-          console.log("✅ Assigned Member tag to new team member");
-        }
-      } else {
-        // Member tag doesn't exist - ensure team has default tags
-        await ensureTeamTags(team.id);
-
-        // Try again to get and assign the Member tag
-        const { data: newMemberTag } = await supabase
-          .from("team_tags")
-          .select("id")
-          .eq("team_id", team.id)
-          .ilike("tag_name", "member")
-          .maybeSingle();
-
-        if (newMemberTag) {
-          await supabase.from("team_member_tags").insert({
-            team_id: team.id,
-            user_id: userId,
-            tag_id: newMemberTag.id,
-          });
-          console.log("✅ Assigned Member tag to new team member (after creating tags)");
-        }
-      }
-    } catch (tagError) {
-      console.error("Error assigning Member tag:", tagError);
-      // Don't fail - user is still added to team
+    if (orgError) {
+      console.error("Error inserting team_org entry:", orgError);
+      return { success: false, error: `Failed to join team: ${orgError.message}` };
     }
 
     // Mark invitation as accepted
@@ -405,7 +434,7 @@ export async function acceptInvitation(
 
     if (inviteUpdateError) {
       console.error("Error marking invitation as accepted:", inviteUpdateError);
-      // Don't fail - user is already added to team
+      // Don't fail - user is already added to the team
     }
 
     return { success: true };
@@ -416,7 +445,7 @@ export async function acceptInvitation(
 }
 
 /**
- * Get pending invitations for a team
+ * Get pending invitations for a team.
  */
 export async function getTeamPendingInvitations(teamId: number): Promise<TeamInvitation[]> {
   const { data } = await supabase
@@ -430,7 +459,7 @@ export async function getTeamPendingInvitations(teamId: number): Promise<TeamInv
 }
 
 /**
- * Cancel/revoke an invitation
+ * Cancel/revoke an invitation.
  */
 export async function revokeInvitation(invitationId: string): Promise<boolean> {
   const { error } = await supabase
@@ -441,54 +470,68 @@ export async function revokeInvitation(invitationId: string): Promise<boolean> {
   return !error;
 }
 
+// ============================================================================
+// Leave team
+// ============================================================================
+
 /**
- * Leave a team
+ * Leave a team. The sole remaining Admin cannot leave; they must transfer the
+ * Admin role to another member first, or delete the team.
+ * Sets the user's team_org entry to active = false.
  */
 export async function leaveTeam(
   teamId: number,
   userId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Get team
-    const { data: team } = await supabase
-      .from("teams")
-      .select("*")
-      .eq("id", teamId)
-      .single();
+    // Check the user's team_org entry
+    const { data: membership, error: fetchError } = await supabase
+      .from("team_org")
+      .select("id, team_role_id, is_sales_manager")
+      .eq("team_id", teamId)
+      .eq("user_id", userId)
+      .eq("active", true)
+      .maybeSingle();
 
-    if (!team) {
-      return { success: false, error: "Team not found." };
+    if (fetchError || !membership) {
+      return { success: false, error: "You are not an active member of this team." };
     }
 
-    // Check if owner
-    if (team.owner === userId) {
-      return { success: false, error: "Team owner cannot leave. Transfer ownership first or delete the team." };
+    // If the user is an Admin (role_id 1), check whether they are the only one
+    if (membership.team_role_id === 1) {
+      const { count, error: countError } = await supabase
+        .from("team_org")
+        .select("id", { count: "exact", head: true })
+        .eq("team_id", teamId)
+        .eq("team_role_id", 1) // Admin
+        .eq("active", true);
+
+      if (countError) {
+        console.error("Error counting admins:", countError);
+        return { success: false, error: "Failed to verify admin count." };
+      }
+
+      if ((count ?? 0) <= 1) {
+        return {
+          success: false,
+          error:
+            "You are the only Admin on this team. Promote another member to Admin first, or delete the team.",
+        };
+      }
     }
 
-    // Remove from members array
-    const newMembers = (team.members || []).filter((id: string) => id !== userId);
+    // Deactivate the team_org entry
+    const { error: updateError } = await supabase
+      .from("team_org")
+      .update({ active: false })
+      .eq("team_id", teamId)
+      .eq("user_id", userId)
+      .eq("active", true);
 
-    const { error } = await supabase
-      .from("teams")
-      .update({ members: newMembers })
-      .eq("id", teamId);
-
-    if (error) {
+    if (updateError) {
+      console.error("Error deactivating team_org entry:", updateError);
       return { success: false, error: "Failed to leave team." };
     }
-
-    // Remove member tags
-    await supabase
-      .from("team_member_tags")
-      .delete()
-      .eq("team_id", teamId)
-      .eq("user_id", userId);
-
-    // Clear user's team_id
-    await supabase
-      .from("users")
-      .update({ team_id: null })
-      .eq("id", userId);
 
     return { success: true };
   } catch (err) {
@@ -497,553 +540,217 @@ export async function leaveTeam(
   }
 }
 
-/**
- * Ensure Admin and Member tags exist for a team
- * Call this to fix teams that were created without default tags
- */
-export async function ensureTeamTags(teamId: number, ownerId?: string): Promise<void> {
-  try {
-    // Check if Admin tag exists
-    const { data: existingAdminTag } = await supabase
-      .from("team_tags")
-      .select("id")
-      .eq("team_id", teamId)
-      .ilike("tag_name", "admin")
-      .maybeSingle();
-
-    // Check if Member tag exists
-    const { data: existingMemberTag } = await supabase
-      .from("team_tags")
-      .select("id")
-      .eq("team_id", teamId)
-      .ilike("tag_name", "member")
-      .maybeSingle();
-
-    // Create Admin tag if missing
-    let adminTagId = existingAdminTag?.id;
-    if (!existingAdminTag) {
-      const { data: newAdminTag } = await supabase
-        .from("team_tags")
-        .insert({
-          team_id: teamId,
-          tag_name: "Admin",
-          tag_color: "#ef4444",
-        })
-        .select("id")
-        .single();
-      adminTagId = newAdminTag?.id;
-    }
-
-    // Create Member tag if missing
-    if (!existingMemberTag) {
-      await supabase
-        .from("team_tags")
-        .insert({
-          team_id: teamId,
-          tag_name: "Member",
-          tag_color: "#6366f1",
-        });
-    }
-
-    // If owner is provided and Admin tag was just created, assign it to owner
-    if (ownerId && adminTagId && !existingAdminTag) {
-      // Check if owner already has the admin tag
-      const { data: existingOwnerTag } = await supabase
-        .from("team_member_tags")
-        .select("id")
-        .eq("team_id", teamId)
-        .eq("user_id", ownerId)
-        .eq("tag_id", adminTagId)
-        .maybeSingle();
-
-      if (!existingOwnerTag) {
-        await supabase
-          .from("team_member_tags")
-          .insert({
-            team_id: teamId,
-            user_id: ownerId,
-            tag_id: adminTagId,
-          });
-      }
-    }
-  } catch (err) {
-    console.error("Error ensuring team tags:", err);
-  }
-}
-
-/**
- * Create a new team (with single team check)
- */
-export async function createTeam(
-  teamName: string,
-  userId: string
-): Promise<{ success: boolean; team?: any; error?: string }> {
-  try {
-    // Check if user is already in a team
-    const { canJoin, existingTeam } = await canUserJoinTeam(userId);
-    if (!canJoin) {
-      return { success: false, error: `You are already a member of "${existingTeam}". Leave that team first to create a new one.` };
-    }
-
-    // Create team
-    const { data: newTeam, error } = await supabase
-      .from("teams")
-      .insert({
-        team_name: teamName.trim(),
-        owner: userId,
-        members: [userId],
-      })
-      .select("*")
-      .single();
-
-    if (error) {
-      console.error("Create team error:", error);
-      return { success: false, error: "Failed to create team." };
-    }
-
-    // Create default Admin and Member tags for the team
-    const { data: adminTag } = await supabase
-      .from("team_tags")
-      .insert({
-        team_id: newTeam.id,
-        tag_name: "Admin",
-        tag_color: "#ef4444", // Red for admin
-      })
-      .select("id")
-      .single();
-
-    await supabase
-      .from("team_tags")
-      .insert({
-        team_id: newTeam.id,
-        tag_name: "Member",
-        tag_color: "#6366f1", // Indigo for member
-      });
-
-    // Assign Admin tag to team owner
-    if (adminTag) {
-      await supabase
-        .from("team_member_tags")
-        .insert({
-          team_id: newTeam.id,
-          user_id: userId,
-          tag_id: adminTag.id,
-        });
-    }
-
-    // Update user's team_id
-    await supabase
-      .from("users")
-      .update({ team_id: newTeam.id })
-      .eq("id", userId);
-
-    return { success: true, team: newTeam };
-  } catch (err) {
-    console.error("Create team error:", err);
-    return { success: false, error: "An unexpected error occurred." };
-  }
-}
-
 // ============================================================================
-// Tag/Department Management Types
-// ============================================================================
-
-export type TagType = "role" | "department";
-
-export interface TeamTag {
-  id: number;
-  team_id: number;
-  tag_name: string;
-  tag_color: string;
-  tag_type: TagType;
-  description: string | null;
-  is_system: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TeamMemberTag {
-  id: number;
-  team_id: number;
-  user_id: string;
-  tag_id: number;
-  created_at: string;
-}
-
-export interface TagUpdatePayload {
-  tag_name?: string;
-  tag_color?: string;
-  description?: string;
-}
-
-export const DEPARTMENT_TYPE_OPTIONS = [
-  "HR",
-  "Engineering",
-  "Sales",
-  "Marketing",
-  "Finance",
-  "Operations",
-  "Customer Support",
-  "Other",
-] as const;
-
-export type DepartmentType = (typeof DEPARTMENT_TYPE_OPTIONS)[number];
-
-// ============================================================================
-// Tag/Department Management Functions
+// Roles and members
 // ============================================================================
 
 /**
- * Get all tags for a team, ordered by type then name
+ * Fetch all global team roles from the team_roles table (read-only).
  */
-export async function getTeamTags(
-  teamId: number
-): Promise<{ success: boolean; tags?: TeamTag[]; error?: string }> {
+export async function getTeamRoles(): Promise<{
+  success: boolean;
+  roles?: TeamRole[];
+  error?: string;
+}> {
   try {
     const { data, error } = await supabase
-      .from("team_tags")
-      .select("*")
+      .from("team_roles")
+      .select("id, role_name, description")
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching team roles:", error);
+      return { success: false, error: "Failed to fetch team roles." };
+    }
+
+    return { success: true, roles: data || [] };
+  } catch (err) {
+    console.error("Get team roles error:", err);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+}
+
+/**
+ * Get the role of a specific user within a team.
+ */
+export async function getUserRole(
+  userId: string,
+  teamId: number
+): Promise<{
+  roleId: number | null;
+  roleName: string | null;
+  isSalesManager: boolean;
+}> {
+  const { data } = await supabase
+    .from("team_org")
+    .select("team_role_id, is_sales_manager, team_roles(role_name)")
+    .eq("user_id", userId)
+    .eq("team_id", teamId)
+    .eq("active", true)
+    .maybeSingle();
+
+  if (!data) return { roleId: null, roleName: null, isSalesManager: false };
+
+  return {
+    roleId: data.team_role_id,
+    roleName: (data as any).team_roles?.role_name || null,
+    isSalesManager: data.is_sales_manager || false,
+  };
+}
+
+/**
+ * Get all active members for a team, including user details and role name.
+ */
+export async function getTeamMembers(teamId: number): Promise<{
+  success: boolean;
+  members?: TeamMember[];
+  error?: string;
+}> {
+  try {
+    const { data, error } = await supabase
+      .from("team_org")
+      .select(
+        "id, user_id, team_id, team_role_id, is_sales_manager, active, users(name, email), team_roles(role_name)"
+      )
       .eq("team_id", teamId)
-      .order("tag_type", { ascending: true })
-      .order("tag_name", { ascending: true });
+      .eq("active", true);
 
     if (error) {
-      console.error("Error fetching team tags:", error);
-      return { success: false, error: "Failed to fetch team tags." };
+      console.error("Error fetching team members:", error);
+      return { success: false, error: "Failed to fetch team members." };
     }
 
-    return { success: true, tags: data || [] };
+    const members: TeamMember[] = (data || []).map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      team_id: row.team_id,
+      team_role_id: row.team_role_id,
+      role_name: row.team_roles?.role_name ?? "Unknown",
+      is_sales_manager: row.is_sales_manager,
+      active: row.active,
+      user_name: row.users?.name ?? null,
+      user_email: row.users?.email ?? "",
+    }));
+
+    return { success: true, members };
   } catch (err) {
-    console.error("Get team tags error:", err);
+    console.error("Get team members error:", err);
     return { success: false, error: "An unexpected error occurred." };
   }
 }
 
 /**
- * Create a new custom tag for a team
+ * Update a member's role in a team.
  */
-export async function createTeamTag(
-  teamId: number,
-  tagName: string,
-  tagColor: string,
-  tagType: TagType,
-  description?: string
-): Promise<{ success: boolean; tag?: TeamTag; error?: string }> {
-  try {
-    // Validate inputs
-    if (!tagName || tagName.trim().length === 0) {
-      return { success: false, error: "Tag name is required." };
-    }
-
-    if (!tagColor || !/^#[0-9A-Fa-f]{6}$/.test(tagColor)) {
-      return { success: false, error: "Invalid tag color. Must be a valid hex color (e.g., #FF0000)." };
-    }
-
-    if (!["role", "department"].includes(tagType)) {
-      return { success: false, error: "Invalid tag type. Must be 'role' or 'department'." };
-    }
-
-    // Check for duplicate tag name in the same team
-    const { data: existingTag } = await supabase
-      .from("team_tags")
-      .select("id")
-      .eq("team_id", teamId)
-      .ilike("tag_name", tagName.trim())
-      .maybeSingle();
-
-    if (existingTag) {
-      return { success: false, error: "A tag with this name already exists in the team." };
-    }
-
-    // Create the tag
-    const { data: newTag, error } = await supabase
-      .from("team_tags")
-      .insert({
-        team_id: teamId,
-        tag_name: tagName.trim(),
-        tag_color: tagColor,
-        tag_type: tagType,
-        description: description?.trim() || null,
-        is_system: false,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error creating team tag:", error);
-      return { success: false, error: "Failed to create tag." };
-    }
-
-    return { success: true, tag: newTag };
-  } catch (err) {
-    console.error("Create team tag error:", err);
-    return { success: false, error: "An unexpected error occurred." };
-  }
-}
-
-/**
- * Update an existing tag
- */
-export async function updateTeamTag(
-  tagId: number,
-  updates: TagUpdatePayload
-): Promise<{ success: boolean; tag?: TeamTag; error?: string }> {
-  try {
-    // Fetch the existing tag to check if it's a system tag
-    const { data: existingTag, error: fetchError } = await supabase
-      .from("team_tags")
-      .select("*")
-      .eq("id", tagId)
-      .single();
-
-    if (fetchError || !existingTag) {
-      return { success: false, error: "Tag not found." };
-    }
-
-    // System tags can only have their color updated
-    if (existingTag.is_system && (updates.tag_name || updates.description)) {
-      return { success: false, error: "System tags can only have their color updated." };
-    }
-
-    // Validate tag name if provided
-    if (updates.tag_name !== undefined) {
-      if (!updates.tag_name || updates.tag_name.trim().length === 0) {
-        return { success: false, error: "Tag name cannot be empty." };
-      }
-
-      // Check for duplicate tag name in the same team (excluding current tag)
-      const { data: duplicateTag } = await supabase
-        .from("team_tags")
-        .select("id")
-        .eq("team_id", existingTag.team_id)
-        .ilike("tag_name", updates.tag_name.trim())
-        .neq("id", tagId)
-        .maybeSingle();
-
-      if (duplicateTag) {
-        return { success: false, error: "A tag with this name already exists in the team." };
-      }
-    }
-
-    // Validate color if provided
-    if (updates.tag_color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(updates.tag_color)) {
-      return { success: false, error: "Invalid tag color. Must be a valid hex color (e.g., #FF0000)." };
-    }
-
-    // Build update payload
-    const updatePayload: Record<string, unknown> = {};
-    if (updates.tag_name !== undefined) {
-      updatePayload.tag_name = updates.tag_name.trim();
-    }
-    if (updates.tag_color !== undefined) {
-      updatePayload.tag_color = updates.tag_color;
-    }
-    if (updates.description !== undefined) {
-      updatePayload.description = updates.description?.trim() || null;
-    }
-
-    if (Object.keys(updatePayload).length === 0) {
-      return { success: false, error: "No valid updates provided." };
-    }
-
-    // Update the tag
-    const { data: updatedTag, error } = await supabase
-      .from("team_tags")
-      .update(updatePayload)
-      .eq("id", tagId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error updating team tag:", error);
-      return { success: false, error: "Failed to update tag." };
-    }
-
-    return { success: true, tag: updatedTag };
-  } catch (err) {
-    console.error("Update team tag error:", err);
-    return { success: false, error: "An unexpected error occurred." };
-  }
-}
-
-/**
- * Delete a tag (with validation it's not a system tag)
- */
-export async function deleteTeamTag(
-  tagId: number
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    // Fetch the existing tag to check if it's a system tag
-    const { data: existingTag, error: fetchError } = await supabase
-      .from("team_tags")
-      .select("id, is_system")
-      .eq("id", tagId)
-      .single();
-
-    if (fetchError || !existingTag) {
-      return { success: false, error: "Tag not found." };
-    }
-
-    if (existingTag.is_system) {
-      return { success: false, error: "System tags cannot be deleted." };
-    }
-
-    // Delete all member associations for this tag first
-    const { error: memberTagError } = await supabase
-      .from("team_member_tags")
-      .delete()
-      .eq("tag_id", tagId);
-
-    if (memberTagError) {
-      console.error("Error deleting member tag associations:", memberTagError);
-      return { success: false, error: "Failed to delete tag associations." };
-    }
-
-    // Delete the tag
-    const { error } = await supabase
-      .from("team_tags")
-      .delete()
-      .eq("id", tagId);
-
-    if (error) {
-      console.error("Error deleting team tag:", error);
-      return { success: false, error: "Failed to delete tag." };
-    }
-
-    return { success: true };
-  } catch (err) {
-    console.error("Delete team tag error:", err);
-    return { success: false, error: "An unexpected error occurred." };
-  }
-}
-
-/**
- * Assign multiple tags to a member (replaces existing non-role tags)
- */
-export async function assignTagsToMember(
+export async function updateMemberRole(
   teamId: number,
   userId: string,
-  tagIds: number[]
+  newRoleId: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Validate that all provided tag IDs belong to this team
-    if (tagIds.length > 0) {
-      const { data: validTags, error: validateError } = await supabase
-        .from("team_tags")
-        .select("id, tag_type")
-        .eq("team_id", teamId)
-        .in("id", tagIds);
-
-      if (validateError) {
-        console.error("Error validating tags:", validateError);
-        return { success: false, error: "Failed to validate tags." };
-      }
-
-      if (!validTags || validTags.length !== tagIds.length) {
-        return { success: false, error: "One or more tags do not belong to this team." };
-      }
-    }
-
-    // Get existing role tags for the user (we'll preserve these)
-    const { data: existingRoleTags, error: fetchRoleError } = await supabase
-      .from("team_member_tags")
-      .select("tag_id, team_tags!inner(tag_type)")
-      .eq("team_id", teamId)
-      .eq("user_id", userId);
-
-    if (fetchRoleError) {
-      console.error("Error fetching existing role tags:", fetchRoleError);
-      return { success: false, error: "Failed to fetch existing tags." };
-    }
-
-    // Filter to get only role tag IDs that should be preserved
-    const roleTagIds = (existingRoleTags || [])
-      .filter((t: any) => t.team_tags?.tag_type === "role")
-      .map((t: any) => t.tag_id);
-
-    // Delete all existing non-role tags for this member
-    const { error: deleteError } = await supabase
-      .from("team_member_tags")
-      .delete()
+    const { error } = await supabase
+      .from("team_org")
+      .update({ team_role_id: newRoleId })
       .eq("team_id", teamId)
       .eq("user_id", userId)
-      .not("tag_id", "in", `(${roleTagIds.length > 0 ? roleTagIds.join(",") : "0"})`);
+      .eq("active", true);
 
-    if (deleteError) {
-      console.error("Error deleting existing member tags:", deleteError);
-      return { success: false, error: "Failed to update member tags." };
-    }
-
-    // Filter out role tags from the new tag IDs (we already have them preserved)
-    const nonRoleTagIds = tagIds.filter((id) => !roleTagIds.includes(id));
-
-    // Insert new non-role tags
-    if (nonRoleTagIds.length > 0) {
-      const insertPayload = nonRoleTagIds.map((tagId) => ({
-        team_id: teamId,
-        user_id: userId,
-        tag_id: tagId,
-      }));
-
-      const { error: insertError } = await supabase
-        .from("team_member_tags")
-        .insert(insertPayload);
-
-      if (insertError) {
-        console.error("Error inserting member tags:", insertError);
-        return { success: false, error: "Failed to assign tags to member." };
-      }
+    if (error) {
+      console.error("Error updating member role:", error);
+      return { success: false, error: "Failed to update member role." };
     }
 
     return { success: true };
   } catch (err) {
-    console.error("Assign tags to member error:", err);
+    console.error("Update member role error:", err);
     return { success: false, error: "An unexpected error occurred." };
   }
 }
 
 /**
- * Get all tags assigned to a specific member
+ * Change a user's role in a team (alias for updateMemberRole).
  */
-export async function getMemberTags(
+export async function changeUserRole(
   teamId: number,
-  userId: string
-): Promise<{ success: boolean; tags?: TeamTag[]; error?: string }> {
-  try {
-    const { data, error } = await supabase
-      .from("team_member_tags")
-      .select("tag_id, team_tags(*)")
-      .eq("team_id", teamId)
-      .eq("user_id", userId);
+  userId: string,
+  newRoleId: number
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase
+    .from("team_org")
+    .update({ team_role_id: newRoleId })
+    .eq("team_id", teamId)
+    .eq("user_id", userId)
+    .eq("active", true);
 
-    if (error) {
-      console.error("Error fetching member tags:", error);
-      return { success: false, error: "Failed to fetch member tags." };
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/**
+ * Move a user from one team to another. Deactivates the old team_org entry
+ * and creates a new one for the target team.
+ */
+export async function moveUserBetweenTeams(
+  userId: string,
+  fromTeamId: number,
+  toTeamId: number,
+  roleId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Deactivate old membership
+    const { error: deactivateError } = await supabase
+      .from("team_org")
+      .update({ active: false })
+      .eq("user_id", userId)
+      .eq("team_id", fromTeamId)
+      .eq("active", true);
+
+    if (deactivateError) {
+      console.error("Error deactivating old team_org entry:", deactivateError);
+      return { success: false, error: "Failed to remove user from old team." };
     }
 
-    // Extract the tag objects from the join result
-    const tags = (data || [])
-      .map((item: any) => item.team_tags)
-      .filter((tag: TeamTag | null) => tag !== null) as TeamTag[];
-
-    // Sort by type then name
-    tags.sort((a, b) => {
-      if (a.tag_type !== b.tag_type) {
-        return a.tag_type.localeCompare(b.tag_type);
-      }
-      return a.tag_name.localeCompare(b.tag_name);
+    // Create new membership
+    const { error: insertError } = await supabase.from("team_org").insert({
+      team_id: toTeamId,
+      user_id: userId,
+      team_role_id: roleId,
+      is_sales_manager: false,
+      active: true,
     });
 
-    return { success: true, tags };
+    if (insertError) {
+      console.error("Error creating new team_org entry:", insertError);
+      // Attempt to reactivate old entry on failure
+      await supabase
+        .from("team_org")
+        .update({ active: true })
+        .eq("user_id", userId)
+        .eq("team_id", fromTeamId)
+        .eq("active", false)
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      return { success: false, error: "Failed to add user to new team." };
+    }
+
+    return { success: true };
   } catch (err) {
-    console.error("Get member tags error:", err);
+    console.error("Move user between teams error:", err);
     return { success: false, error: "An unexpected error occurred." };
   }
 }
 
+// ============================================================================
+// Legacy stubs (kept for backward compatibility with callers)
+// ============================================================================
+
 /**
- * Returns predefined department type options
+ * No-op: Roles are now global in the team_roles table.
+ * Kept for backward compatibility with callers that still invoke it.
  */
-export function getTagTypeOptions(): DepartmentType[] {
-  return [...DEPARTMENT_TYPE_OPTIONS];
+export async function ensureTeamTags(
+  _teamId: number,
+  _ownerId?: string
+): Promise<void> {
+  // No-op: Roles are now global in team_roles table
 }

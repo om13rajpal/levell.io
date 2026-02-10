@@ -15,7 +15,6 @@ import {
   getTeamPendingInvitations,
   revokeInvitation,
   leaveTeam,
-  ensureTeamTags,
   TeamInvitation,
 } from "@/services/team";
 
@@ -89,9 +88,9 @@ import { MemberTagAssignment } from "@/components/MemberTagAssignment";
 type Team = {
   id: number;
   team_name: string;
-  owner: string;
-  members: string[];
   created_at: string;
+  active: boolean;
+  internal_org_id?: string;
 };
 
 type UserRow = {
@@ -100,21 +99,22 @@ type UserRow = {
   email: string;
 };
 
-type TeamTag = {
+type TeamRole = {
   id: number;
-  team_id: number;
-  tag_name: string;
-  tag_color: string | null;
-  tag_type?: "role" | "department";
+  role_name: string;
+  description: string | null;
   created_at: string;
 };
 
-type MemberTag = {
-  id: number;
+type TeamOrgMember = {
+  id: string;
   team_id: number;
   user_id: string;
-  tag_id: number;
+  team_role_id: number;
+  is_sales_manager: boolean;
+  active: boolean;
   created_at: string;
+  updated_at: string;
 };
 
 export default function TeamPage() {
@@ -125,10 +125,10 @@ export default function TeamPage() {
 
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<UserRow[]>([]);
-  const [ownerUser, setOwnerUser] = useState<UserRow | null>(null);
+  const [salesManager, setSalesManager] = useState<UserRow | null>(null);
 
-  const [tags, setTags] = useState<TeamTag[]>([]);
-  const [memberTags, setMemberTags] = useState<MemberTag[]>([]);
+  const [roles, setRoles] = useState<TeamRole[]>([]);
+  const [teamOrgMembers, setTeamOrgMembers] = useState<TeamOrgMember[]>([]);
 
   const [createTeamName, setCreateTeamName] = useState("");
   const [joinTeamId, setJoinTeamId] = useState("");
@@ -185,30 +185,23 @@ export default function TeamPage() {
 
   const getRoleForUser = useCallback((
     uid: string | null | undefined
-  ): "admin" | "member" | null => {
+  ): "admin" | "sales_manager" | "member" | null => {
     if (!uid || !team) return null;
-    if (!tags.length || !memberTags.length) return null;
+    if (!teamOrgMembers.length) return null;
 
-    const userMappings = memberTags.filter(
-      (mt) => mt.user_id === uid && mt.team_id === team.id
+    const orgEntry = teamOrgMembers.find(
+      (to) => to.user_id === uid && to.team_id === team.id && to.active
     );
 
-    if (!userMappings.length) return null;
+    if (!orgEntry) return null;
 
-    const adminTag = tags.find(
-      (t) => t.team_id === team.id && t.tag_name.toLowerCase() === "admin"
-    );
-    const memberTag = tags.find(
-      (t) => t.team_id === team.id && t.tag_name.toLowerCase() === "member"
-    );
-
-    if (adminTag && userMappings.some((mt) => mt.tag_id === adminTag.id))
-      return "admin";
-    if (memberTag && userMappings.some((mt) => mt.tag_id === memberTag.id))
-      return "member";
+    // team_role_id: 1=Admin, 2=Sales Manager, 3=Member
+    if (orgEntry.team_role_id === 1) return "admin";
+    if (orgEntry.team_role_id === 2) return "sales_manager";
+    if (orgEntry.team_role_id === 3) return "member";
 
     return null;
-  }, [team, tags, memberTags]);
+  }, [team, teamOrgMembers]);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
@@ -226,89 +219,40 @@ export default function TeamPage() {
         .single();
       setUser(u);
 
-      const { data: teamRow, error: teamError } = await supabase
-        .from("teams")
-        .select("*")
-        .contains("members", [userId])
+      // Find team via team_org junction table
+      const { data: orgEntry, error: orgError } = await supabase
+        .from("team_org")
+        .select("team_id")
+        .eq("user_id", userId)
+        .eq("active", true)
         .limit(1)
         .maybeSingle();
 
-      if (teamError) {
-        console.error("Error fetching team:", teamError);
+      if (orgError) {
+        console.error("Error fetching team_org:", orgError);
       }
 
-      // Debug: Also check user's team_id as fallback
-      if (!teamRow) {
-        // Try to find team by user's team_id field
-        const { data: userData } = await supabase
-          .from("users")
-          .select("team_id")
-          .eq("id", userId)
-          .single();
-
-        if (userData?.team_id) {
-          const { data: teamByUserTeamId } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("id", userData.team_id)
-            .single();
-
-          if (teamByUserTeamId) {
-            console.log("Found team via user.team_id, members array might be out of sync");
-            // The team exists but user isn't in members array - this is the bug!
-            // Fix it by adding user to members
-            const currentMembers = teamByUserTeamId.members || [];
-            if (!currentMembers.includes(userId)) {
-              const newMembers = [...currentMembers, userId];
-              await supabase
-                .from("teams")
-                .update({ members: newMembers })
-                .eq("id", teamByUserTeamId.id);
-
-              // Refetch the team
-              const { data: fixedTeam } = await supabase
-                .from("teams")
-                .select("*")
-                .eq("id", teamByUserTeamId.id)
-                .single();
-
-              if (fixedTeam) {
-                setTeam(fixedTeam as Team);
-                setSettingsTeamName(fixedTeam.team_name);
-
-                // Ensure Admin and Member tags exist for the team (fixes legacy teams)
-                await ensureTeamTags(fixedTeam.id, fixedTeam.owner);
-
-                const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
-                  fixedTeam.members?.length > 0
-                    ? supabase.from("users").select("id, name, email").in("id", fixedTeam.members)
-                    : Promise.resolve({ data: [] }),
-                  fixedTeam.owner
-                    ? supabase.from("users").select("id, name, email").eq("id", fixedTeam.owner).single()
-                    : Promise.resolve({ data: null }),
-                  supabase.from("team_tags").select("*").eq("team_id", fixedTeam.id),
-                  supabase.from("team_member_tags").select("*").eq("team_id", fixedTeam.id)
-                ]);
-
-                setMembers(membersResult.data || []);
-                setOwnerUser(ownerResult.data);
-                setTags(tagsResult.data || []);
-                setMemberTags(memberTagsResult.data || []);
-
-                const invitations = await getTeamPendingInvitations(fixedTeam.id);
-                setPendingInvitations(invitations);
-
-                setLoading(false);
-                return;
-              }
-            }
-          }
-        }
-
+      if (!orgEntry) {
         setTeam(null);
         setMembers([]);
-        setTags([]);
-        setMemberTags([]);
+        setRoles([]);
+        setTeamOrgMembers([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data: teamRow, error: teamError } = await supabase
+        .from("teams")
+        .select("*")
+        .eq("id", orgEntry.team_id)
+        .single();
+
+      if (teamError || !teamRow) {
+        console.error("Error fetching team:", teamError);
+        setTeam(null);
+        setMembers([]);
+        setRoles([]);
+        setTeamOrgMembers([]);
         setLoading(false);
         return;
       }
@@ -316,24 +260,42 @@ export default function TeamPage() {
       setTeam(teamRow as Team);
       setSettingsTeamName(teamRow.team_name);
 
-      // Ensure Admin and Member tags exist for the team (fixes legacy teams)
-      await ensureTeamTags(teamRow.id, teamRow.owner);
+      // Fetch all team_org entries for this team (active members)
+      const { data: orgMembers } = await supabase
+        .from("team_org")
+        .select("*")
+        .eq("team_id", teamRow.id)
+        .eq("active", true);
 
-      const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
-        teamRow.members?.length > 0
-          ? supabase.from("users").select("id, name, email").in("id", teamRow.members)
-          : Promise.resolve({ data: [] }),
-        teamRow.owner
-          ? supabase.from("users").select("id, name, email").eq("id", teamRow.owner).single()
-          : Promise.resolve({ data: null }),
-        supabase.from("team_tags").select("*").eq("team_id", teamRow.id),
-        supabase.from("team_member_tags").select("*").eq("team_id", teamRow.id)
-      ]);
+      const activeOrgMembers = (orgMembers || []) as TeamOrgMember[];
+      setTeamOrgMembers(activeOrgMembers);
+
+      // Fetch user details for all active members
+      const memberIds = activeOrgMembers.map((om) => om.user_id);
+      const membersResult = memberIds.length > 0
+        ? await supabase.from("users").select("id, name, email").in("id", memberIds)
+        : { data: [] };
+
+      // Fetch the sales manager (owner equivalent)
+      const salesManagerEntry = activeOrgMembers.find((om) => om.is_sales_manager);
+      let salesManagerResult = { data: null as UserRow | null };
+      if (salesManagerEntry) {
+        const { data: smData } = await supabase
+          .from("users")
+          .select("id, name, email")
+          .eq("id", salesManagerEntry.user_id)
+          .single();
+        salesManagerResult = { data: smData };
+      }
+
+      // Fetch global team_roles
+      const { data: rolesData } = await supabase
+        .from("team_roles")
+        .select("id, role_name, description, created_at");
 
       setMembers(membersResult.data || []);
-      setOwnerUser(ownerResult.data);
-      setTags(tagsResult.data || []);
-      setMemberTags(memberTagsResult.data || []);
+      setSalesManager(salesManagerResult.data);
+      setRoles(rolesData || []);
 
       const invitations = await getTeamPendingInvitations(teamRow.id);
       setPendingInvitations(invitations);
@@ -351,12 +313,15 @@ export default function TeamPage() {
       return;
     }
 
-    const ownerFlag = team.owner === userId;
+    const orgEntry = teamOrgMembers.find(
+      (to) => to.user_id === userId && to.team_id === team.id && to.active
+    );
+    const salesManagerFlag = orgEntry?.is_sales_manager === true;
     const role = getRoleForUser(userId);
 
-    setIsOwner(ownerFlag);
-    setIsAdmin(role === "admin" || ownerFlag);
-  }, [team, userId, getRoleForUser]);
+    setIsOwner(salesManagerFlag);
+    setIsAdmin(role === "admin" || salesManagerFlag);
+  }, [team, userId, getRoleForUser, teamOrgMembers]);
 
   const isInTeam = !!team;
 
@@ -473,9 +438,15 @@ export default function TeamPage() {
     setTeam(newTeam as Team);
     setSettingsTeamName(newTeam.team_name);
     setMembers([user!]);
-    setOwnerUser(user);
-    setTags([]);
-    setMemberTags([]);
+    setSalesManager(user);
+
+    // Fetch the team_org entries and roles for the new team
+    const [orgResult, rolesResult] = await Promise.all([
+      supabase.from("team_org").select("*").eq("team_id", newTeam.id).eq("active", true),
+      supabase.from("team_roles").select("id, role_name, description, created_at"),
+    ]);
+    setTeamOrgMembers((orgResult.data || []) as TeamOrgMember[]);
+    setRoles(rolesResult.data || []);
     setPendingInvitations([]);
   };
 
@@ -509,81 +480,37 @@ export default function TeamPage() {
       return;
     }
 
-    const currentMembers: string[] = teamRow.members || [];
+    // Check if user is already a member via team_org
+    const { data: existingOrg } = await supabase
+      .from("team_org")
+      .select("id")
+      .eq("team_id", teamIdNum)
+      .eq("user_id", userId)
+      .eq("active", true)
+      .maybeSingle();
 
-    // Check if user is already a member
-    if (currentMembers.includes(userId)) {
+    if (existingOrg) {
       toast.info("You are already a member of this team");
       setJoinLoading(false);
       return;
     }
 
-    console.log("Current members:", currentMembers);
-    console.log("User ID to add:", userId);
+    // Insert into team_org with default Member role (id=3)
+    const { error: insertError } = await supabase
+      .from("team_org")
+      .insert({
+        team_id: teamIdNum,
+        user_id: userId,
+        team_role_id: 3, // Member
+        is_sales_manager: false,
+        active: true,
+      });
 
-    let updatedTeam = null;
-
-    // Try using RPC function first (most reliable for array operations)
-    const { error: rpcError } = await supabase.rpc("append_team_member", {
-      team_id_input: teamIdNum,
-      user_id_input: userId
-    });
-
-    if (rpcError) {
-      console.log("RPC not available, using direct update:", rpcError.message);
-
-      // Fallback: Use direct update with explicit array
-      const newMembers: string[] = [...currentMembers, userId];
-      console.log("New members array:", newMembers);
-
-      const { error: directError } = await supabase
-        .from("teams")
-        .update({ members: newMembers })
-        .eq("id", teamIdNum);
-
-      if (directError) {
-        console.error("Error joining team:", directError);
-        toast.error(`Failed to join team: ${directError.message}`);
-        setJoinLoading(false);
-        return;
-      }
-    }
-
-    // Fetch the updated team data
-    const { data: verifyTeam, error: fetchError } = await supabase
-      .from("teams")
-      .select("*")
-      .eq("id", teamIdNum)
-      .single();
-
-    console.log("Team after update:", verifyTeam);
-
-    if (fetchError || !verifyTeam) {
-      toast.error("Failed to fetch team data");
+    if (insertError) {
+      console.error("Error joining team:", insertError);
+      toast.error(`Failed to join team: ${insertError.message}`);
       setJoinLoading(false);
       return;
-    }
-
-    // Check if user was added
-    if (!verifyTeam.members?.includes(userId)) {
-      console.error("User was not added to members array");
-      console.log("Expected userId:", userId);
-      console.log("Actual members:", verifyTeam.members);
-      toast.error("Failed to join team - please contact support");
-      setJoinLoading(false);
-      return;
-    }
-
-    updatedTeam = verifyTeam;
-
-    // Update user's team_id
-    const { error: userUpdateError } = await supabase
-      .from("users")
-      .update({ team_id: teamIdNum })
-      .eq("id", userId);
-
-    if (userUpdateError) {
-      console.error("Error updating user team_id:", userUpdateError);
     }
 
     setOpenJoinTeam(false);
@@ -591,29 +518,37 @@ export default function TeamPage() {
     setJoinTeamId("");
     toast.success("Successfully joined the team!");
 
-    setTeam(updatedTeam as Team);
-    setSettingsTeamName(updatedTeam.team_name);
+    setTeam(teamRow as Team);
+    setSettingsTeamName(teamRow.team_name);
 
-    // Ensure Admin and Member tags exist for the team (fixes legacy teams)
-    await ensureTeamTags(updatedTeam.id, updatedTeam.owner);
-
-    const [membersResult, ownerResult, tagsResult, memberTagsResult] = await Promise.all([
-      updatedTeam.members?.length > 0
-        ? supabase.from("users").select("id, name, email").in("id", updatedTeam.members)
-        : Promise.resolve({ data: [] }),
-      updatedTeam.owner
-        ? supabase.from("users").select("id, name, email").eq("id", updatedTeam.owner).single()
-        : Promise.resolve({ data: null }),
-      supabase.from("team_tags").select("*").eq("team_id", updatedTeam.id),
-      supabase.from("team_member_tags").select("*").eq("team_id", updatedTeam.id)
+    // Fetch updated team_org, members, roles
+    const [orgResult, rolesResult] = await Promise.all([
+      supabase.from("team_org").select("*").eq("team_id", teamRow.id).eq("active", true),
+      supabase.from("team_roles").select("id, role_name, description, created_at"),
     ]);
 
-    setMembers(membersResult.data || []);
-    setOwnerUser(ownerResult.data);
-    setTags(tagsResult.data || []);
-    setMemberTags(memberTagsResult.data || []);
+    const activeOrgMembers = (orgResult.data || []) as TeamOrgMember[];
+    setTeamOrgMembers(activeOrgMembers);
+    setRoles(rolesResult.data || []);
 
-    const invitations = await getTeamPendingInvitations(updatedTeam.id);
+    const memberIds = activeOrgMembers.map((om) => om.user_id);
+    const membersResult = memberIds.length > 0
+      ? await supabase.from("users").select("id, name, email").in("id", memberIds)
+      : { data: [] };
+
+    const salesManagerEntry = activeOrgMembers.find((om) => om.is_sales_manager);
+    if (salesManagerEntry) {
+      const { data: smData } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("id", salesManagerEntry.user_id)
+        .single();
+      setSalesManager(smData);
+    }
+
+    setMembers(membersResult.data || []);
+
+    const invitations = await getTeamPendingInvitations(teamRow.id);
     setPendingInvitations(invitations);
   };
 
@@ -631,51 +566,42 @@ export default function TeamPage() {
 
     setTeam(null);
     setMembers([]);
-    setTags([]);
-    setMemberTags([]);
-    setOwnerUser(null);
+    setRoles([]);
+    setTeamOrgMembers([]);
+    setSalesManager(null);
     setPendingInvitations([]);
   };
 
   const removeMember = async (memberId: string) => {
     if (!team || !isAdmin) return;
     if (!confirm("Remove this member from the team?")) return;
-    if (memberId === team.owner) {
-      toast.error("Cannot remove the team owner");
+
+    // Check if the member is a sales manager (owner equivalent)
+    const memberOrg = teamOrgMembers.find(
+      (to) => to.user_id === memberId && to.team_id === team.id && to.active
+    );
+    if (memberOrg?.is_sales_manager) {
+      toast.error("Cannot remove the sales manager");
       return;
     }
 
-    const newMembers = team.members.filter((id) => id !== memberId);
-
+    // Deactivate the team_org entry
     const { error } = await supabase
-      .from("teams")
-      .update({ members: newMembers })
-      .eq("id", team.id);
+      .from("team_org")
+      .update({ active: false })
+      .eq("team_id", team.id)
+      .eq("user_id", memberId);
 
     if (error) {
       toast.error(error.message);
       return;
     }
 
-    // Remove member tags
-    await supabase
-      .from("team_member_tags")
-      .delete()
-      .eq("team_id", team.id)
-      .eq("user_id", memberId);
-
-    // Clear the user's team_id so they're fully removed from the team
-    await supabase
-      .from("users")
-      .update({ team_id: null })
-      .eq("id", memberId);
-
     toast.success("Member removed successfully");
     setMembers((prev) => prev.filter((m) => m.id !== memberId));
-    setMemberTags((prev) =>
-      prev.filter((mt) => !(mt.user_id === memberId && mt.team_id === team.id))
+    setTeamOrgMembers((prev) =>
+      prev.filter((to) => !(to.user_id === memberId && to.team_id === team.id))
     );
-    setTeam((prev) => (prev ? { ...prev, members: newMembers } : prev));
   };
 
   const inviteMember = async () => {
@@ -785,25 +711,24 @@ export default function TeamPage() {
 
   const handleTagsChange = async () => {
     if (!team) return;
-    // Refresh tags and member tags
-    const [tagsResult, memberTagsResult] = await Promise.all([
-      supabase.from("team_tags").select("*").eq("team_id", team.id),
-      supabase.from("team_member_tags").select("*").eq("team_id", team.id)
+    // Refresh roles and team_org members
+    const [rolesResult, orgResult] = await Promise.all([
+      supabase.from("team_roles").select("id, role_name, description, created_at"),
+      supabase.from("team_org").select("*").eq("team_id", team.id).eq("active", true),
     ]);
-    setTags(tagsResult.data || []);
-    setMemberTags(memberTagsResult.data || []);
+    setRoles(rolesResult.data || []);
+    setTeamOrgMembers((orgResult.data || []) as TeamOrgMember[]);
   };
 
-  // Get custom role tags for a member
-  const getMemberCustomRoleTags = (memberId: string) => {
-    if (!team) return [];
-    const userMemberTags = memberTags.filter(
-      (mt) => mt.user_id === memberId && mt.team_id === team.id
+  // Get the role name for a member from team_org
+  const getMemberRoleName = (memberId: string): string | null => {
+    if (!team) return null;
+    const orgEntry = teamOrgMembers.find(
+      (to) => to.user_id === memberId && to.team_id === team.id && to.active
     );
-    const customRoleTags = tags.filter(
-      (t) => t.tag_type === "department" && userMemberTags.some((mt) => mt.tag_id === t.id)
-    );
-    return customRoleTags;
+    if (!orgEntry) return null;
+    const role = roles.find((r) => r.id === orgEntry.team_role_id);
+    return role?.role_name || null;
   };
 
   const saveMemberRole = async () => {
@@ -811,100 +736,43 @@ export default function TeamPage() {
 
     setRoleSaving(true);
 
-    const adminTag = tags.find(
-      (t) => t.team_id === team.id && t.tag_name.toLowerCase() === "admin"
-    );
-    const memberTag = tags.find(
-      (t) => t.team_id === team.id && t.tag_name.toLowerCase() === "member"
-    );
+    const uid = selectedMember.id;
+    // Map selectedRole to team_role_id: admin=1, member=3
+    const newRoleId = selectedRole === "admin" ? 1 : 3;
 
-    if (!adminTag || !memberTag) {
-      toast.error("Admin/Member tags not configured for this team.");
+    const { error } = await supabase
+      .from("team_org")
+      .update({ team_role_id: newRoleId })
+      .eq("team_id", team.id)
+      .eq("user_id", uid)
+      .eq("active", true);
+
+    if (error) {
+      toast.error("Failed to update role");
       setRoleSaving(false);
       return;
     }
 
-    const uid = selectedMember.id;
-    const userMappings = memberTags.filter(
-      (mt) => mt.user_id === uid && mt.team_id === team.id
+    // Update local state
+    setTeamOrgMembers((prev) =>
+      prev.map((to) =>
+        to.team_id === team.id && to.user_id === uid && to.active
+          ? { ...to, team_role_id: newRoleId }
+          : to
+      )
     );
-
-    const hasAdmin = userMappings.some((mt) => mt.tag_id === adminTag.id);
-    const hasMember = userMappings.some((mt) => mt.tag_id === memberTag.id);
-
-    if (selectedRole === "admin") {
-      if (!hasAdmin) {
-        const { data } = await supabase
-          .from("team_member_tags")
-          .insert({
-            team_id: team.id,
-            user_id: uid,
-            tag_id: adminTag.id,
-          })
-          .select("*")
-          .single();
-
-        if (data) setMemberTags((prev) => [...prev, data as MemberTag]);
-      }
-
-      if (hasMember) {
-        await supabase
-          .from("team_member_tags")
-          .delete()
-          .eq("team_id", team.id)
-          .eq("user_id", uid)
-          .eq("tag_id", memberTag.id);
-
-        setMemberTags((prev) =>
-          prev.filter(
-            (mt) =>
-              !(mt.team_id === team.id && mt.user_id === uid && mt.tag_id === memberTag.id)
-          )
-        );
-      }
-    } else {
-      if (!hasMember) {
-        const { data } = await supabase
-          .from("team_member_tags")
-          .insert({
-            team_id: team.id,
-            user_id: uid,
-            tag_id: memberTag.id,
-          })
-          .select("*")
-          .single();
-
-        if (data) setMemberTags((prev) => [...prev, data as MemberTag]);
-      }
-
-      if (hasAdmin) {
-        await supabase
-          .from("team_member_tags")
-          .delete()
-          .eq("team_id", team.id)
-          .eq("user_id", uid)
-          .eq("tag_id", adminTag.id);
-
-        setMemberTags((prev) =>
-          prev.filter(
-            (mt) =>
-              !(mt.team_id === team.id && mt.user_id === uid && mt.tag_id === adminTag.id)
-          )
-        );
-      }
-    }
 
     toast.success("Role updated!");
     setRoleSaving(false);
     setRoleDialogOpen(false);
   };
 
-  const renderRoleBadge = (role: "admin" | "member" | null, isOwnerMember: boolean) => {
-    if (isOwnerMember) {
+  const renderRoleBadge = (role: "admin" | "sales_manager" | "member" | null, isSalesManagerMember: boolean) => {
+    if (isSalesManagerMember) {
       return (
         <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 gap-1 text-xs">
           <Crown className="h-3 w-3" />
-          Owner
+          Sales Manager
         </Badge>
       );
     }
@@ -1151,13 +1019,13 @@ export default function TeamPage() {
                           </span>
                         </CardDescription>
 
-                        {ownerUser && (
+                        {salesManager && (
                           <div className="flex items-center gap-2 pt-1">
                             <div className="h-5 w-5 rounded-full bg-amber-500/10 flex items-center justify-center">
                               <Crown className="h-2.5 w-2.5 text-amber-600" />
                             </div>
                             <span className="text-xs text-muted-foreground">
-                              Owned by <span className="font-medium text-foreground">{ownerUser.name || ownerUser.email}</span>
+                              Managed by <span className="font-medium text-foreground">{salesManager.name || salesManager.email}</span>
                             </span>
                           </div>
                         )}
@@ -1431,7 +1299,10 @@ export default function TeamPage() {
                       <TableBody>
                         {members.map((m) => {
                           const role = getRoleForUser(m.id);
-                          const isMemberOwner = team.owner === m.id;
+                          const memberOrgEntry = teamOrgMembers.find(
+                            (to) => to.user_id === m.id && to.team_id === team.id && to.active
+                          );
+                          const isMemberSalesManager = memberOrgEntry?.is_sales_manager === true;
                           const isCurrentUser = m.id === userId;
 
                           return (
@@ -1445,7 +1316,7 @@ export default function TeamPage() {
                                   <div className="relative">
                                     <div className={`
                                       h-9 w-9 rounded-lg flex items-center justify-center text-xs font-semibold shrink-0
-                                      ${isMemberOwner
+                                      ${isMemberSalesManager
                                         ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
                                         : role === 'admin'
                                           ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400'
@@ -1454,7 +1325,7 @@ export default function TeamPage() {
                                     `}>
                                       {m.name ? m.name[0].toUpperCase() : m.email[0].toUpperCase()}
                                     </div>
-                                    {isMemberOwner && (
+                                    {isMemberSalesManager && (
                                       <div className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-amber-500 flex items-center justify-center ring-2 ring-background">
                                         <Crown className="h-2 w-2 text-white" />
                                       </div>
@@ -1486,21 +1357,7 @@ export default function TeamPage() {
 
                               <TableCell className="py-3">
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  {renderRoleBadge(role, isMemberOwner)}
-                                  {getMemberCustomRoleTags(m.id).map((tag) => (
-                                    <Badge
-                                      key={tag.id}
-                                      variant="outline"
-                                      className="text-[10px] px-1.5 py-0"
-                                      style={{
-                                        backgroundColor: tag.tag_color ? `${tag.tag_color}15` : undefined,
-                                        borderColor: tag.tag_color || undefined,
-                                        color: tag.tag_color || undefined,
-                                      }}
-                                    >
-                                      {tag.tag_name}
-                                    </Badge>
-                                  ))}
+                                  {renderRoleBadge(role, isMemberSalesManager)}
                                 </div>
                               </TableCell>
 
@@ -1519,7 +1376,7 @@ export default function TeamPage() {
                                       <Eye className="h-3.5 w-3.5" />
                                     </Button>
 
-                                    {m.id !== userId && !isMemberOwner && (
+                                    {m.id !== userId && !isMemberSalesManager && (
                                       <>
                                         <Button
                                           variant="ghost"
@@ -1542,7 +1399,7 @@ export default function TeamPage() {
                                             e.stopPropagation();
                                             openTagAssignment(m);
                                           }}
-                                          title="Assign tags"
+                                          title="Assign role"
                                         >
                                           <Tag className="h-3.5 w-3.5" />
                                         </Button>
@@ -1576,7 +1433,7 @@ export default function TeamPage() {
               {isAdmin && (
                 <TagManagement
                   teamId={team.id}
-                  tags={tags}
+                  roles={roles}
                   isAdmin={isAdmin}
                   onTagsChange={handleTagsChange}
                 />
@@ -1781,19 +1638,23 @@ export default function TeamPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Tag Assignment Dialog */}
+      {/* Role Assignment Dialog */}
       {team && tagAssignmentMember && (
         <MemberTagAssignment
           open={tagAssignmentOpen}
           onOpenChange={setTagAssignmentOpen}
           teamId={team.id}
           member={tagAssignmentMember}
-          allTags={tags}
-          currentMemberTags={memberTags.filter(
-            (mt) => mt.user_id === tagAssignmentMember.id && mt.team_id === team.id
-          )}
+          roles={roles}
+          currentOrgEntry={teamOrgMembers.find(
+            (to) => to.user_id === tagAssignmentMember.id && to.team_id === team.id && to.active
+          ) || null}
           onSave={handleTagsChange}
-          isOwner={team.owner === tagAssignmentMember.id}
+          isSalesManager={
+            teamOrgMembers.find(
+              (to) => to.user_id === tagAssignmentMember.id && to.team_id === team.id && to.active
+            )?.is_sales_manager === true
+          }
         />
       )}
 
@@ -1809,14 +1670,7 @@ export default function TeamPage() {
               id: m.id,
               name: m.name,
               email: m.email,
-              role: memberTags.some(
-                (mt) =>
-                  mt.user_id === m.id &&
-                  mt.team_id === team.id &&
-                  tags.find((t) => t.id === mt.tag_id)?.tag_name.toLowerCase() === "admin"
-              )
-                ? "admin"
-                : "member",
+              role: getRoleForUser(m.id) || "member",
             })),
             pendingInvitations: pendingInvitations.length,
             myStats: myStats,

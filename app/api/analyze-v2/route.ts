@@ -97,7 +97,7 @@ export async function POST(req: Request): Promise<NextResponse<AnalyzeResponse>>
     const result: PipelineResult = await runAnalysisPipeline({
       transcriptId: request.transcript_id,
       userId: request.user_id,
-      companyId: request.company_id,
+      companyId: request.company_id?.toString(),
       callType: request.call_type as CallType | undefined,
     });
 

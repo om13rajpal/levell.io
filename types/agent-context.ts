@@ -58,7 +58,7 @@ export type TeamContext = {
     id: string;
     name: string | null;
     email: string;
-    role: "admin" | "member" | null;
+    role: "admin" | "sales_manager" | "member" | null;
   }>;
   pendingInvitations?: number;
   myStats?: {

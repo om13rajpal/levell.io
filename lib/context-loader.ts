@@ -29,7 +29,7 @@ function getSupabaseAdmin(): SupabaseClient {
  * Returns the last 5 calls (excluding the current one)
  */
 async function fetchPreviousCalls(
-  companyId: number | null,
+  companyId: string | null,
   currentTranscriptId: number
 ): Promise<CallSummary[]> {
   if (!companyId) {
@@ -40,7 +40,7 @@ async function fetchPreviousCalls(
   try {
     // First get transcript IDs for this company
     const { data: companyCalls, error: companyCallsError } = await getSupabaseAdmin()
-      .from("company_calls")
+      .from("external_org_calls")
       .select("transcript_id, created_at")
       .eq("company_id", companyId)
       .neq("transcript_id", currentTranscriptId)
@@ -61,7 +61,7 @@ async function fetchPreviousCalls(
     const transcriptIds = companyCalls.map((c) => c.transcript_id);
     const { data: transcripts, error: transcriptsError } = await getSupabaseAdmin()
       .from("transcripts")
-      .select("id, title, ai_summary, ai_overall_score, created_at, call_summary, deal_signal")
+      .select("id, title, ai_summary, ai_overall_score, created_at, ai_deal_signal")
       .in("id", transcriptIds);
 
     if (transcriptsError) {
@@ -72,9 +72,9 @@ async function fetchPreviousCalls(
     const callSummaries: CallSummary[] = (transcripts || []).map((t) => ({
       transcript_id: t.id,
       title: t.title || undefined,
-      summary: t.call_summary || t.ai_summary || undefined,
+      summary: t.ai_summary || undefined,
       overall_score: t.ai_overall_score || undefined,
-      deal_signal: t.deal_signal || undefined,
+      deal_signal: t.ai_deal_signal || undefined,
       created_at: t.created_at,
     }));
 
@@ -89,7 +89,7 @@ async function fetchPreviousCalls(
 /**
  * Load company profile from companies table
  */
-async function fetchCompanyProfile(companyId: number | null): Promise<CompanyProfile | null> {
+async function fetchCompanyProfile(companyId: string | null): Promise<CompanyProfile | null> {
   if (!companyId) {
     console.log("[ContextLoader] No company ID provided, skipping company profile");
     return null;
@@ -97,7 +97,7 @@ async function fetchCompanyProfile(companyId: number | null): Promise<CompanyPro
 
   try {
     const { data: company, error } = await getSupabaseAdmin()
-      .from("companies")
+      .from("external_org")
       .select("id, company_name, domain, pain_points, company_contacts, company_goal_objective")
       .eq("id", companyId)
       .single();
@@ -112,16 +112,22 @@ async function fetchCompanyProfile(companyId: number | null): Promise<CompanyPro
       return null;
     }
 
+    // Safely handle company_contacts - might be array, object, or null
+    let contacts: CompanyProfile["contacts"] = undefined;
+    if (company.company_contacts && Array.isArray(company.company_contacts)) {
+      contacts = company.company_contacts.map((c: { name?: string; email?: string; title?: string }) => ({
+        name: c.name,
+        email: c.email,
+        title: c.title,
+      }));
+    }
+
     const profile: CompanyProfile = {
       id: company.id,
       company_name: company.company_name,
       domain: company.domain || undefined,
       pain_points: company.pain_points || undefined,
-      contacts: company.company_contacts?.map((c: { name?: string; email?: string; title?: string }) => ({
-        name: c.name,
-        email: c.email,
-        title: c.title,
-      })) || undefined,
+      contacts,
       company_goal_objective: company.company_goal_objective || undefined,
     };
 
@@ -134,70 +140,52 @@ async function fetchCompanyProfile(companyId: number | null): Promise<CompanyPro
 }
 
 /**
- * Fetch user's team tags (system roles and custom roles)
+ * Fetch user's team role via team_org + team_roles
  */
-async function fetchUserTeamTags(userId: string): Promise<UserProfile["team_tags"]> {
+async function fetchUserTeamRoles(userId: string): Promise<UserProfile["team_roles"]> {
   try {
-    // First, get the user's team_id
-    const { data: userData, error: userError } = await getSupabaseAdmin()
-      .from("users")
-      .select("team_id")
-      .eq("id", userId)
-      .single();
-
-    if (userError || !userData?.team_id) {
-      console.log("[ContextLoader] User has no team or error fetching team:", userError?.message);
-      return undefined;
-    }
-
-    const teamId = userData.team_id;
-
-    // Get the user's tag assignments
-    const { data: memberTags, error: memberTagsError } = await getSupabaseAdmin()
-      .from("team_member_tags")
-      .select("tag_id")
+    // Get user's active team membership with role info
+    const { data: membership, error: membershipError } = await getSupabaseAdmin()
+      .from("team_org")
+      .select("team_role_id, is_sales_manager, team_roles(role_name, description)")
       .eq("user_id", userId)
-      .eq("team_id", teamId);
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
 
-    if (memberTagsError || !memberTags || memberTags.length === 0) {
-      console.log("[ContextLoader] No tags found for user:", userId);
+    if (membershipError || !membership) {
+      console.log("[ContextLoader] User has no active team membership:", membershipError?.message);
       return undefined;
     }
 
-    const tagIds = memberTags.map((mt) => mt.tag_id);
-
-    // Fetch the actual tag details
-    const { data: tags, error: tagsError } = await getSupabaseAdmin()
-      .from("team_tags")
-      .select("tag_name, tag_type, description")
-      .in("id", tagIds);
-
-    if (tagsError || !tags || tags.length === 0) {
-      console.log("[ContextLoader] Error fetching tag details:", tagsError?.message);
+    const role = (membership as any).team_roles;
+    if (!role) {
+      console.log("[ContextLoader] No role found for user membership");
       return undefined;
     }
 
-    console.log(`[ContextLoader] Found ${tags.length} tags for user`);
+    console.log(`[ContextLoader] Found role for user: ${role.role_name}`);
 
-    return tags.map((tag) => ({
-      tag_name: tag.tag_name,
-      tag_type: tag.tag_type as "role" | "department",
-      description: tag.description || undefined,
-    }));
+    return [{
+      role_name: role.role_name,
+      role_type: "role" as const,
+      description: role.description || undefined,
+    }];
   } catch (error) {
-    console.error("[ContextLoader] Error in fetchUserTeamTags:", error);
+    console.error("[ContextLoader] Error in fetchUserTeamRoles:", error);
     return undefined;
   }
 }
 
 /**
  * Load user's business profile (ICP, products, personas, etc.)
+ * Note: The users table stores sales_motion and framework directly, not in a business_profile JSONB
  */
 async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
   try {
     const { data: user, error } = await getSupabaseAdmin()
       .from("users")
-      .select("business_profile")
+      .select("sales_motion, framework")
       .eq("id", userId)
       .single();
 
@@ -206,43 +194,22 @@ async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
       return null;
     }
 
-    if (!user?.business_profile) {
-      console.log("[ContextLoader] No business profile found for user:", userId);
+    // Fetch team roles for this user
+    const teamRoles = await fetchUserTeamRoles(userId);
+
+    // If user has no relevant profile data and no team roles, return null
+    if (!user?.sales_motion && !teamRoles) {
+      console.log("[ContextLoader] No profile data found for user:", userId);
       return null;
     }
 
-    const bp = user.business_profile;
-
-    // Fetch team tags for this user
-    const teamTags = await fetchUserTeamTags(userId);
-
-    // Parse business profile into UserProfile format
+    // Build minimal profile from available data
     const profile: UserProfile = {
-      icp: bp.icp ? {
-        company_size: bp.icp.company_size || undefined,
-        regions: bp.icp.regions || undefined,
-        industries: bp.icp.industries || undefined,
-        tech_stack: bp.icp.tech_stack || undefined,
-      } : undefined,
-      products: bp.products?.map((p: { name: string; description?: string }) => ({
-        name: p.name,
-        description: p.description,
-      })) || undefined,
-      buyer_personas: bp.buyer_personas?.map((p: { role: string; notes?: string }) => ({
-        role: p.role,
-        notes: p.notes,
-      })) || undefined,
-      talk_tracks: bp.talk_tracks || undefined,
-      objection_handling: bp.objection_handling?.map((o: { objection: string; rebuttal: string }) => ({
-        objection: o.objection,
-        rebuttal: o.rebuttal,
-      })) || undefined,
-      elevator_pitch: bp.elevator_pitch || bp.value_proposition || undefined,
-      sales_motion: bp.sales_motion || undefined,
-      team_tags: teamTags,
+      sales_motion: user?.sales_motion || undefined,
+      team_roles: teamRoles,
     };
 
-    console.log("[ContextLoader] Loaded user profile with business data and team tags");
+    console.log("[ContextLoader] Loaded user profile with available data");
     return profile;
   } catch (error) {
     console.error("[ContextLoader] Error in fetchUserProfile:", error);
@@ -253,10 +220,10 @@ async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
 /**
  * Get company ID from a transcript via company_calls table
  */
-async function getCompanyIdForTranscript(transcriptId: number): Promise<number | null> {
+async function getCompanyIdForTranscript(transcriptId: number): Promise<string | null> {
   try {
     const { data, error } = await getSupabaseAdmin()
-      .from("company_calls")
+      .from("external_org_calls")
       .select("company_id")
       .eq("transcript_id", transcriptId)
       .limit(1)
@@ -315,9 +282,151 @@ function detectCallType(
   return "discovery";
 }
 
+// ---------------------------------------------------------------------------
+// Enriched Context Types & Helpers
+// ---------------------------------------------------------------------------
+
+export interface EnrichedContext extends ContextObject {
+  company_info?: { value_proposition?: string; company_url?: string };
+  products_and_services?: Array<any>;
+  products_and_services_formatted?: string;
+  icp?: {
+    industry?: string;
+    company_size?: string;
+    tech_stack?: string;
+    sales_motion?: string;
+    region?: string;
+  };
+  buyer_personas?: Array<any>;
+  buyer_personas_formatted?: string;
+  extracted?: {
+    pain_points_formatted?: string;
+    goals_formatted?: string;
+    job_titles_formatted?: string;
+    responsibilities_formatted?: string;
+  };
+  rep_focus_areas?: any;
+  rep_key_strengths?: any;
+  rep_ai_recommendations?: any;
+}
+
+/**
+ * Fetch ICP, products, and buyer persona data from company_icp table.
+ * Returns null when no row exists for the given company.
+ */
+async function fetchICPData(
+  companyId: string | null
+): Promise<{
+  company_info: any;
+  products_and_services: any;
+  ideal_customer_profile: any;
+  buyer_personas: any;
+} | null> {
+  if (!companyId) {
+    console.log("[ContextLoader] No company ID provided, skipping ICP data");
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .from("external_org_icp")
+      .select("company_info, products_and_services, ideal_customer_profile, buyer_personas")
+      .eq("company_id", companyId)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[ContextLoader] Error fetching ICP data:", error);
+      return null;
+    }
+
+    if (!data) {
+      console.log("[ContextLoader] No ICP data found for company:", companyId);
+      return null;
+    }
+
+    console.log("[ContextLoader] Loaded ICP data for company:", companyId);
+
+    // Parse JSONB fields if they arrive as strings
+    const parse = (val: any) => {
+      if (typeof val === "string") {
+        try {
+          return JSON.parse(val);
+        } catch {
+          return val;
+        }
+      }
+      return val;
+    };
+
+    return {
+      company_info: parse(data.company_info),
+      products_and_services: parse(data.products_and_services),
+      ideal_customer_profile: parse(data.ideal_customer_profile),
+      buyer_personas: parse(data.buyer_personas),
+    };
+  } catch (error) {
+    console.error("[ContextLoader] Error in fetchICPData:", error);
+    return null;
+  }
+}
+
+/**
+ * Fetch extended rep profile fields from the users table.
+ * These columns (focus_areas, key_strengths, ai_recommendations) may not exist yet
+ * in the DB schema. The function gracefully returns null if the query fails.
+ */
+async function fetchRepExtendedProfile(
+  userId: string | null
+): Promise<{
+  focus_areas: any;
+  key_strengths: any;
+  ai_recommendations: any;
+} | null> {
+  if (!userId) {
+    console.log("[ContextLoader] No user ID provided, skipping extended profile");
+    return null;
+  }
+
+  try {
+    // Query only columns we know exist. The extended columns (focus_areas,
+    // key_strengths, ai_recommendations) will be added via migration 005.
+    // Until then, this query will simply return null for those fields.
+    const { data, error } = await getSupabaseAdmin()
+      .from("users")
+      .select("sales_motion, framework")
+      .eq("id", userId)
+      .single();
+
+    if (error || !data) {
+      console.log("[ContextLoader] No extended profile found for user:", userId);
+      return null;
+    }
+
+    // Try to fetch the extended columns separately - they may not exist yet
+    const { data: extData } = await getSupabaseAdmin()
+      .from("users")
+      .select("focus_areas, key_strengths, ai_recommendations")
+      .eq("id", userId)
+      .single();
+
+    // If the extended columns don't exist, extData will be null or the query errors
+    console.log("[ContextLoader] Loaded extended rep profile for user:", userId);
+    return {
+      focus_areas: extData?.focus_areas ?? null,
+      key_strengths: extData?.key_strengths ?? null,
+      ai_recommendations: extData?.ai_recommendations ?? null,
+    };
+  } catch (error) {
+    // Graceful degradation - these columns may not exist yet
+    console.log("[ContextLoader] Extended profile columns not available yet (expected before migration):", (error as Error)?.message);
+    return null;
+  }
+}
+
 export interface LoadContextParams {
   transcriptId: number;
-  companyId?: number;
+  companyId?: string;
   userId?: string;
 }
 
@@ -415,29 +524,29 @@ export function formatContextForPrompt(context: ContextObject): string {
     const up = context.user_profile;
     formatted += "### Rep's Business Context\n";
 
-    // Team role tags - CRITICAL FOR SCORING CONTEXT
-    if (up.team_tags && up.team_tags.length > 0) {
+    // Team roles - CRITICAL FOR SCORING CONTEXT
+    if (up.team_roles && up.team_roles.length > 0) {
       formatted += "**Rep's Roles:**\n";
 
-      const systemRoleTags = up.team_tags.filter(t => t.tag_type === "role");
-      const customRoleTags = up.team_tags.filter(t => t.tag_type === "department");
+      const systemRoles = up.team_roles.filter(t => t.role_type === "role");
+      const customRoles = up.team_roles.filter(t => t.role_type === "department");
 
-      if (systemRoleTags.length > 0) {
+      if (systemRoles.length > 0) {
         formatted += "- System Role: ";
-        systemRoleTags.forEach((tag, index) => {
-          formatted += tag.tag_name;
-          if (tag.description) formatted += ` (${tag.description})`;
-          if (index < systemRoleTags.length - 1) formatted += ", ";
+        systemRoles.forEach((role, index) => {
+          formatted += role.role_name;
+          if (role.description) formatted += ` (${role.description})`;
+          if (index < systemRoles.length - 1) formatted += ", ";
         });
         formatted += "\n";
       }
 
-      if (customRoleTags.length > 0) {
+      if (customRoles.length > 0) {
         formatted += "- Custom Role(s): ";
-        customRoleTags.forEach((tag, index) => {
-          formatted += tag.tag_name;
-          if (tag.description) formatted += ` (${tag.description})`;
-          if (index < customRoleTags.length - 1) formatted += ", ";
+        customRoles.forEach((role, index) => {
+          formatted += role.role_name;
+          if (role.description) formatted += ` (${role.description})`;
+          if (index < customRoles.length - 1) formatted += ", ";
         });
         formatted += "\n";
       }
@@ -520,6 +629,257 @@ export function formatContextForPrompt(context: ContextObject): string {
         formatted += "This is a closing call - focus on handling objections and securing next steps.\n";
         break;
     }
+  }
+
+  return formatted;
+}
+
+// ---------------------------------------------------------------------------
+// Enriched Context Loader
+// ---------------------------------------------------------------------------
+
+/**
+ * Load enriched context that includes all base context PLUS ICP data,
+ * products/services, buyer personas, and extended rep profile fields.
+ *
+ * Same signature as loadContext but returns an EnrichedContext.
+ */
+export async function loadEnrichedContext(
+  params: LoadContextParams
+): Promise<EnrichedContext> {
+  const { transcriptId, companyId: providedCompanyId, userId: providedUserId } = params;
+
+  console.log("[ContextLoader] Loading enriched context for transcript:", transcriptId);
+
+  // Resolve IDs if not provided
+  const companyId = providedCompanyId ?? (await getCompanyIdForTranscript(transcriptId));
+  const userId = providedUserId ?? (await getUserIdForTranscript(transcriptId));
+
+  // Load ALL data in parallel -- existing fetches + new enrichment fetches
+  const [previousCalls, company, userProfile, icpData, repExtended] = await Promise.all([
+    fetchPreviousCalls(companyId, transcriptId),
+    fetchCompanyProfile(companyId),
+    userId ? fetchUserProfile(userId) : Promise.resolve(null),
+    fetchICPData(companyId),
+    fetchRepExtendedProfile(userId),
+  ]);
+
+  // Detect call type
+  const callType = detectCallType(previousCalls, company);
+
+  // Start with the base context fields
+  const enriched: EnrichedContext = {
+    previous_calls: previousCalls,
+    company,
+    user_profile: userProfile,
+    call_type: callType,
+  };
+
+  // --- Merge ICP data ---
+  if (icpData) {
+    // Company info
+    if (icpData.company_info) {
+      enriched.company_info = {
+        value_proposition: icpData.company_info.value_proposition ?? undefined,
+        company_url: icpData.company_info.company_url ?? icpData.company_info.url ?? undefined,
+      };
+    }
+
+    // Products & services
+    if (Array.isArray(icpData.products_and_services)) {
+      enriched.products_and_services = icpData.products_and_services;
+      enriched.products_and_services_formatted = icpData.products_and_services
+        .map((p: any, i: number) => {
+          const name = p.name ?? p.title ?? `Product ${i + 1}`;
+          const desc = p.description ?? p.summary ?? "";
+          return desc ? `- ${name}: ${desc}` : `- ${name}`;
+        })
+        .join("\n");
+    }
+
+    // Ideal Customer Profile
+    if (icpData.ideal_customer_profile) {
+      const icp = icpData.ideal_customer_profile;
+      enriched.icp = {
+        industry: icp.industry ?? icp.industries ?? undefined,
+        company_size: icp.company_size ?? undefined,
+        tech_stack: icp.tech_stack ?? undefined,
+        sales_motion: icp.sales_motion ?? undefined,
+        region: icp.region ?? icp.regions ?? undefined,
+      };
+    }
+
+    // Buyer personas
+    if (Array.isArray(icpData.buyer_personas)) {
+      enriched.buyer_personas = icpData.buyer_personas;
+      enriched.buyer_personas_formatted = icpData.buyer_personas
+        .map((bp: any) => {
+          const role = bp.role ?? bp.title ?? "Unknown Role";
+          const notes = bp.notes ?? bp.description ?? "";
+          return notes ? `- ${role}: ${notes}` : `- ${role}`;
+        })
+        .join("\n");
+
+      // Extract structured data from personas if available
+      const painPoints: string[] = [];
+      const goals: string[] = [];
+      const jobTitles: string[] = [];
+      const responsibilities: string[] = [];
+
+      for (const bp of icpData.buyer_personas) {
+        if (bp.pain_points) {
+          const pts = Array.isArray(bp.pain_points) ? bp.pain_points : [bp.pain_points];
+          painPoints.push(...pts.map(String));
+        }
+        if (bp.goals) {
+          const gs = Array.isArray(bp.goals) ? bp.goals : [bp.goals];
+          goals.push(...gs.map(String));
+        }
+        if (bp.job_title || bp.title || bp.role) {
+          jobTitles.push(String(bp.job_title ?? bp.title ?? bp.role));
+        }
+        if (bp.responsibilities) {
+          const rs = Array.isArray(bp.responsibilities) ? bp.responsibilities : [bp.responsibilities];
+          responsibilities.push(...rs.map(String));
+        }
+      }
+
+      enriched.extracted = {
+        pain_points_formatted: painPoints.length > 0 ? painPoints.map((p) => `- ${p}`).join("\n") : undefined,
+        goals_formatted: goals.length > 0 ? goals.map((g) => `- ${g}`).join("\n") : undefined,
+        job_titles_formatted: jobTitles.length > 0 ? jobTitles.join(", ") : undefined,
+        responsibilities_formatted:
+          responsibilities.length > 0 ? responsibilities.map((r) => `- ${r}`).join("\n") : undefined,
+      };
+    }
+  }
+
+  // --- Merge extended rep profile ---
+  if (repExtended) {
+    enriched.rep_focus_areas = repExtended.focus_areas ?? undefined;
+    enriched.rep_key_strengths = repExtended.key_strengths ?? undefined;
+    enriched.rep_ai_recommendations = repExtended.ai_recommendations ?? undefined;
+  }
+
+  console.log("[ContextLoader] Enriched context loaded:", {
+    previousCallsCount: previousCalls.length,
+    hasCompany: !!company,
+    hasUserProfile: !!userProfile,
+    hasICPData: !!icpData,
+    hasRepExtended: !!repExtended,
+    callType,
+  });
+
+  return enriched;
+}
+
+// ---------------------------------------------------------------------------
+// Enriched Context Formatter
+// ---------------------------------------------------------------------------
+
+/**
+ * Format an EnrichedContext into a prompt string.
+ *
+ * Extends the base formatContextForPrompt output with additional XML-like
+ * tagged sections that downstream extraction agents expect:
+ *   <company_profile>, <icp>, <buyer_personas>, <rep_context>
+ */
+export function formatEnrichedContextForPrompt(context: EnrichedContext): string {
+  // Start with the existing base formatting
+  let formatted = formatContextForPrompt(context);
+
+  // ---- Company Profile Section ----
+  const hasCompanyInfo =
+    context.company_info?.value_proposition || context.company_info?.company_url || context.products_and_services_formatted;
+
+  if (hasCompanyInfo) {
+    formatted += "\n<company_profile>\n";
+
+    if (context.company_info?.value_proposition) {
+      formatted += `Value Proposition: ${context.company_info.value_proposition}\n`;
+    }
+    if (context.company_info?.company_url) {
+      formatted += `Company URL: ${context.company_info.company_url}\n`;
+    }
+    if (context.products_and_services_formatted) {
+      formatted += `Products & Services:\n${context.products_and_services_formatted}\n`;
+    }
+
+    formatted += "</company_profile>\n";
+  }
+
+  // ---- ICP Section ----
+  if (context.icp) {
+    const icpEntries: string[] = [];
+    if (context.icp.industry) icpEntries.push(`Industry: ${context.icp.industry}`);
+    if (context.icp.company_size) icpEntries.push(`Company Size: ${context.icp.company_size}`);
+    if (context.icp.tech_stack) icpEntries.push(`Tech Stack: ${context.icp.tech_stack}`);
+    if (context.icp.sales_motion) icpEntries.push(`Sales Motion: ${context.icp.sales_motion}`);
+    if (context.icp.region) icpEntries.push(`Region: ${context.icp.region}`);
+
+    if (icpEntries.length > 0) {
+      formatted += "\n<icp>\n";
+      formatted += icpEntries.join("\n") + "\n";
+      formatted += "</icp>\n";
+    }
+  }
+
+  // ---- Buyer Personas Section ----
+  const hasBuyerData =
+    context.buyer_personas_formatted ||
+    context.extracted?.pain_points_formatted ||
+    context.extracted?.goals_formatted ||
+    context.extracted?.job_titles_formatted ||
+    context.extracted?.responsibilities_formatted;
+
+  if (hasBuyerData) {
+    formatted += "\n<buyer_personas>\n";
+
+    if (context.buyer_personas_formatted) {
+      formatted += `Personas:\n${context.buyer_personas_formatted}\n`;
+    }
+
+    if (context.extracted?.pain_points_formatted) {
+      formatted += `\nPain Points:\n${context.extracted.pain_points_formatted}\n`;
+    }
+    if (context.extracted?.goals_formatted) {
+      formatted += `\nGoals:\n${context.extracted.goals_formatted}\n`;
+    }
+    if (context.extracted?.job_titles_formatted) {
+      formatted += `\nJob Titles: ${context.extracted.job_titles_formatted}\n`;
+    }
+    if (context.extracted?.responsibilities_formatted) {
+      formatted += `\nResponsibilities:\n${context.extracted.responsibilities_formatted}\n`;
+    }
+
+    formatted += "</buyer_personas>\n";
+  }
+
+  // ---- Rep Context Section ----
+  const formatJsonField = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    if (Array.isArray(val)) return val.map(String).join(', ');
+    return JSON.stringify(val);
+  };
+
+  const hasRepContext =
+    context.rep_focus_areas || context.rep_key_strengths || context.rep_ai_recommendations;
+
+  if (hasRepContext) {
+    formatted += "\n<rep_context>\n";
+
+    if (context.rep_focus_areas) {
+      formatted += `Focus Areas: ${formatJsonField(context.rep_focus_areas)}\n`;
+    }
+    if (context.rep_key_strengths) {
+      formatted += `Key Strengths: ${formatJsonField(context.rep_key_strengths)}\n`;
+    }
+    if (context.rep_ai_recommendations) {
+      formatted += `AI Recommendations: ${formatJsonField(context.rep_ai_recommendations)}\n`;
+    }
+
+    formatted += "</rep_context>\n";
   }
 
   return formatted;

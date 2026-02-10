@@ -143,13 +143,25 @@ export default function TeamAnalyticsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get team
+      // Get team via team_org junction table
+      const { data: orgEntry } = await supabase
+        .from("team_org")
+        .select("team_id")
+        .eq("user_id", user.id)
+        .eq("active", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (!orgEntry) {
+        setLoading(false);
+        return;
+      }
+
       const { data: teamRow } = await supabase
         .from("teams")
         .select("*")
-        .contains("members", [user.id])
-        .limit(1)
-        .maybeSingle();
+        .eq("id", orgEntry.team_id)
+        .single();
 
       if (!teamRow) {
         setLoading(false);
@@ -158,12 +170,20 @@ export default function TeamAnalyticsPage() {
 
       setTeam(teamRow);
 
-      // Get all team members
-      if (teamRow.members?.length > 0) {
+      // Get all active team member IDs from team_org
+      const { data: teamOrgMembers } = await supabase
+        .from("team_org")
+        .select("user_id")
+        .eq("team_id", orgEntry.team_id)
+        .eq("active", true);
+
+      const memberIds = teamOrgMembers?.map((m: any) => m.user_id) || [];
+
+      if (memberIds.length > 0) {
         const { data: memberData } = await supabase
           .from("users")
           .select("id, name, email")
-          .in("id", teamRow.members);
+          .in("id", memberIds);
         setMembers(memberData || []);
 
         // Get scored transcripts for team members (optimized - only necessary fields)
@@ -171,7 +191,7 @@ export default function TeamAnalyticsPage() {
         const { data: transcriptData } = await supabase
           .from("transcripts")
           .select("id, user_id, title, ai_overall_score, ai_category_breakdown, ai_deal_risk_alerts, created_at, fireflies_id")
-          .in("user_id", teamRow.members)
+          .in("user_id", memberIds)
           .not("duration", "is", null)
           .gte("duration", 5)
           .not("ai_overall_score", "is", null)
@@ -182,13 +202,13 @@ export default function TeamAnalyticsPage() {
 
       // Get companies
       const { data: companyData } = await supabase
-        .from("companies")
+        .from("external_org")
         .select("*");
       setCompanies(companyData || []);
 
       // Get company calls
       const { data: callsData } = await supabase
-        .from("company_calls")
+        .from("external_org_calls")
         .select("*");
       setCompanyCalls(callsData || []);
 

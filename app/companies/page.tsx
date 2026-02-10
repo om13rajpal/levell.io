@@ -329,7 +329,7 @@ export default function CompaniesPage() {
       // Fetch calls and transcripts for the visible companies only
       const [callsResult, transcriptsResult] = await Promise.all([
         supabase
-          .from("company_calls")
+          .from("external_org_calls")
           .select("company_id, created_at, transcript_id")
           .in("company_id", detectedCompanyIds),
         supabase.from("transcripts").select("id, ai_overall_score"),
@@ -531,7 +531,7 @@ export default function CompaniesPage() {
       setModalState((prev) => ({ ...prev, saving: true }));
 
       const { error } = await supabase
-        .from("companies")
+        .from("external_org")
         .update({ company_goal_objective: modalState.goal })
         .eq("id", modalState.selectedCompany.id);
 
@@ -607,7 +607,7 @@ export default function CompaniesPage() {
       const [userCompanyResult, insertResult] = await Promise.all([
         supabase.from("company").select("id").eq("user_id", user.id).single(),
         supabase
-          .from("companies")
+          .from("external_org")
           .insert([
             {
               company_name: modalState.newCompanyName,
@@ -623,7 +623,7 @@ export default function CompaniesPage() {
       toast.success("Company added successfully!");
 
       // Refresh the companies list
-      const { data: detected } = await supabase.from("companies").select("*");
+      const { data: detected } = await supabase.from("external_org").select("*");
       setDetectedCompanies(detected || []);
 
       // Invalidate cache
@@ -667,7 +667,7 @@ export default function CompaniesPage() {
     try {
       // First, get all transcript IDs associated with this company
       const { data: companyCalls } = await supabase
-        .from("company_calls")
+        .from("external_org_calls")
         .select("transcript_id")
         .eq("company_id", modalState.companyToDelete.id);
 
@@ -675,7 +675,7 @@ export default function CompaniesPage() {
 
       // Delete the company_calls records
       const { error: callsError } = await supabase
-        .from("company_calls")
+        .from("external_org_calls")
         .delete()
         .eq("company_id", modalState.companyToDelete.id);
 
@@ -698,7 +698,7 @@ export default function CompaniesPage() {
 
       // Now delete the company
       const { error } = await supabase
-        .from("companies")
+        .from("external_org")
         .delete()
         .eq("id", modalState.companyToDelete.id);
 

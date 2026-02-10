@@ -497,7 +497,7 @@ export async function getCompaniesPaginated(
 
   // Build the query - fetch only the current page's batch
   let query = supabase
-    .from('companies')
+    .from('external_org')
     .select('*', { count: 'exact' })
     .eq('company_id', companyId)
     .order('company_name', { ascending: true });
@@ -551,10 +551,10 @@ export async function getCompaniesWithCache(
 ): Promise<any[]> {
   // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
-    .from('companies')
+    .from('external_org')
     .select('*')
-    .eq('user_id', userId)
-    .order('name', { ascending: true });
+    .eq('internal_org_id', userId)
+    .order('company_name', { ascending: true });
 
   if (error) {
     console.error('Error fetching companies:', error);
@@ -597,7 +597,7 @@ export async function getTeamWithCache(
 ): Promise<any[]> {
   // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
-    .from('team_members')
+    .from('team_org')
     .select('*, users(*)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
@@ -620,7 +620,7 @@ export async function getCallsWithCache(
 ): Promise<any[]> {
   // Fetch from Supabase (no caching to avoid quota issues)
   const { data, error } = await supabase
-    .from('calls')
+    .from('external_org_calls')
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
@@ -900,7 +900,7 @@ export async function getCompanyStats(
   try {
     // Get total companies count
     const { count: totalCompanies, error: companyError } = await supabase
-      .from('companies')
+      .from('external_org')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId);
 
@@ -908,7 +908,7 @@ export async function getCompanyStats(
 
     // Get all company IDs for this user's company
     const { data: companyIds, error: idsError } = await supabase
-      .from('companies')
+      .from('external_org')
       .select('id')
       .eq('company_id', companyId);
 
@@ -922,7 +922,7 @@ export async function getCompanyStats(
 
     // Get total calls count
     const { count: totalCalls, error: callsError } = await supabase
-      .from('company_calls')
+      .from('external_org_calls')
       .select('*', { count: 'exact', head: true })
       .in('company_id', ids);
 
@@ -930,7 +930,7 @@ export async function getCompanyStats(
 
     // Get calls with scores for average calculation
     const { data: callsWithScores, error: scoresError } = await supabase
-      .from('company_calls')
+      .from('external_org_calls')
       .select('transcript_id')
       .in('company_id', ids);
 
@@ -954,7 +954,7 @@ export async function getCompanyStats(
 
     // Count companies with 0 calls (at risk)
     const { data: callCounts, error: countError } = await supabase
-      .from('company_calls')
+      .from('external_org_calls')
       .select('company_id')
       .in('company_id', ids);
 

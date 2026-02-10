@@ -33,13 +33,21 @@ const DATABASE_SCHEMA_CONTEXT = `
 - risk_summary (JSONB array)
 - ai_relationship (JSONB array)
 - ai_deal_risk_alerts (JSONB array)
+- internal_org_id (UUID) - Links to SaaS customer org
 
 ### company_calls (Links Transcripts to Companies)
 - company_id, transcript_id, created_at
 
-### teams & members
-- team_id, team_name, owner, members (array)
-- team_tags, team_member_tags for roles
+### teams & membership
+- teams: id, team_name, internal_org_id, active, created_at, updated_at
+- team_org: team_id, user_id, team_role_id, is_sales_manager, active
+- team_roles: id, role_name, description (Admin, Sales Manager, Member)
+
+### call_analysis (AI Analysis Records)
+- user_id, internal_org_id, team_id, transcript_id
+- model, prompt_id, cost, execution_time_ms, input_tokens, output_tokens
+- ai_score, ai_summary, ai_strengths, ai_improvements, ai_category_scores
+- deal_signal, call_type, extraction_outputs, status
 
 ### coaching_notes
 - user_id, coach_id, note, created_at

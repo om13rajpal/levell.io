@@ -55,6 +55,7 @@ import {
   Loader2,
   ListChecks,
   X,
+  Sparkles,
 } from "lucide-react";
 import { IconFileText, IconRefresh } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
@@ -105,6 +106,8 @@ export default function Page() {
   const [isVisible, setIsVisible] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const [unscoredCount, setUnscoredCount] = useState<number | null>(null);
 
   // AI Agent panel state
 
@@ -331,6 +334,66 @@ export default function Page() {
     }
   }, [totalCount]);
 
+  // Fetch unscored count on mount and after scoring
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchUnscoredCount = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+
+        const response = await axiosClient.get("/api/score-batch", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+
+        if (isMounted && response.data?.unscored_count !== undefined) {
+          setUnscoredCount(response.data.unscored_count);
+        }
+      } catch (err) {
+        console.error("Error fetching unscored count:", err);
+      }
+    };
+
+    fetchUnscoredCount();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [hasFetched]);
+
+  // Trigger batch scoring
+  const handleScoreCalls = useCallback(async () => {
+    try {
+      setScoreLoading(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error("Please log in to score calls");
+        setScoreLoading(false);
+        return;
+      }
+
+      const response = await axiosClient.post(
+        "/api/score-batch",
+        {},
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+
+      if (response.status >= 200 && response.status < 300) {
+        toast.success("Scoring job started! Calls will be scored in the background.");
+        setUnscoredCount(0); // Optimistically update
+      } else {
+        toast.error("Failed to start scoring job");
+      }
+    } catch (err) {
+      console.error("Score error:", err);
+      toast.error("Failed to start scoring job");
+    } finally {
+      setScoreLoading(false);
+    }
+  }, []);
+
   return (
     <SidebarProvider
       style={
@@ -396,6 +459,20 @@ export default function Page() {
                         Recent Calls
                       </CardTitle>
                       <div className="flex items-center gap-2">
+                        {unscoredCount !== null && unscoredCount > 0 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex items-center gap-2 border-amber-500/30 text-amber-600 hover:bg-amber-500/10"
+                            onClick={handleScoreCalls}
+                            disabled={scoreLoading}
+                          >
+                            <Sparkles
+                              className={`h-4 w-4 ${scoreLoading ? "animate-pulse" : ""}`}
+                            />
+                            {scoreLoading ? "Scoring..." : `Score ${unscoredCount} Calls`}
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"

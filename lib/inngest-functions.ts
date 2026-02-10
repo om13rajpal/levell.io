@@ -2,7 +2,7 @@ import { inngest } from "@/lib/inngest";
 import { runAnalysisPipeline } from "@/lib/analysis-pipeline";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { getOpenAIModel } from "@/lib/openai";
 import { ingestTranscript, ingestCompany, ingestAllUserTranscripts } from "@/lib/embeddings";
 import { cleanupExpiredCache } from "@/lib/prompt-cache";
@@ -49,8 +49,10 @@ const scoreTranscript = inngest.createFunction(
   {
     id: "score-transcript-v2",
     name: "Score Transcript V2",
-    // Allow multiple instances to run in parallel (up to 10 per environment)
-    concurrency: { limit: 10, key: "score-v2", scope: "env" },
+    // Process transcripts sequentially to avoid memory issues in dev
+    // Each instance runs 6 extraction agents + synthesis (7+ concurrent API calls)
+    // In production, increase this to 3-5 with adequate server memory
+    concurrency: { limit: 1, key: "score-v2", scope: "env" },
   },
   { event: "transcript/score.requested" },
   async ({ event, step }) => {
@@ -332,27 +334,57 @@ const clusterCompanies = inngest.createFunction(
     const companies = await step.run("fetch-companies", async () => {
       const supabase = getSupabaseAdmin();
 
-      let query = supabase
-        .from("companies")
-        .select("id, company_name, user_id")
-        .not("company_name", "is", null);
-
-      // If specific user, filter by user
+      // Companies table has no user_id - resolve ownership through company_calls → transcripts
       if (user_id) {
-        query = query.eq("user_id", user_id);
+        // Get companies linked to this user's transcripts
+        const { data: userTranscripts } = await supabase
+          .from("transcripts")
+          .select("id")
+          .eq("user_id", user_id);
+
+        if (!userTranscripts || userTranscripts.length === 0) {
+          return [];
+        }
+
+        const transcriptIds = userTranscripts.map((t) => t.id);
+        const { data: companyLinks } = await supabase
+          .from("external_org_calls")
+          .select("company_id")
+          .in("transcript_id", transcriptIds);
+
+        if (!companyLinks || companyLinks.length === 0) {
+          return [];
+        }
+
+        const companyIds = [...new Set(companyLinks.map((c) => c.company_id))];
+
+        let query = supabase
+          .from("external_org")
+          .select("id, company_name")
+          .in("id", companyIds)
+          .not("company_name", "is", null);
+
+        if (company_id) {
+          query = query.eq("id", company_id);
+        }
+
+        const { data, error } = await query.limit(50);
+        if (error) throw new Error(`Failed to fetch companies: ${error.message}`);
+        return (data || []).map((c) => ({ ...c, resolved_user_id: user_id }));
       }
 
-      // If specific company, filter by company
+      // No user filter - get all companies
+      let query = supabase
+        .from("external_org")
+        .select("id, company_name")
+        .not("company_name", "is", null);
+
       if (company_id) {
         query = query.eq("id", company_id);
       }
 
       const { data, error } = await query.limit(50);
-
-      if (error) {
-        throw new Error(`Failed to fetch companies: ${error.message}`);
-      }
-
+      if (error) throw new Error(`Failed to fetch companies: ${error.message}`);
       return data || [];
     });
 
@@ -362,9 +394,28 @@ const clusterCompanies = inngest.createFunction(
 
     // Step 2: Create job record
     const jobId = await step.run("create-job", async () => {
+      // Resolve user_id: from event data, from resolved lookup, or from first company's transcripts
+      let resolvedUserId = user_id || (companies[0] as any).resolved_user_id;
+      if (!resolvedUserId) {
+        const supabase = getSupabaseAdmin();
+        const { data: companyLink } = await supabase
+          .from("external_org_calls")
+          .select("transcript_id")
+          .eq("company_id", companies[0].id)
+          .limit(1)
+          .single();
+        if (companyLink) {
+          const { data: transcript } = await supabase
+            .from("transcripts")
+            .select("user_id")
+            .eq("id", companyLink.transcript_id)
+            .single();
+          resolvedUserId = transcript?.user_id;
+        }
+      }
       return createRecommendationJob(
         "company_clustering",
-        user_id || companies[0].user_id,
+        resolvedUserId || "unknown",
         company_id?.toString(),
         companies.length
       );
@@ -380,7 +431,7 @@ const clusterCompanies = inngest.createFunction(
         try {
           // Get all transcripts for this company
           const { data: companyCalls } = await supabase
-            .from("company_calls")
+            .from("external_org_calls")
             .select("transcript_id")
             .eq("company_id", company.id);
 
@@ -415,27 +466,40 @@ Score: ${t.ai_overall_score || "N/A"}/100, Signal: ${t.ai_deal_signal || "N/A"}
 Summary: ${t.ai_summary || "No summary"}`;
             }).join("\n\n---\n\n");
 
-            // AI analysis
-            const { object } = await generateObject({
+            // AI analysis - use generateText + manual JSON parsing (Zod v4 compatibility)
+            const { text: clusterText } = await generateText({
               model: getOpenAIModel("gpt-4o-mini"),
-              schema: ClusteringAnalysisSchema,
-              system: `You are a sales analytics expert. Analyze these call transcripts for a company and extract patterns, recommendations, and insights. Be specific and actionable.`,
+              system: `You are a senior sales strategy consultant analyzing call transcripts for a specific company account. Your analysis must be HIGHLY SPECIFIC to this company — reference their actual pain points, actual quotes from calls, actual deal dynamics. NEVER give generic advice like "set clear agendas" or "do regular check-ins" that could apply to any company.
+
+## Output Quality Rules
+- Every recommendation must reference something specific from the calls (a quote, a concern, a person, a deal stage)
+- Every strength must cite evidence from the transcripts
+- Every risk must explain the specific business impact for THIS deal
+- Patterns must show evolution across calls (getting better/worse/stuck)
+- Use the company name and prospect names when available
+
+Respond with valid JSON only, no markdown.`,
               prompt: `Company: ${company.company_name}
 Total Transcripts: ${transcripts.length}
 
 Calls:
 ${batchSummary}
 
-Analyze these calls and provide:
-1. Strategic recommendations for this account
-2. Key strengths in the relationship
-3. Areas needing focus
-4. Relationship dynamics
-5. Risks to monitor
-6. Common pain points and objections`,
+Analyze these calls for ${company.company_name} and respond with a JSON object containing:
+- "recommendations": array of 3-5 strings. Each must be a SPECIFIC strategic recommendation tied to what happened in these calls. Bad: "Set clear agendas for calls". Good: "Address the unresolved budget concern from the last call before pitching additional features — they mentioned 'we need to justify the current spend first'."
+- "key_strengths": array of 2-4 strings. What is going WELL with this account? Reference specific moments or trends across calls.
+- "focus_areas": array of 2-4 strings. What needs attention? Reference specific gaps or risks observed in the calls.
+- "relationships": array of 2-3 strings. Who are the key contacts? What are the relationship dynamics? Who is the champion vs blocker? Reference actual people and interactions from calls.
+- "risks": array of 2-4 strings. What could go wrong with this deal? Be specific — reference unresolved objections, competitor mentions, timeline slippage, stakeholder concerns.
+- "pain_points_objections": array of 2-4 strings. What are this company's specific pain points and objections? Reference actual quotes or themes from the transcripts.
+- "patterns": array of 2-3 strings. What behavioral or deal patterns emerge across multiple calls? Examples: "Deal velocity is slowing — first 3 calls were weekly, last 2 had 3-week gaps", "Champion engagement is declining — shorter answers and fewer questions in recent calls", "Budget objection resurfaced in 3 of 4 calls despite being 'resolved' each time".`,
             });
 
-            allInsights.push(JSON.stringify(object));
+            // Parse JSON from text response
+            const jsonMatch = clusterText.match(/\{[\s\S]*\}/);
+            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+            const validated = ClusteringAnalysisSchema.safeParse(parsed);
+            allInsights.push(JSON.stringify(validated.success ? validated.data : parsed));
           }
 
           // Merge insights if multiple batches
@@ -445,17 +509,32 @@ Analyze these calls and provide:
             for (let i = 1; i < allInsights.length; i++) {
               const insight = JSON.parse(allInsights[i]);
               finalAnalysis.recommendations = [...(finalAnalysis.recommendations || []), ...(insight.recommendations || [])];
+              finalAnalysis.key_strengths = [...(finalAnalysis.key_strengths || []), ...(insight.key_strengths || [])];
+              finalAnalysis.focus_areas = [...(finalAnalysis.focus_areas || []), ...(insight.focus_areas || [])];
+              finalAnalysis.relationships = [...(finalAnalysis.relationships || []), ...(insight.relationships || [])];
               finalAnalysis.risks = [...(finalAnalysis.risks || []), ...(insight.risks || [])];
               finalAnalysis.pain_points_objections = [...(finalAnalysis.pain_points_objections || []), ...(insight.pain_points_objections || [])];
+              finalAnalysis.patterns = [...(finalAnalysis.patterns || []), ...(insight.patterns || [])];
             }
           }
 
-          // Store in company_recommendations
+          // Resolve user_id for this company through transcripts
+          let companyUserId = (company as any).resolved_user_id || user_id;
+          if (!companyUserId && companyCalls.length > 0) {
+            const { data: ownerTranscript } = await supabase
+              .from("transcripts")
+              .select("user_id")
+              .eq("id", companyCalls[0].transcript_id)
+              .single();
+            companyUserId = ownerTranscript?.user_id;
+          }
+
+          // Store in external_org_recommendations
           await supabase
-            .from("company_recommendations")
+            .from("external_org_recommendations")
             .upsert({
               company_id: company.id,
-              user_id: company.user_id,
+              user_id: companyUserId,
               recommendations: finalAnalysis.recommendations || [],
               key_strengths: finalAnalysis.key_strengths || [],
               focus_areas: finalAnalysis.focus_areas || [],
@@ -531,7 +610,7 @@ const generateUserRecommendations = inngest.createFunction(
     const users = await step.run("fetch-users", async () => {
       const supabase = getSupabaseAdmin();
 
-      let query = supabase.from("users").select("id, email, full_name");
+      let query = supabase.from("users").select("id, email, name");
 
       if (user_id) {
         query = query.eq("id", user_id);
@@ -596,25 +675,40 @@ Score: ${t.ai_overall_score || "N/A"}/100, Signal: ${t.ai_deal_signal || "N/A"}
 Summary: ${t.ai_summary || "No summary"}`;
             }).join("\n\n---\n\n");
 
-            const { object } = await generateObject({
+            // Use generateText + manual JSON parsing (Zod v4 compatibility)
+            const { text: recsText } = await generateText({
               model: getOpenAIModel("gpt-4o-mini"),
-              schema: UserRecommendationsSchema,
-              system: `You are a sales coaching expert. Analyze these call transcripts and provide personalized coaching recommendations for this sales rep. Focus on patterns, strengths, and actionable improvements.`,
-              prompt: `Sales Rep: ${user.full_name || user.email}
+              system: `You are a senior sales coach analyzing a rep's performance across multiple calls. Your coaching must be SPECIFIC to this rep — reference their actual behaviors, actual scores, actual patterns. Avoid generic advice. Write as if you've watched every call.
+
+## Output Quality Rules
+- Reference specific calls by name when making observations
+- Cite score trends (improving/declining/inconsistent) with actual numbers
+- Recommendations must be tied to observed behaviors, not general best practices
+- Strengths must reference specific techniques the rep demonstrated
+- Focus areas must explain WHY they matter with evidence from calls
+
+Respond with valid JSON only, no markdown.`,
+              prompt: `Sales Rep: ${user.name || user.email}
 Total Analyzed Calls: ${transcripts.length}
 
 Recent Calls:
 ${batchSummary}
 
-Provide:
-1. Actionable recommendations for improvement
-2. Key strengths to leverage
-3. Focus areas for development
-4. Relationship management insights
-5. Coaching insights with trends`,
+Analyze ${user.name || "this rep"}'s performance across these calls and respond with a JSON object containing:
+- "recommendations": array of 4-6 strings. Each must reference specific calls or patterns. Bad: "Practice active listening". Good: "Your discovery questions improved from Call 3 to Call 5 (score jumped from 62 to 78), but you still drop follow-ups when the prospect mentions competitors — happened in 3 of 5 calls. Practice the 'tell me more about that' technique specifically when competitors come up."
+- "key_strengths": array of 3-4 strings. What does this rep consistently do well? Reference specific calls and techniques.
+- "focus_areas": array of 2-4 strings. What recurring weaknesses show up across calls? Reference score patterns and specific examples.
+- "relationships": array of 2-3 strings. How does this rep manage relationships? Reference specific account dynamics observed.
+- "coaching_insights": object with:
+  - "insights": array of 3-4 strings — deeper observations about this rep's selling style, decision patterns, and growth areas
+  - "overall_trend": "improving" | "stable" | "declining" — based on score trajectory across calls
+  - "suggested_training": array of 2-3 strings — specific training modules or exercises tied to observed weaknesses`,
             });
 
-            allInsights.push(JSON.stringify(object));
+            const recsJsonMatch = recsText.match(/\{[\s\S]*\}/);
+            const recsParsed = recsJsonMatch ? JSON.parse(recsJsonMatch[0]) : {};
+            const recsValidated = UserRecommendationsSchema.safeParse(recsParsed);
+            allInsights.push(JSON.stringify(recsValidated.success ? recsValidated.data : recsParsed));
           }
 
           // Merge insights
@@ -696,7 +790,7 @@ const analyzeCompanyWebsite = inngest.createFunction(
             process.env.SUPABASE_SERVICE_ROLE_KEY!
           );
           await supabase
-            .from("company_icp")
+            .from("external_org_icp")
             .update({
               scrape_status: "failed",
             })
@@ -722,7 +816,7 @@ const analyzeCompanyWebsite = inngest.createFunction(
     await step.run("init-icp-record", async () => {
       const supabase = getSupabaseAdmin();
       await supabase
-        .from("company_icp")
+        .from("external_org_icp")
         .upsert({
           company_id,
           user_id,
@@ -780,7 +874,7 @@ const analyzeCompanyWebsite = inngest.createFunction(
         .join("\n\n---\n\n");
 
       await supabase
-        .from("company_icp")
+        .from("external_org_icp")
         .update({
           scrape_status: "analyzing",
           raw_scraped_content: combinedMarkdown,
@@ -795,12 +889,12 @@ const analyzeCompanyWebsite = inngest.createFunction(
         .map(c => `## Page: ${c.url}\n\n${c.markdown}`)
         .join("\n\n---\n\n");
 
-      const { object } = await generateObject({
+      // Use generateText + manual JSON parsing (Zod v4 compatibility)
+      const { text: icpText } = await generateText({
         model: getOpenAIModel("gpt-4o"),
-        schema: ICPAnalysisSchema,
         system: `You are a sales intelligence expert. Analyze this company's website content and extract comprehensive information about the company, their products/services, ideal customer profile, buyer personas, talk tracks, and objection handling strategies.
 
-Be thorough but realistic - only include information that can be reasonably inferred from the content. You are analyzing multiple pages from the same company website.`,
+Be thorough but realistic - only include information that can be reasonably inferred from the content. You are analyzing multiple pages from the same company website. Respond with valid JSON only, no markdown.`,
         prompt: `Company: ${company_name}
 Website: ${website}
 Pages Analyzed: ${allContent.length}
@@ -808,23 +902,26 @@ Pages Analyzed: ${allContent.length}
 Content:
 ${combinedMarkdown}
 
-Extract:
-1. Company information (name, industry, description, size, etc.)
-2. Products and services with key features
-3. Ideal customer profile (industries, sizes, geographies)
-4. Buyer personas with their goals and challenges
-5. Key talk tracks and value propositions
-6. Common objections and how to handle them`,
+Respond with a JSON object containing:
+- "company_info": object with name, industry, description, founded_year, company_size, headquarters, mission, vision
+- "products_and_services": array of objects with name, description, category, key_features, target_audience, pricing_model
+- "ideal_customer_profile": object with industries, company_sizes, geographies, job_titles, pain_points, use_cases, budget_range
+- "buyer_personas": array of objects with title, description, goals, challenges, decision_criteria, preferred_channels
+- "talk_tracks": array of strings (key talking points)
+- "objection_handling": array of objects with objection, response, category`,
       });
 
-      return object;
+      const icpJsonMatch = icpText.match(/\{[\s\S]*\}/);
+      const icpParsed = icpJsonMatch ? JSON.parse(icpJsonMatch[0]) : {};
+      const icpValidated = ICPAnalysisSchema.safeParse(icpParsed);
+      return icpValidated.success ? icpValidated.data : icpParsed;
     });
 
     // Step 7: Store analysis
     await step.run("store-analysis", async () => {
       const supabase = getSupabaseAdmin();
       await supabase
-        .from("company_icp")
+        .from("external_org_icp")
         .update({
           company_info: analysis.company_info,
           products_and_services: analysis.products_and_services,

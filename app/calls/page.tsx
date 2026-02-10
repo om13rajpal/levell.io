@@ -379,7 +379,7 @@ function CallsDashboard() {
       // First, delete any company_calls records that reference this transcript
       // This prevents foreign key constraint violation
       const { error: companyCallsError } = await supabase
-        .from("company_calls")
+        .from("external_org_calls")
         .delete()
         .eq("transcript_id", transcriptToDelete.id);
 

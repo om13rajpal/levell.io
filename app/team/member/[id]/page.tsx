@@ -162,11 +162,13 @@ export default function TeamMemberProfilePage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Member tags and team info
-  const [memberTags, setMemberTags] = useState<any[]>([]);
-  const [teamTags, setTeamTags] = useState<any[]>([]);
+  // Member org entries and team roles
+  const [memberOrgEntries, setMemberOrgEntries] = useState<any[]>([]);
+  const [teamRoles, setTeamRoles] = useState<any[]>([]);
   const [isTeamOwner, setIsTeamOwner] = useState(false);
   const [memberRole, setMemberRole] = useState<"admin" | "member" | null>(null);
+  const [memberTeamRole, setMemberTeamRole] = useState<string | null>(null); // from team_roles table
+  const [isSalesManager, setIsSalesManager] = useState(false);
 
   // Server-side pagination for transcripts
   const [currentPage, setCurrentPage] = useState(1);
@@ -208,77 +210,61 @@ export default function TeamMemberProfilePage() {
         .eq("id", memberId)
         .single();
 
-      // Get member's team to check admin status and fetch member tags
-      if (memberData?.team_id) {
-        // Fetch team tags
-        const { data: tagsData } = await supabase
-          .from("team_tags")
-          .select("*")
-          .eq("team_id", memberData.team_id);
+      // Get member's active team membership via team_org junction table
+      const { data: memberTeamOrg } = await supabase
+        .from("team_org")
+        .select("team_id, team_role_id, is_sales_manager, team_roles(role_name)")
+        .eq("user_id", memberId)
+        .eq("active", true)
+        .limit(1)
+        .maybeSingle();
 
-        if (tagsData) {
-          setTeamTags(tagsData);
+      if (memberTeamOrg) {
+        const teamId = memberTeamOrg.team_id;
+
+        // Set role info from team_org
+        const roleName = (memberTeamOrg as any).team_roles?.role_name || null;
+        setMemberTeamRole(roleName);
+        setIsSalesManager(memberTeamOrg.is_sales_manager || false);
+
+        // Determine member's role from team_role_id
+        // team_roles: id=1 Admin, id=2 Sales Manager, id=3 Member
+        if (memberTeamOrg.team_role_id === 1) {
+          setMemberRole("admin");
+        } else {
+          setMemberRole("member");
         }
 
-        // Fetch member tags for the profile member (not current user)
-        const { data: profileMemberTags } = await supabase
-          .from("team_member_tags")
-          .select("*")
-          .eq("team_id", memberData.team_id)
-          .eq("user_id", memberId);
+        // Fetch global team_roles
+        const { data: rolesData } = await supabase
+          .from("team_roles")
+          .select("id, role_name, description, created_at");
 
-        if (profileMemberTags) {
-          setMemberTags(profileMemberTags);
-
-          // Determine member's role
-          if (tagsData) {
-            const adminTag = tagsData.find(
-              (t: any) => t.tag_name.toLowerCase() === "admin"
-            );
-            const memberTag = tagsData.find(
-              (t: any) => t.tag_name.toLowerCase() === "member"
-            );
-
-            if (adminTag && profileMemberTags.some((mt: any) => mt.tag_id === adminTag.id)) {
-              setMemberRole("admin");
-            } else if (memberTag && profileMemberTags.some((mt: any) => mt.tag_id === memberTag.id)) {
-              setMemberRole("member");
-            }
-          }
+        if (rolesData) {
+          setTeamRoles(rolesData);
         }
 
-        // Also check if current user is team owner (for admin access)
-        const { data: teamData } = await supabase
-          .from("teams")
-          .select("owner")
-          .eq("id", memberData.team_id)
-          .single();
+        // Store the member's org entry for display
+        setMemberOrgEntries([memberTeamOrg]);
 
-        // Check if profile member is team owner
-        if (teamData?.owner === memberId) {
+        // Check if profile member is sales manager (owner equivalent)
+        if (memberTeamOrg.is_sales_manager) {
           setIsTeamOwner(true);
         }
 
         if (currentUid) {
-          // Fetch member tags for current user to check admin status
-          const { data: currentUserTags } = await supabase
-            .from("team_member_tags")
-            .select("*")
-            .eq("team_id", memberData.team_id)
-            .eq("user_id", currentUid);
+          // Check current user's role via team_org for admin access
+          const { data: currentUserTeamOrg } = await supabase
+            .from("team_org")
+            .select("team_role_id, is_sales_manager")
+            .eq("user_id", currentUid)
+            .eq("team_id", teamId)
+            .eq("active", true)
+            .limit(1)
+            .maybeSingle();
 
-          // Check if current user has admin tag
-          if (tagsData && currentUserTags) {
-            const adminTag = tagsData.find(
-              (t: any) => t.tag_name.toLowerCase() === "admin"
-            );
-            if (adminTag && currentUserTags.some((mt: any) => mt.tag_id === adminTag.id)) {
-              setIsAdmin(true);
-            }
-          }
-
-          // Check if current user is team owner
-          if (teamData?.owner === currentUid) {
+          // Admin role (team_role_id=1) or is_sales_manager grants admin access
+          if (currentUserTeamOrg && (currentUserTeamOrg.team_role_id === 1 || currentUserTeamOrg.is_sales_manager)) {
             setIsAdmin(true);
           }
         }
@@ -569,13 +555,14 @@ export default function TeamMemberProfilePage() {
       .slice(-20);
   }, [chartData]);
 
-  // Get custom role tags for display
-  const customRoleTags = useMemo(() => {
-    if (!teamTags.length || !memberTags.length) return [];
-    return teamTags.filter(
-      (t) => t.tag_type === "department" && memberTags.some((mt) => mt.tag_id === t.id)
-    );
-  }, [teamTags, memberTags]);
+  // Get the member's role name for display
+  const memberRoleLabel = useMemo(() => {
+    if (!memberOrgEntries.length || !teamRoles.length) return null;
+    const orgEntry = memberOrgEntries[0]; // we stored the team_org entry here
+    if (!orgEntry?.team_role_id) return null;
+    const role = teamRoles.find((r: any) => r.id === orgEntry.team_role_id);
+    return role?.role_name || null;
+  }, [teamRoles, memberOrgEntries]);
 
   // Server-side pagination calculations
   const totalPages = Math.ceil(totalTranscripts / pageSize);
@@ -740,24 +727,13 @@ export default function TeamMemberProfilePage() {
                         ) : null}
                       </div>
                       <p className="text-sm text-muted-foreground">{member.email}</p>
-                      {/* Custom Role Tags */}
-                      {customRoleTags.length > 0 && (
+                      {/* Role Label */}
+                      {memberRoleLabel && !isTeamOwner && memberRole !== "admin" && (
                         <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                           <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
-                          {customRoleTags.map((tag: any) => (
-                            <Badge
-                              key={tag.id}
-                              variant="outline"
-                              className="text-[10px] px-1.5 py-0"
-                              style={{
-                                backgroundColor: tag.tag_color ? `${tag.tag_color}15` : undefined,
-                                borderColor: tag.tag_color || undefined,
-                                color: tag.tag_color || undefined,
-                              }}
-                            >
-                              {tag.tag_name}
-                            </Badge>
-                          ))}
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            {memberRoleLabel}
+                          </Badge>
                         </div>
                       )}
                     </div>

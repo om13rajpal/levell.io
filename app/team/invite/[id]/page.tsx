@@ -24,8 +24,8 @@ export default function TeamInvitePage() {
 
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
-  const [team, setTeam] = useState<{ id: number; team_name: string; owner: string } | null>(null);
-  const [ownerName, setOwnerName] = useState<string | null>(null);
+  const [team, setTeam] = useState<{ id: number; team_name: string } | null>(null);
+  const [salesManagerName, setSalesManagerName] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState("");
   const [alreadyInTeam, setAlreadyInTeam] = useState(false);
@@ -91,16 +91,25 @@ export default function TeamInvitePage() {
         return;
       }
 
-      // Get owner name
-      if (inviteTeam.owner) {
-        const { data: ownerData } = await supabase
+      // Get sales manager name via team_org
+      const { data: smOrgEntry } = await supabase
+        .from("team_org")
+        .select("user_id")
+        .eq("team_id", inviteTeam.id)
+        .eq("is_sales_manager", true)
+        .eq("active", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (smOrgEntry) {
+        const { data: smData } = await supabase
           .from("users")
           .select("name, email")
-          .eq("id", inviteTeam.owner)
+          .eq("id", smOrgEntry.user_id)
           .single();
 
-        if (ownerData) {
-          setOwnerName(ownerData.name || ownerData.email);
+        if (smData) {
+          setSalesManagerName(smData.name || smData.email);
         }
       }
 
@@ -111,14 +120,16 @@ export default function TeamInvitePage() {
         setExistingTeamName(existingTeam);
       }
 
-      // Check if user is already a member of this specific team
-      const { data: teamData } = await supabase
-        .from("teams")
-        .select("members")
-        .eq("id", inviteTeam.id)
-        .single();
+      // Check if user is already a member of this specific team via team_org
+      const { data: existingOrg } = await supabase
+        .from("team_org")
+        .select("id")
+        .eq("team_id", inviteTeam.id)
+        .eq("user_id", authUser.id)
+        .eq("active", true)
+        .maybeSingle();
 
-      if (teamData?.members?.includes(authUser.id)) {
+      if (existingOrg) {
         setSuccess(true);
       }
 
@@ -331,9 +342,9 @@ export default function TeamInvitePage() {
             </div>
             <CardTitle className="text-2xl">Join {team?.team_name}</CardTitle>
             <CardDescription className="text-base">
-              {ownerName ? (
+              {salesManagerName ? (
                 <>
-                  <span className="font-medium text-foreground">{ownerName}</span> has invited you to join their team
+                  <span className="font-medium text-foreground">{salesManagerName}</span> has invited you to join their team
                 </>
               ) : (
                 "You've been invited to join this team"
@@ -407,9 +418,9 @@ export default function TeamInvitePage() {
           </div>
           <CardTitle className="text-2xl font-bold">Team Invitation</CardTitle>
           <CardDescription className="text-base">
-            {ownerName ? (
+            {salesManagerName ? (
               <>
-                <span className="font-medium text-foreground">{ownerName}</span> has invited you to join
+                <span className="font-medium text-foreground">{salesManagerName}</span> has invited you to join
               </>
             ) : (
               "You've been invited to join"

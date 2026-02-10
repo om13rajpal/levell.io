@@ -289,19 +289,22 @@ export async function copyTeamOwnerDataToUser(
   teamId: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Get team details to find the owner
-    const { data: team, error: teamError } = await supabase
-      .from("teams")
-      .select("owner")
-      .eq("id", teamId)
-      .single();
+    // Get team admin via team_org (the admin/owner is the user with team_role_id=1 or is_sales_manager=true)
+    const { data: adminMembership, error: adminError } = await supabase
+      .from("team_org")
+      .select("user_id")
+      .eq("team_id", teamId)
+      .eq("team_role_id", 1) // Admin role
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
 
-    if (teamError || !team) {
-      console.error("Error fetching team:", teamError);
-      return { success: false, error: "Team not found" };
+    if (adminError || !adminMembership) {
+      console.error("Error fetching team admin:", adminError);
+      return { success: false, error: "Team admin not found" };
     }
 
-    const ownerId = team.owner;
+    const ownerId = adminMembership.user_id;
 
     // Get owner's user data (sales_motion)
     const { data: ownerData, error: ownerError } = await supabase

@@ -265,7 +265,7 @@ export default function CompanyDetailsPage() {
     try {
       // First, get all transcript IDs associated with this company
       const { data: companyCalls } = await supabase
-        .from("company_calls")
+        .from("external_org_calls")
         .select("transcript_id")
         .eq("company_id", id);
 
@@ -273,7 +273,7 @@ export default function CompanyDetailsPage() {
 
       // Delete the company_calls records
       const { error: callsError } = await supabase
-        .from("company_calls")
+        .from("external_org_calls")
         .delete()
         .eq("company_id", id);
 
@@ -296,7 +296,7 @@ export default function CompanyDetailsPage() {
 
       // Now delete the company
       const { error } = await supabase
-        .from("companies")
+        .from("external_org")
         .delete()
         .eq("id", id);
 
@@ -329,8 +329,8 @@ export default function CompanyDetailsPage() {
       // Parallel API calls - fetch company and calls simultaneously
       // Include company_contacts, ai_recommendations, risk_summary, and ai_relationship from schema
       const [companyResult, callDataResult] = await Promise.all([
-        supabase.from("companies").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations, risk_summary, ai_relationship, pain_points").eq("id", id).single(),
-        supabase.from("company_calls")
+        supabase.from("external_org").select("id, domain, company_name, created_at, company_goal_objective, company_contacts, ai_recommendations, risk_summary, ai_relationship, pain_points").eq("id", id).single(),
+        supabase.from("external_org_calls")
           .select("id, created_at, transcript_id")
           .eq("company_id", id)
           .order("created_at", { ascending: false })

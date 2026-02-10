@@ -277,7 +277,7 @@ async function fetchCompanyContext(companyId: string): Promise<string> {
     console.log("[Agent] Fetching company context for ID:", companyId);
 
     const { data: company, error } = await getSupabaseAdmin()
-      .from("companies")
+      .from("external_org")
       .select("*")
       .eq("id", companyId)
       .single();
@@ -354,7 +354,7 @@ async function fetchCompanyContext(companyId: string): Promise<string> {
 
     // Fetch associated calls
     const { data: companyCalls } = await getSupabaseAdmin()
-      .from("company_calls")
+      .from("external_org_calls")
       .select("transcript_id, created_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
@@ -644,7 +644,7 @@ async function fetchUserDatabaseContext(
         if (userCompany) {
           // Fetch all companies
           const { data: companies } = await supabase
-            .from("companies")
+            .from("external_org")
             .select("*")
             .eq("company_id", userCompany.id)
             .order("created_at", { ascending: false });
@@ -653,7 +653,7 @@ async function fetchUserDatabaseContext(
             // Get call counts
             const companyIds = companies.map((c) => c.id);
             const { data: callCounts } = await supabase
-              .from("company_calls")
+              .from("external_org_calls")
               .select("company_id")
               .in("company_id", companyIds);
 
@@ -698,7 +698,7 @@ async function fetchUserDatabaseContext(
       case "company_detail": {
         if (pageContext?.companyId) {
           const { data: company } = await supabase
-            .from("companies")
+            .from("external_org")
             .select("*")
             .eq("id", pageContext.companyId)
             .single();
@@ -753,7 +753,7 @@ async function fetchUserDatabaseContext(
 
             // Fetch related calls
             const { data: companyCalls } = await supabase
-              .from("company_calls")
+              .from("external_org_calls")
               .select("transcript_id, created_at")
               .eq("company_id", pageContext.companyId)
               .order("created_at", { ascending: false })
@@ -779,23 +779,42 @@ async function fetchUserDatabaseContext(
       }
 
       case "team": {
-        // Fetch user's team
-        const { data: userTeam } = await supabase
-          .from("teams")
-          .select("*")
-          .contains("members", [userId])
-          .single();
+        // Find user's team via team_org junction table
+        const { data: orgEntry } = await supabase
+          .from("team_org")
+          .select("team_id")
+          .eq("user_id", userId)
+          .eq("active", true)
+          .limit(1)
+          .maybeSingle();
 
-        if (userTeam) {
-          parts.push(`### Team: ${userTeam.team_name}`);
-          parts.push(`- **Members**: ${userTeam.members?.length || 0}`);
+        if (orgEntry) {
+          const { data: userTeam } = await supabase
+            .from("teams")
+            .select("id, team_name")
+            .eq("id", orgEntry.team_id)
+            .single();
+
+          // Fetch all active team member IDs
+          const { data: teamMembers } = await supabase
+            .from("team_org")
+            .select("user_id")
+            .eq("team_id", orgEntry.team_id)
+            .eq("active", true);
+
+          const memberIds = teamMembers?.map((m: any) => m.user_id) || [];
+
+          if (userTeam) {
+            parts.push(`### Team: ${userTeam.team_name}`);
+            parts.push(`- **Members**: ${memberIds.length}`);
+          }
 
           // Fetch member details
-          if (userTeam.members && userTeam.members.length > 0) {
+          if (memberIds.length > 0) {
             const { data: members } = await supabase
               .from("users")
               .select("id, name, email")
-              .in("id", userTeam.members);
+              .in("id", memberIds);
 
             if (members) {
               // For each member, get their call stats

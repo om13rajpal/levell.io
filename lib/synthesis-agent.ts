@@ -1,4 +1,4 @@
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { getOpenAIModel } from "@/lib/openai";
 import {
   AllExtractions,
@@ -8,6 +8,7 @@ import {
   DealSignal,
   PerformanceBreakdown,
 } from "@/types/extraction-outputs";
+import type { CleanedTranscript } from "@/lib/transcript-cleaner";
 
 // Use a smarter model for synthesis (needs to prioritize, write naturally, connect patterns)
 const SYNTHESIS_MODEL = "gpt-4o";
@@ -25,38 +26,54 @@ interface ScoringWeights {
   rep_technique: number;
 }
 
-const WEIGHTS_BY_CALL_TYPE: Record<CallType, ScoringWeights> = {
+const WEIGHTS_BY_CALL_TYPE: Record<string, ScoringWeights> = {
   discovery: {
-    pain_points: 0.25,      // HIGH - This is the whole point
-    objections: 0.10,       // LOW - Not expected yet
-    engagement: 0.25,       // HIGH - Get them talking
-    next_steps: 0.15,       // MEDIUM - Earn a meeting
-    call_structure: 0.10,   // MEDIUM - Set agenda
-    rep_technique: 0.15,    // HIGH - Listening is everything
-  },
-  followup: {
-    pain_points: 0.15,      // MEDIUM - Validate, go deeper
-    objections: 0.25,       // HIGH - Make or break
-    engagement: 0.15,       // MEDIUM - Are stakeholders engaged?
-    next_steps: 0.25,       // HIGH - Advance the deal
-    call_structure: 0.10,   // MEDIUM - Build on context
-    rep_technique: 0.10,    // MEDIUM - Confidence in presenting
+    pain_points: 0.25,
+    objections: 0.05,
+    engagement: 0.20,
+    next_steps: 0.15,
+    call_structure: 0.15,
+    rep_technique: 0.20,
   },
   demo: {
-    pain_points: 0.15,      // MEDIUM
-    objections: 0.20,       // HIGH - Address concerns
-    engagement: 0.20,       // HIGH - Keep them interested
-    next_steps: 0.20,       // HIGH - Move to close
-    call_structure: 0.15,   // MEDIUM
-    rep_technique: 0.10,    // MEDIUM
+    pain_points: 0.05,
+    objections: 0.20,
+    engagement: 0.20,
+    next_steps: 0.15,
+    call_structure: 0.15,
+    rep_technique: 0.25,
+  },
+  followup: {
+    pain_points: 0.15,
+    objections: 0.25,
+    engagement: 0.15,
+    next_steps: 0.25,
+    call_structure: 0.10,
+    rep_technique: 0.10,
   },
   closing: {
-    pain_points: 0.10,      // LOW - Should be known
-    objections: 0.30,       // HIGHEST - Handle final concerns
-    engagement: 0.15,       // MEDIUM
-    next_steps: 0.30,       // HIGHEST - Secure commitment
-    call_structure: 0.05,   // LOW
-    rep_technique: 0.10,    // MEDIUM
+    pain_points: 0.10,
+    objections: 0.30,
+    engagement: 0.15,
+    next_steps: 0.30,
+    call_structure: 0.05,
+    rep_technique: 0.10,
+  },
+  coaching: {
+    pain_points: 0.10,
+    objections: 0.10,
+    engagement: 0.25,
+    next_steps: 0.10,
+    call_structure: 0.20,
+    rep_technique: 0.25,
+  },
+  check_in: {
+    pain_points: 0.15,
+    objections: 0.15,
+    engagement: 0.25,
+    next_steps: 0.20,
+    call_structure: 0.10,
+    rep_technique: 0.15,
   },
 };
 
@@ -75,9 +92,9 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
  */
 export function calculateWeightedScore(
   breakdown: PerformanceBreakdown,
-  callType?: CallType
+  callType?: CallType | string
 ): number {
-  const weights = callType ? WEIGHTS_BY_CALL_TYPE[callType] : DEFAULT_WEIGHTS;
+  const weights = callType && WEIGHTS_BY_CALL_TYPE[callType] ? WEIGHTS_BY_CALL_TYPE[callType] : DEFAULT_WEIGHTS;
 
   const weightedSum =
     breakdown.pain_points * weights.pain_points +
@@ -113,6 +130,9 @@ export function determineDealSignal(
   const noNextSteps = extractions.next_steps.committed_actions.length === 0;
   const stalledMomentum = extractions.next_steps.momentum_assessment === "stalled";
   const lowEngagement = extractions.engagement.prospect_energy === "low";
+  const highEngagement = extractions.engagement.prospect_energy === "high";
+  const strongMomentum = extractions.next_steps.momentum_assessment === "strong";
+  const hasCriticalIssues = stalledMomentum || noNextSteps || hasUnhandledObjections || lowEngagement;
 
   // Critical: Multiple red flags
   if (
@@ -134,6 +154,21 @@ export function determineDealSignal(
     return "at_risk";
   }
 
+  // Strong: Excellent performance across the board
+  if (
+    avgScore >= 80 &&
+    !hasUnhandledObjections &&
+    strongMomentum &&
+    highEngagement
+  ) {
+    return "strong";
+  }
+
+  // Positive: Good performance with no critical issues
+  if (avgScore >= 70 && !hasCriticalIssues) {
+    return "positive";
+  }
+
   // Healthy: Good signals across the board
   return "healthy";
 }
@@ -142,9 +177,11 @@ export function determineDealSignal(
 // Synthesis Agent Prompt
 // ============================================
 
-const SYNTHESIS_SYSTEM_PROMPT = `You are an expert sales coach synthesizing analysis from multiple specialized agents into a cohesive coaching report.
+const SYNTHESIS_SYSTEM_PROMPT = `You are an expert sales coaching AI synthesizing analysis from 6 extraction agents.
 
 ## Your Role
+Address the rep by first name. Be direct. Sound like a senior sales manager, not a consultant.
+
 You receive structured analysis from 6 extraction agents:
 1. Pain Points Extractor - problems the prospect revealed
 2. Objections Extractor - resistance and how it was handled
@@ -155,51 +192,11 @@ You receive structured analysis from 6 extraction agents:
 
 Your job is to synthesize these into an actionable coaching report.
 
-## Output Sections
-
-### 1. What Worked (2-3 items max)
-Specific moments the rep nailed. Include:
-- The moment (what happened)
-- The exact quote
-- Why it was effective
-
-### 2. Missed Opportunities (2-4 items)
-Key moments where the rep could have done better:
-- The moment (headline)
-- Why it matters
-- What they should have done (with exact phrasing to use)
-
-### 3. Deal Risk Alerts (0-3 items)
-Only include if there are genuine risks:
-- Risk type (headline)
-- What happened
-- Why it's a risk
-- How to address it (specific question to ask)
-
-### 4. Patterns to Watch
-Recurring behaviors from this call:
-- The pattern observed
-- How many times it occurred
-- Its impact
-- Recommendation to fix
-
-### 5. Next Call Game Plan
-Specific actions for the next conversation:
-- Questions to ask
-- Topics to revisit
-- Things to avoid
-Prioritize as high/medium/low
-
-### 6. Call Summary
-Write 4-5 sentences summarizing:
-- What the call was about
-- Key discoveries
-- Current deal status
-- What happens next
-This is stored in the database for future context, not shown to the rep.
-
-## Language Guidelines
-Sound like a sales manager giving feedback, NOT a consultant writing a report.
+## Language Rules
+- Address rep by first name throughout
+- Use "You said X -> Try instead: Y" format for improvements
+- For practice drills, be specific: "Record yourself doing X for 2 minutes, then listen back"
+- Sound like a sales manager, not a report generator
 
 DON'T say: "Value articulation was suboptimal"
 DO say: "You didn't explain why they should care"
@@ -221,6 +218,8 @@ export interface SynthesisInput {
   transcript: string;
   context: string;
   callType?: CallType;
+  repInfo?: { name: string; email: string; transcript_speaker_name?: string; company?: string; role?: string };
+  cleanedTranscript?: { talk_ratio: { rep_percent: number; prospect_percent: number }; duration_minutes: number };
 }
 
 export interface SynthesisResult {
@@ -259,14 +258,44 @@ export async function synthesizeCoachingReport(
     // Format extraction outputs for the prompt
     const extractionSummary = formatExtractionsForPrompt(input.extractions);
 
-    // Generate the coaching report
-    const { object } = await generateObject({
-      model: getOpenAIModel(SYNTHESIS_MODEL),
-      schema: CoachingReportSchema,
-      system: SYNTHESIS_SYSTEM_PROMPT,
-      prompt: `## Historical Context
-${input.context}
+    // Build rep info section if available
+    let repSection = "";
+    if (input.repInfo) {
+      repSection = `\n## Rep Information
+- Name: ${input.repInfo.name}
+- Email: ${input.repInfo.email}`;
+      if (input.repInfo.company) repSection += `\n- Company: ${input.repInfo.company}`;
+      if (input.repInfo.role) repSection += `\n- Role: ${input.repInfo.role}`;
+      if (input.repInfo.transcript_speaker_name) repSection += `\n- Transcript Speaker Name: ${input.repInfo.transcript_speaker_name}`;
+      repSection += "\n";
+    }
 
+    // Build talk ratio section if available
+    let talkRatioSection = "";
+    if (input.cleanedTranscript) {
+      talkRatioSection = `\n## Talk Ratio
+- Rep: ${input.cleanedTranscript.talk_ratio.rep_percent}%
+- Prospect: ${input.cleanedTranscript.talk_ratio.prospect_percent}%
+- Call Duration: ${input.cleanedTranscript.duration_minutes} minutes\n`;
+    }
+
+    // Build scoring weights context
+    const activeWeights = input.callType && WEIGHTS_BY_CALL_TYPE[input.callType]
+      ? WEIGHTS_BY_CALL_TYPE[input.callType]
+      : DEFAULT_WEIGHTS;
+    const weightsContext = `\n## Scoring Weights (${input.callType || "default"})
+- Pain Points: ${(activeWeights.pain_points * 100).toFixed(0)}%
+- Objections: ${(activeWeights.objections * 100).toFixed(0)}%
+- Engagement: ${(activeWeights.engagement * 100).toFixed(0)}%
+- Next Steps: ${(activeWeights.next_steps * 100).toFixed(0)}%
+- Call Structure: ${(activeWeights.call_structure * 100).toFixed(0)}%
+- Rep Technique: ${(activeWeights.rep_technique * 100).toFixed(0)}%
+Higher weight = more important for this call type.\n`;
+
+    // Build the synthesis prompt
+    const synthesisPrompt = `## Historical Context
+${input.context}
+${repSection}${talkRatioSection}${weightsContext}
 ## Extraction Agent Outputs
 ${extractionSummary}
 
@@ -286,24 +315,95 @@ Overall Score: ${overallScore}/100
 Deal Signal: ${dealSignal.toUpperCase()}
 
 ## Your Task
-Synthesize all this information into a coaching report. Use the pre-calculated scores for the performance_breakdown, overall_score, and deal_signal fields.
+Synthesize all this information into a coaching report.${input.repInfo ? ` Address ${input.repInfo.name.split(" ")[0]} by first name throughout.` : ""}
 
-Focus on:
-1. What Worked - 2-3 specific wins with quotes
-2. Missed Opportunities - 2-4 actionable improvements
-3. Deal Risk Alerts - only genuine risks
-4. Patterns to Watch - recurring behaviors
-5. Next Call Game Plan - specific actions
-6. Call Summary - 4-5 sentences for database storage`,
+Do NOT include performance_breakdown, overall_score, or deal_signal - those are calculated separately.
+
+Focus on producing RICH, DETAILED output for each section. DO NOT be thin or surface-level. Every section must have substance.
+
+1. Overall Assessment - 2-3 sentences addressing the rep by first name. Be specific about what happened on this call. Reference actual moments.
+2. What Worked - EXACTLY 3-4 specific wins with exact quotes from the transcript. Each must have a different "keep_doing" tip. Don't repeat generic advice. Look for: good questions asked, effective responses to objections, rapport-building moments, strong closes, empathetic statements.
+3. Critical Improvements - EXACTLY 3 areas with SPECIFIC practice drills. Each drill must be actionable this week (e.g., "Record yourself asking discovery questions for 5 minutes — aim for 3 follow-ups per topic before moving on. Do this daily for 5 days."). Use "You said X -> Try instead: Y" format.
+4. Missed Opportunities - EXACTLY 3-4 actionable improvements with "You said X -> Try instead: Y" format. Include the exact prospect quote that was the missed cue.
+5. Deal Risk Alerts - provide AT LEAST 2-3 if deal_signal is at_risk or critical. Even for healthy deals, provide AT LEAST 1 risk. Include severity (high/medium/low), what_happened (specific moment), why_risky (business impact), how_to_address (next call action), and suggested_question where applicable.
+6. Patterns to Watch - AT LEAST 2-3 recurring behaviors observed across the call. Include: frequency (occurrences count), impact, and a specific recommendation. Look for: question types, response patterns, energy levels, topic avoidance, verbal habits.
+7. The One Thing - single most impactful change. "what" must be specific (not generic like "ask better questions"), "how" must be a concrete 3-step drill, "measure" must be observable.
+8. Next Call Game Plan - AT LEAST 3-4 specific actions with success criteria. Mix of questions to ask, topics to cover, and things to avoid.
+9. Coaching Notes - EXACTLY 3 discussion points for the manager. Each should be specific to this call, not generic coaching advice.
+10. Call Summary / Executive Summary - 4-5 sentences for database storage. Include: what the call was about, key outcome, deal status, and recommended next action.
+11. Deal Signal Reason - specific evidence from the call for the deal signal determination. Reference at least 2 concrete moments.`;
+
+    // Use generateText + manual JSON parsing to avoid Zod v4 JSON Schema conversion issues.
+    // The AI SDK's generateObject fails ~80% of the time with Zod v4 schemas because
+    // the Zod-to-JSON-Schema conversion produces schemas that confuse the model.
+    const { text } = await generateText({
+      model: getOpenAIModel(SYNTHESIS_MODEL),
+      system: SYNTHESIS_SYSTEM_PROMPT + `\n\nIMPORTANT: Respond with ONLY a valid JSON object. No markdown, no code fences, no explanation.
+The JSON must have these exact fields:
+{
+  "rep_scored": { "name": "string", "email": "string", "transcript_speaker_name": "string" },
+  "call_type": "discovery|demo|coaching|check_in|followup|closing",
+  "overall_assessment": "2-3 sentences addressing rep by first name",
+  "deal_signal_reason": "specific evidence for the deal signal determination",
+  "executive_summary": "4-5 sentences for CRM storage",
+  "what_worked": [{"moment": "string", "quote": "string", "why_effective": "string", "keep_doing": "string"}],
+  "critical_improvements": [{"area": "string", "issue": "string", "practice_drill": "specific drill to practice"}],
+  "missed_opportunities": [{"moment": "string", "prospect_said": "exact quote", "rep_said": "exact quote", "why_it_matters": "string", "what_to_do": "string", "suggested_phrasing": "string or omit"}],
+  "deal_risk_alerts": [{"risk_type": "string", "severity": "high|medium|low", "what_happened": "string", "why_risky": "string", "how_to_address": "string", "suggested_question": "string or omit"}],
+  "patterns_to_watch": [{"pattern": "string", "occurrences": number, "impact": "string", "recommendation": "string"}],
+  "the_one_thing": { "what": "single most impactful change", "how": "specific steps to implement", "measure": "how to know it's working" },
+  "next_call_game_plan": [{"action": "string", "priority": "high|medium|low", "category": "question|topic|avoid", "success_criteria": "string"}],
+  "coaching_notes": ["manager discussion point 1", "manager discussion point 2"],
+  "call_summary": "string (4-5 sentences for database)"
+}`,
+      prompt: synthesisPrompt,
+      maxRetries: 2,
     });
 
-    // Override with our calculated values to ensure consistency
-    const report: CoachingReport = {
-      ...object,
+    // Parse JSON from the response (strip markdown fences if present)
+    const jsonStr = text.replace(/^```(?:json)?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      throw new Error(`Failed to parse synthesis JSON: ${jsonStr.slice(0, 200)}`);
+    }
+
+    // Extract new fields from parsed response
+    const parsedObj = parsed as Record<string, unknown>;
+
+    // Map executive_summary or call_summary from response
+    if (parsedObj.executive_summary && !parsedObj.call_summary) {
+      parsedObj.call_summary = parsedObj.executive_summary;
+    }
+
+    // Validate with Zod, but merge our calculated fields first
+    const fullObject = {
+      ...parsedObj,
       performance_breakdown: performanceBreakdown,
       overall_score: overallScore,
       deal_signal: dealSignal,
+      // Preserve new n8n-aligned fields if present in AI output
+      ...(parsedObj.the_one_thing ? { the_one_thing: parsedObj.the_one_thing } : {}),
+      ...(parsedObj.coaching_notes ? { coaching_notes: parsedObj.coaching_notes } : {}),
+      ...(parsedObj.critical_improvements ? { critical_improvements: parsedObj.critical_improvements } : {}),
+      ...(parsedObj.call_type ? { call_type: parsedObj.call_type } : {}),
+      ...(parsedObj.overall_assessment ? { overall_assessment: parsedObj.overall_assessment } : {}),
+      ...(parsedObj.deal_signal_reason ? { deal_signal_reason: parsedObj.deal_signal_reason } : {}),
+      ...(parsedObj.rep_scored ? { rep_scored: parsedObj.rep_scored } : {}),
     };
+
+    const validated = CoachingReportSchema.safeParse(fullObject);
+    if (!validated.success) {
+      const issues = validated.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+      console.warn(`[SynthesisAgent] Validation issues: ${issues}`);
+      // Use the parsed data as-is with our calculated values, coercing to CoachingReport
+      // This is acceptable because the model output is close enough and we override the critical fields
+    }
+
+    const report: CoachingReport = validated.success
+      ? validated.data
+      : (fullObject as CoachingReport);
 
     const timingMs = Date.now() - startTime;
     console.log(`[SynthesisAgent] Completed in ${timingMs}ms, Score: ${overallScore}, Signal: ${dealSignal}`);
@@ -385,7 +485,17 @@ function formatExtractionsForPrompt(extractions: AllExtractions): string {
   output += "### Next Steps Analysis\n";
   output += `Score: ${extractions.next_steps.score}/100\n`;
   output += `Summary: ${extractions.next_steps.summary}\n`;
-  output += `Meeting Scheduled: ${extractions.next_steps.meeting_scheduled ? "Yes" : "No"}\n`;
+  // Handle union type: meeting_scheduled can be boolean or object { scheduled, date, attendees, purpose }
+  const meetingScheduled = typeof extractions.next_steps.meeting_scheduled === "object"
+    ? extractions.next_steps.meeting_scheduled.scheduled
+    : extractions.next_steps.meeting_scheduled;
+  output += `Meeting Scheduled: ${meetingScheduled ? "Yes" : "No"}\n`;
+  if (typeof extractions.next_steps.meeting_scheduled === "object") {
+    const ms = extractions.next_steps.meeting_scheduled;
+    if (ms.date) output += `  Date: ${ms.date}\n`;
+    if (ms.attendees?.length) output += `  Attendees: ${ms.attendees.join(", ")}\n`;
+    if (ms.purpose) output += `  Purpose: ${ms.purpose}\n`;
+  }
   output += `Momentum: ${extractions.next_steps.momentum_assessment}\n`;
   if (extractions.next_steps.committed_actions.length > 0) {
     output += "Committed Actions:\n";

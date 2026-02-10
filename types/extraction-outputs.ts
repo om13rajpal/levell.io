@@ -25,6 +25,8 @@ export const PainPointExtractionSchema = z.object({
   items: z.array(PainPointItemSchema),
   score: z.number().min(0).max(100),
   summary: z.string(),
+  missed_opportunities: z.array(z.string()).optional(),
+  score_rationale: z.string().optional(),
 });
 export type PainPointExtraction = z.infer<typeof PainPointExtractionSchema>;
 
@@ -53,6 +55,8 @@ export const ObjectionExtractionSchema = z.object({
   items: z.array(ObjectionItemSchema),
   score: z.number().min(0).max(100),
   summary: z.string(),
+  unaddressed_objections: z.array(z.string()).optional(),
+  patterns: z.array(z.string()).optional(),
 });
 export type ObjectionExtraction = z.infer<typeof ObjectionExtractionSchema>;
 
@@ -86,6 +90,13 @@ export const EngagementScoreSchema = z.object({
   prospect_energy: ProspectEnergySchema,
   score: z.number().min(0).max(100),
   summary: z.string(),
+  energy_shifts: z.array(z.object({
+    moment: z.string(),
+    direction: z.enum(["up", "down"]),
+    trigger: z.string(),
+  })).optional(),
+  red_flags: z.array(z.string()).optional(),
+  rep_adjustments: z.array(z.string()).optional(),
 });
 export type EngagementScore = z.infer<typeof EngagementScoreSchema>;
 
@@ -116,10 +127,21 @@ export type MomentumAssessment = z.infer<typeof MomentumAssessmentSchema>;
 
 export const NextStepsAnalysisSchema = z.object({
   committed_actions: z.array(CommittedActionSchema),
-  meeting_scheduled: z.boolean(),
+  meeting_scheduled: z.union([
+    z.boolean(),
+    z.object({
+      scheduled: z.boolean(),
+      date: z.string().optional(),
+      attendees: z.array(z.string()).optional(),
+      purpose: z.string().optional(),
+    }),
+  ]),
   momentum_assessment: MomentumAssessmentSchema,
   score: z.number().min(0).max(100),
   summary: z.string(),
+  who_has_the_ball: z.enum(["rep", "prospect", "unclear"]).optional(),
+  risk_factors: z.array(z.string()).optional(),
+  closing_quote: z.string().optional(),
 });
 export type NextStepsAnalysis = z.infer<typeof NextStepsAnalysisSchema>;
 
@@ -153,6 +175,7 @@ export const CallStructureReviewSchema = z.object({
   time_management: TimeManagementSchema,
   score: z.number().min(0).max(100),
   summary: z.string(),
+  structure_issues: z.array(z.string()).optional(),
 });
 export type CallStructureReview = z.infer<typeof CallStructureReviewSchema>;
 
@@ -206,6 +229,14 @@ export const RepTechniqueAnalysisSchema = z.object({
   average_monologue_length: z.number().min(0), // in seconds
   score: z.number().min(0).max(100),
   summary: z.string(),
+  metrics: z.object({
+    monologue_count: z.number().optional(),
+    longest_monologue: z.number().optional(),
+    missed_follow_up_count: z.number().optional(),
+    good_follow_up_count: z.number().optional(),
+  }).optional(),
+  patterns: z.array(z.string()).optional(),
+  top_priority_fix: z.string().optional(),
 });
 export type RepTechniqueAnalysis = z.infer<typeof RepTechniqueAnalysisSchema>;
 
@@ -224,6 +255,13 @@ export const AllExtractionsSchema = z.object({
 export type AllExtractions = z.infer<typeof AllExtractionsSchema>;
 
 // ============================================
+// Deal Signal (shared, defined early for reuse)
+// ============================================
+
+export const DealSignalSchema = z.enum(["strong", "positive", "healthy", "at_risk", "critical"]);
+export type DealSignal = z.infer<typeof DealSignalSchema>;
+
+// ============================================
 // Context Object (from Context Loader)
 // ============================================
 
@@ -232,13 +270,13 @@ export const CallSummarySchema = z.object({
   title: z.string().optional(),
   summary: z.string().optional(),
   overall_score: z.number().optional(),
-  deal_signal: z.enum(["healthy", "at_risk", "critical"]).optional(),
+  deal_signal: DealSignalSchema.optional(),
   created_at: z.string(),
 });
 export type CallSummary = z.infer<typeof CallSummarySchema>;
 
 export const CompanyProfileSchema = z.object({
-  id: z.number(),
+  id: z.string(),
   company_name: z.string(),
   domain: z.string().optional(),
   pain_points: z.array(z.string()).optional(),
@@ -273,15 +311,15 @@ export const UserProfileSchema = z.object({
   })).optional(),
   elevator_pitch: z.string().optional(),
   sales_motion: z.string().optional(),
-  team_tags: z.array(z.object({
-    tag_name: z.string(),
-    tag_type: z.enum(["role", "department"]),
+  team_roles: z.array(z.object({
+    role_name: z.string(),
+    role_type: z.enum(["role", "department"]),
     description: z.string().optional(),
   })).optional(),
 });
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 
-export const CallTypeSchema = z.enum(["discovery", "followup", "demo", "closing"]);
+export const CallTypeSchema = z.enum(["discovery", "followup", "demo", "closing", "other"]);
 export type CallType = z.infer<typeof CallTypeSchema>;
 
 export const ContextObjectSchema = z.object({
@@ -296,18 +334,18 @@ export type ContextObject = z.infer<typeof ContextObjectSchema>;
 // Synthesis Agent Output
 // ============================================
 
-export const DealSignalSchema = z.enum(["healthy", "at_risk", "critical"]);
-export type DealSignal = z.infer<typeof DealSignalSchema>;
-
 export const WhatWorkedItemSchema = z.object({
   moment: z.string(),
   quote: z.string(),
   why_effective: z.string(),
+  keep_doing: z.string().optional(),
 });
 export type WhatWorkedItem = z.infer<typeof WhatWorkedItemSchema>;
 
 export const MissedOpportunitySchema = z.object({
   moment: z.string(),
+  prospect_said: z.string().optional(),
+  rep_said: z.string().optional(),
   why_it_matters: z.string(),
   what_to_do: z.string(),
   suggested_phrasing: z.string().optional(),
@@ -316,6 +354,7 @@ export type MissedOpportunity = z.infer<typeof MissedOpportunitySchema>;
 
 export const DealRiskAlertSchema = z.object({
   risk_type: z.string(),
+  severity: z.enum(["high", "medium", "low"]).optional(),
   what_happened: z.string(),
   why_risky: z.string(),
   how_to_address: z.string(),
@@ -335,6 +374,7 @@ export const NextCallActionSchema = z.object({
   action: z.string(),
   priority: z.enum(["high", "medium", "low"]),
   category: z.enum(["question", "topic", "avoid"]),
+  success_criteria: z.string().optional(),
 });
 export type NextCallAction = z.infer<typeof NextCallActionSchema>;
 
@@ -358,6 +398,25 @@ export const CoachingReportSchema = z.object({
   overall_score: z.number().min(0).max(100),
   call_summary: z.string(), // 4-5 sentences for DB storage
   deal_signal: DealSignalSchema,
+  call_type: z.string().optional(),
+  overall_assessment: z.string().optional(),
+  deal_signal_reason: z.string().optional(),
+  critical_improvements: z.array(z.object({
+    area: z.string(),
+    issue: z.string(),
+    practice_drill: z.string().optional(),
+  })).optional(),
+  the_one_thing: z.object({
+    what: z.string(),
+    how: z.string(),
+    measure: z.string(),
+  }).optional(),
+  coaching_notes: z.array(z.string()).optional(),
+  rep_scored: z.object({
+    name: z.string(),
+    email: z.string().optional(),
+    transcript_speaker_name: z.string().optional(),
+  }).optional(),
 });
 export type CoachingReport = z.infer<typeof CoachingReportSchema>;
 

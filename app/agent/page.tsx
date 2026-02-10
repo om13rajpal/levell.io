@@ -295,7 +295,7 @@ export default function AgentPage() {
 
         if (companyRow) {
           const { data, error } = await supabase
-            .from("companies")
+            .from("external_org")
             .select("id, company_name, domain")
             .eq("company_id", companyRow.id)
             .order("company_name", { ascending: true })
