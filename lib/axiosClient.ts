@@ -1,5 +1,6 @@
 import axios from "axios";
 import axiosRetry from "axios-retry";
+import { getSupabase } from "@/lib/supabaseClient";
 
 // Create axios instance with extended timeout for long-running requests (up to 10 minutes)
 const axiosClient = axios.create({
@@ -27,9 +28,18 @@ axiosRetry(axiosClient, {
   },
 });
 
-// Request interceptor for logging/debugging
+// Request interceptor to attach Supabase auth token
 axiosClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        config.headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    } catch {
+      // If we can't get the session, proceed without auth header
+    }
     console.log(`[Axios] Making request to: ${config.url}`);
     return config;
   },
