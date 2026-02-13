@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -28,14 +29,8 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const { apiKey } = body;
-
-    // Simple API key authentication
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && apiKey !== cronSecret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await authenticateRequest(req);
+    if (auth.error) return unauthorizedResponse(auth.error);
 
     const supabase = getSupabaseAdmin();
 

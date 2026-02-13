@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 interface UpgradeRequestBody {
   userName: string;
@@ -108,6 +109,9 @@ function getUpgradeRequestTemplate(data: UpgradeRequestBody): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const body: UpgradeRequestBody = await request.json();
 
     if (!body.userName || !body.userEmail) {

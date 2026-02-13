@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 interface SendInvitationRequest {
   to: string;
@@ -14,6 +15,9 @@ function isValidEmail(email: string): boolean {
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const body: SendInvitationRequest = await request.json();
 
     if (!body.to || !body.subject || !body.html) {

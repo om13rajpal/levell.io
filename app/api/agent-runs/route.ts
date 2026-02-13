@@ -6,6 +6,7 @@ import {
   validationError,
   serverError,
 } from "@/lib/api-response";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Initialize Supabase admin client
 function getSupabaseAdmin() {
@@ -22,6 +23,9 @@ function getSupabaseAdmin() {
 // GET all agent runs with filtering and pagination
 export async function GET(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const supabase = getSupabaseAdmin();
     const { searchParams } = new URL(request.url);
 
@@ -99,6 +103,9 @@ export async function GET(request: NextRequest) {
 // POST log a new agent run
 export async function POST(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 

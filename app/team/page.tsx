@@ -1458,7 +1458,7 @@ export default function TeamPage() {
                         variant="ghost"
                         size="sm"
                         className="text-xs gap-1.5"
-                        onClick={() => router.push("/calls")}
+                        onClick={() => router.push("/dashboard")}
                       >
                         View Calls
                         <ArrowRight className="h-3 w-3" />

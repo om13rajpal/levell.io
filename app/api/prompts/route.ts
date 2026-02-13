@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Initialize Supabase admin client
 function getSupabaseAdmin() {
@@ -16,6 +17,9 @@ function getSupabaseAdmin() {
 // GET all prompts (public route - no auth required)
 export async function GET(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const supabase = getSupabaseAdmin();
     const { searchParams } = new URL(request.url);
 
@@ -130,6 +134,9 @@ export async function GET(request: NextRequest) {
 // POST create new prompt
 export async function POST(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 

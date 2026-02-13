@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Initialize Supabase admin client
 function getSupabaseAdmin() {
@@ -35,6 +36,9 @@ interface TestTranscriptRow {
 // GET all test transcripts
 export async function GET(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const supabase = getSupabaseAdmin();
     const searchParams = request.nextUrl.searchParams;
     const includeContent = searchParams.get("include_content") === "true";

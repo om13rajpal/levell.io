@@ -51,12 +51,28 @@ import {
   ChevronsRight,
   RefreshCw,
   MessageSquare,
-  MessageCircle,
   Loader2,
   ListChecks,
-  X,
   Sparkles,
+  MoreVertical,
+  Pencil,
+  Trash2,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { IconFileText, IconRefresh } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -109,7 +125,12 @@ export default function Page() {
   const [scoreLoading, setScoreLoading] = useState(false);
   const [unscoredCount, setUnscoredCount] = useState<number | null>(null);
 
-  // AI Agent panel state
+  // Rename/Delete dialog state
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Coaching notes state
   const [coachingNotes, setCoachingNotes] = useState<any[]>([]);
@@ -362,6 +383,61 @@ export default function Page() {
     };
   }, [hasFetched]);
 
+  // Rename transcript handler
+  const handleRename = useCallback(async () => {
+    if (!selectedTranscript || !renameValue.trim()) return;
+    setActionLoading(true);
+    try {
+      const { error } = await supabase
+        .from("transcripts")
+        .update({ title: renameValue.trim() })
+        .eq("id", selectedTranscript.id);
+
+      if (error) throw error;
+      toast.success("Call renamed successfully");
+      setTranscripts((prev) =>
+        prev.map((t) =>
+          t.id === selectedTranscript.id ? { ...t, title: renameValue.trim() } : t
+        )
+      );
+      setRenameDialogOpen(false);
+    } catch (err) {
+      console.error("Rename error:", err);
+      toast.error("Failed to rename call");
+    } finally {
+      setActionLoading(false);
+    }
+  }, [selectedTranscript, renameValue]);
+
+  // Delete transcript handler
+  const handleDeleteTranscript = useCallback(async () => {
+    if (!selectedTranscript) return;
+    setActionLoading(true);
+    try {
+      // Delete from external_org_calls first (FK constraint)
+      await supabase
+        .from("external_org_calls")
+        .delete()
+        .eq("transcript_id", selectedTranscript.id);
+
+      const { error } = await supabase
+        .from("transcripts")
+        .delete()
+        .eq("id", selectedTranscript.id);
+
+      if (error) throw error;
+      toast.success("Call deleted successfully");
+      setTranscripts((prev) => prev.filter((t) => t.id !== selectedTranscript.id));
+      setTotalCount((prev) => prev - 1);
+      setDeleteDialogOpen(false);
+    } catch (err) {
+      console.error("Delete error:", err);
+      toast.error("Failed to delete call");
+    } finally {
+      setActionLoading(false);
+    }
+  }, [selectedTranscript]);
+
   // Trigger batch scoring
   const handleScoreCalls = useCallback(async () => {
     try {
@@ -405,7 +481,7 @@ export default function Page() {
     >
       <AppSidebar variant="inset" />
       <SidebarInset>
-        <SiteHeader heading="Dashboard" />
+        <SiteHeader heading="Calls" />
 
         <div className="flex flex-1 flex-col">
           <div className="@container/main flex flex-1 flex-col gap-2">
@@ -505,6 +581,7 @@ export default function Page() {
                             <TableHead>Duration</TableHead>
                             <TableHead>Score</TableHead>
                             <TableHead>Date</TableHead>
+                            <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
 
@@ -546,8 +623,39 @@ export default function Page() {
                                 </TableCell>
                                 <TableCell>
                                   {t.created_at
-                                    ? new Date(t.created_at).toLocaleString()
+                                    ? new Date(t.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                                     : "—"}
+                                </TableCell>
+                                <TableCell>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                        <MoreVertical className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setSelectedTranscript(t);
+                                          setRenameValue(t.title || "");
+                                          setRenameDialogOpen(true);
+                                        }}
+                                      >
+                                        <Pencil className="h-4 w-4 mr-2" />
+                                        Rename
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        className="text-destructive focus:text-destructive"
+                                        onClick={() => {
+                                          setSelectedTranscript(t);
+                                          setDeleteDialogOpen(true);
+                                        }}
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -666,6 +774,54 @@ export default function Page() {
           setTimeout(() => setIsVisible(true), 100);
         }}
       />
+
+      {/* Rename Dialog */}
+      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename Call</DialogTitle>
+            <DialogDescription>Enter a new name for this call.</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            placeholder="Call title"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRename();
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleRename} disabled={actionLoading || !renameValue.trim()}>
+              {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Call</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete &ldquo;{selectedTranscript?.title}&rdquo;? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteTranscript} disabled={actionLoading}>
+              {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Ask AI Coach - Global Component */}
       <AskAICoach

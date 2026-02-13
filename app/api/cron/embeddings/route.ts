@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ingestTranscript, ingestCompany } from "@/lib/embeddings";
+import { authenticateCronRequest } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes max
 export const dynamic = "force-dynamic";
@@ -30,18 +31,9 @@ export async function GET(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // Verify cron secret (Vercel sends this in header)
-    const authHeader = req.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    // Also check query param for manual triggers
-    const url = new URL(req.url);
-    const apiKey = url.searchParams.get("apiKey");
-
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}` && apiKey !== cronSecret) {
-      console.log("[Cron] Unauthorized request");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    // Verify cron secret - fail closed
+    const cronAuth = authenticateCronRequest(req);
+    if (!cronAuth.ok) return cronAuth.response!;
 
     const supabase = getSupabaseAdmin();
     const results = {

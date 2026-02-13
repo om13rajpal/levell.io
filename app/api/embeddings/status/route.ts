@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Initialize Supabase admin client
 function getSupabaseAdmin() {
@@ -20,6 +21,9 @@ function getSupabaseAdmin() {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await authenticateRequest(req);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const url = new URL(req.url);
     const userId = url.searchParams.get("userId");
 

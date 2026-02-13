@@ -18,17 +18,7 @@ import dynamic from "next/dynamic";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { supabase } from "@/lib/supabaseClient";
-import type {
-  AgentContext,
-  CallContext,
-  CompaniesContext,
-  CompanyDetailContext,
-  TeamContext,
-  CallsListContext,
-  DashboardContext,
-  TranscriptContext,
-  CompaniesListContext,
-} from "@/types/agent-context";
+import type { AgentContext } from "@/types/agent-context";
 
 import {
   Sheet,
@@ -377,6 +367,11 @@ export default function InlineAgentPanel({
   const [input, setInput] = useState("");
   const [model, setModel] = useState<string>(inlineModels[0].value);
   const [userId, setUserId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const conversationIdRef = React.useRef<string | null>(null);
+  const conversationPromiseRef = React.useRef<Promise<string | null> | null>(null);
+  const messageSequenceRef = React.useRef(0);
+  const lastSavedMessageCount = React.useRef(0);
 
   // Fetch user ID on mount
   useEffect(() => {
@@ -387,6 +382,67 @@ export default function InlineAgentPanel({
       }
     }
     fetchUserId();
+  }, []);
+
+  // Create a new conversation on first user message (race-safe via ref guard)
+  const ensureConversation = useCallback(async (): Promise<string | null> => {
+    if (conversationIdRef.current) return conversationIdRef.current;
+    if (!userId) return null;
+
+    // If a creation is already in flight, await it instead of creating a duplicate
+    if (conversationPromiseRef.current) return conversationPromiseRef.current;
+
+    const promise = (async () => {
+      const { data, error } = await supabase
+        .from("conversations")
+        .insert({
+          user_id: userId,
+          message_count: 0,
+          metadata: { model, pageType: context?.type || "unknown" },
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        console.error("Failed to create conversation:", error);
+        conversationPromiseRef.current = null;
+        return null;
+      }
+
+      conversationIdRef.current = data.id;
+      setConversationId(data.id);
+      messageSequenceRef.current = 0;
+      lastSavedMessageCount.current = 0;
+      return data.id;
+    })();
+
+    conversationPromiseRef.current = promise;
+    return promise;
+  }, [userId, model, context?.type]);
+
+  // Save a message to the database
+  const saveMessage = useCallback(async (
+    convId: string,
+    role: string,
+    content: string,
+    meta?: Record<string, unknown>
+  ) => {
+    messageSequenceRef.current += 1;
+    const seqNum = messageSequenceRef.current;
+
+    await supabase.from("messages").insert({
+      conversation_id: convId,
+      role,
+      content,
+      sequence_number: seqNum,
+      metadata: meta || null,
+    });
+
+    // Update message_count on conversation
+    await supabase
+      .from("conversations")
+      .update({ message_count: seqNum })
+      .eq("id", convId);
   }, []);
 
   // Determine context type and normalize context
@@ -512,31 +568,73 @@ export default function InlineAgentPanel({
   });
 
   const handleSubmit = useCallback(
-    (e: FormEvent<HTMLFormElement>) => {
+    async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       if (!input.trim()) return;
 
+      const msgText = input.trim();
+      setInput("");
+
+      // Ensure conversation exists and save user message
+      const convId = await ensureConversation();
+      if (convId) {
+        saveMessage(convId, "user", msgText);
+      }
+
       sendMessage(
-        { text: input },
+        { text: msgText },
         { body: requestBody }
       );
-      setInput("");
     },
-    [input, requestBody, sendMessage]
+    [input, requestBody, sendMessage, ensureConversation, saveMessage]
   );
 
   const handleQuickAction = useCallback(
-    (prompt: string) => {
+    async (prompt: string) => {
+      const convId = await ensureConversation();
+      if (convId) {
+        saveMessage(convId, "user", prompt);
+      }
+
       sendMessage(
         { text: prompt },
         { body: requestBody }
       );
     },
-    [requestBody, sendMessage]
+    [requestBody, sendMessage, ensureConversation, saveMessage]
   );
+
+  // Save assistant messages when streaming completes
+  useEffect(() => {
+    if (status !== "ready" && status !== "error") return;
+    if (!conversationId) return;
+    if (messages.length <= lastSavedMessageCount.current) return;
+
+    // Find new assistant messages that haven't been saved
+    const newMessages = messages.slice(lastSavedMessageCount.current);
+    lastSavedMessageCount.current = messages.length;
+
+    for (const msg of newMessages) {
+      if (msg.role === "assistant") {
+        const textContent = msg.parts
+          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+          .map((p) => p.text)
+          .join("\n");
+
+        if (textContent) {
+          saveMessage(conversationId, "assistant", textContent, { model });
+        }
+      }
+    }
+  }, [status, messages, conversationId, saveMessage, model]);
 
   const handleClearChat = useCallback(() => {
     setMessages([]);
+    setConversationId(null);
+    conversationIdRef.current = null;
+    conversationPromiseRef.current = null;
+    messageSequenceRef.current = 0;
+    lastSavedMessageCount.current = 0;
   }, [setMessages]);
 
   // Retry the last user message

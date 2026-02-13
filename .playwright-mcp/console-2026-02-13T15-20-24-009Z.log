@@ -1,0 +1,44 @@
+[   17187ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/5star.bank:0
+[   17195ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aspen.com:0
+[   17195ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/afncu.com:0
+[   17195ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aegisfinancial.com:0
+[   17195ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/acescholarships.org:0
+[   17195ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aetherapparel.com:0
+[   17264ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/anbbank.com:0
+[   17265ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/amerind.com:0
+[   17265ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/americanfinancing.net:0
+[   17265ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/alpinebank.com:0
+[   51831ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aspen.com:0
+[   51833ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/acescholarships.org:0
+[   51833ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/5star.bank:0
+[   51833ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/afncu.com:0
+[   51833ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aegisfinancial.com:0
+[   51833ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aetherapparel.com:0
+[   51911ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/alpinebank.com:0
+[   51912ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/americanfinancing.net:0
+[   51912ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/amerind.com:0
+[   51912ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/anbbank.com:0
+[   56696ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   56696ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   56734ms] [ERROR] Each child in a list should have a unique "key" prop.%s%s See https://react.dev/link/warning-keys for more information. 
+
+Check the render method of `ForwardRef`.  It was passed a child from Line. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:3117
+[   56797ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   56797ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   57575ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aspen.com:0
+[   76072ms] [WARNING] The width(0) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   76072ms] [WARNING] The width(0) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   76103ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   76103ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   76135ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[   76135ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287

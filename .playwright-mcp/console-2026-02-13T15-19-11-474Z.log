@@ -1,0 +1,8 @@
+[    2163ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[    2164ms] [WARNING] The width(1182) and height(250) are both fixed numbers,
+       maybe you don't need to use a ResponsiveContainer. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:2287
+[    2199ms] [ERROR] Each child in a list should have a unique "key" prop.%s%s See https://react.dev/link/warning-keys for more information. 
+
+Check the render method of `ForwardRef`.  It was passed a child from Line. @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:3117
+[    3347ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aspen.com:0

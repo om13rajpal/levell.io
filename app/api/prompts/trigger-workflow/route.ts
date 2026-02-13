@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "@/lib/inngest";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Initialize Supabase admin client
 function getSupabaseAdmin() {
@@ -23,6 +24,9 @@ const INNGEST_WORKFLOWS = {
 // POST - Trigger Inngest workflow with specific parameters
 export async function POST(request: NextRequest) {
   try {
+    const auth = await authenticateRequest(request);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const supabase = getSupabaseAdmin();
     const body = await request.json();
 

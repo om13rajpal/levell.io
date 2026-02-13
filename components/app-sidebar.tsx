@@ -5,15 +5,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import {
-  IconDashboard,
   IconListDetails,
   IconChartBar,
   IconUsers,
-  IconHelp,
-  IconBuilding,
-  IconRobot,
+  IconPhone,
 } from "@tabler/icons-react";
-import Image from "next/image";
 
 import { cn } from "@/lib/utils";
 import {
@@ -99,14 +95,10 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   }, []);
 
   const navMain = [
-    { title: "Dashboard", url: "/dashboard", icon: IconDashboard },
-    { title: "Agent", url: "/agent", icon: IconRobot },
+    { title: "Calls", url: "/dashboard", icon: IconChartBar },
     { title: "Companies", url: "/companies", icon: IconListDetails },
-    { title: "Calls", url: "/calls", icon: IconChartBar },
     { title: "Team", url: "/team", icon: IconUsers },
   ];
-
-  const navSecondary = [{ title: "Help", url: "/help", icon: IconHelp }];
 
   if (loading) {
     return (
@@ -126,7 +118,9 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
               <Link href="/dashboard" className="flex items-center gap-2">
-                <CompanyLogo url={company?.company_url} name={company?.company_name} />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary">
+                  <IconPhone className="h-4 w-4 text-primary-foreground" />
+                </div>
                 <span className="font-semibold">
                   {company?.company_name || "Your Company"}
                 </span>
@@ -186,46 +180,3 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   );
 }
 
-// Helper to extract domain from URL
-function getDomainFromUrl(url: string): string | null {
-  if (!url) return null;
-  try {
-    // Add protocol if missing
-    const urlWithProtocol = url.startsWith("http") ? url : `https://${url}`;
-    const parsed = new URL(urlWithProtocol);
-    return parsed.hostname.replace("www.", "");
-  } catch {
-    // If URL parsing fails, try to extract domain directly
-    return url.replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0];
-  }
-}
-
-function CompanyLogo({ url, name }: { url?: string; name?: string }) {
-  const [imgError, setImgError] = React.useState(false);
-  const domain = getDomainFromUrl(url || "");
-
-  // Use Clearbit Logo API for high-quality logos
-  const logoUrl = domain ? `https://logo.clearbit.com/${domain}` : null;
-
-  if (!logoUrl || imgError) {
-    return (
-      <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/10">
-        <IconBuilding className="h-4 w-4 text-primary" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative h-6 w-6 overflow-hidden rounded">
-      <Image
-        src={logoUrl}
-        alt={name || "Company logo"}
-        width={24}
-        height={24}
-        className="object-contain"
-        onError={() => setImgError(true)}
-        unoptimized
-      />
-    </div>
-  );
-}

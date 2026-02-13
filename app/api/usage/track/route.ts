@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { trackUsage, METER_TYPES } from '@/lib/openmeter';
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 let supabaseAdmin: SupabaseClient | null = null;
 
@@ -73,7 +74,10 @@ export async function POST(req: NextRequest) {
 }
 
 // GET endpoint to check available meter types
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await authenticateRequest(request);
+  if (auth.error) return unauthorizedResponse(auth.error);
+
   return NextResponse.json({
     meterTypes: METER_TYPES,
     description: 'Available meter types for usage tracking',

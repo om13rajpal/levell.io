@@ -4,6 +4,7 @@ import {
   ingestCompany,
   ingestAllUserTranscripts,
 } from "@/lib/embeddings";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes for bulk ingestion
 
@@ -20,6 +21,9 @@ export const maxDuration = 300; // 5 minutes for bulk ingestion
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await authenticateRequest(req);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const body = await req.json();
     const { action, transcriptId, companyId, userId } = body;
 

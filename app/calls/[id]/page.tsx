@@ -965,10 +965,15 @@ export default function CallDetailPage() {
   // Category entries: prefer V2 6-category scores, fall back to V1 breakdown
   const categoryEntries = useMemo((): [string, any][] => {
     if (aiCategoryScores) {
-      // V2 format: just scores, no reason text
-      return Object.entries(aiCategoryScores).map(([key, score]): [string, any] => [key, { score, reason: null }]);
+      return Object.entries(aiCategoryScores).map(([key, val]): [string, any] => {
+        if (typeof val === 'object' && val !== null) return [key, val];
+        return [key, { score: val, reason: null }];
+      });
     }
-    return Object.entries(aiCategoryBreakdown);
+    return Object.entries(aiCategoryBreakdown).map(([key, val]): [string, any] => {
+      if (typeof val === 'object' && val !== null) return [key, val];
+      return [key, { score: val, reason: null }];
+    });
   }, [aiCategoryScores, aiCategoryBreakdown]);
 
   // Full transcript text for the inline AI coach panel
@@ -1280,7 +1285,7 @@ export default function CallDetailPage() {
                   <IconRepeat className="h-5 w-5 text-orange-600 dark:text-orange-400" />
                 </div>
                 <h2 className="text-xl font-bold tracking-tight text-orange-800 dark:text-orange-200">Behavioral Patterns</h2>
-                <Badge variant="secondary" className="ml-auto text-xs bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300">{behavioralPatterns.length} patterns</Badge>
+                <Badge variant="secondary" className="ml-auto text-xs bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300">{behavioralPatterns.length} {behavioralPatterns.length !== 1 ? 'patterns' : 'pattern'}</Badge>
               </div>
 
               <div className="space-y-3">
@@ -2069,7 +2074,7 @@ export default function CallDetailPage() {
                   <IconRepeat className="h-6 w-6 text-orange-600 dark:text-orange-400" />
                 </div>
                 <h2 className="text-2xl font-bold tracking-tight text-orange-800 dark:text-orange-200">Patterns to Watch</h2>
-                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300">{patternsToWatch.length} patterns</Badge>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300">{patternsToWatch.length} {patternsToWatch.length !== 1 ? 'patterns' : 'pattern'}</Badge>
               </div>
 
               <div className="space-y-4">
@@ -2129,7 +2134,7 @@ export default function CallDetailPage() {
                   <IconAlertTriangle className="h-6 w-6 text-rose-600 dark:text-rose-400" />
                 </div>
                 <h2 className="text-2xl font-bold tracking-tight text-rose-800 dark:text-rose-200">Deal Risk Alerts</h2>
-                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300">{effectiveRisks.length} risks</Badge>
+                <Badge variant="secondary" className="ml-auto text-sm px-3 py-1 bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300">{effectiveRisks.length} {effectiveRisks.length !== 1 ? 'risks' : 'risk'}</Badge>
               </div>
 
               <div className="space-y-4">

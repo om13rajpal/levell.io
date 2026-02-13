@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import {
   convertToModelMessages,
   streamText,
@@ -8,6 +9,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { trackAgentRequest } from "@/lib/openmeter";
 import { getRelevantContext } from "@/lib/embeddings";
 import { getSystemPromptForPage, type PageType } from "@/lib/agent-prompts";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -867,10 +869,13 @@ function parseJSON(data: unknown): any {
   return null;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
+    const auth = await authenticateRequest(req);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const body = await req.json();
 
     const {

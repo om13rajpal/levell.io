@@ -24,8 +24,6 @@ import {
   Search,
   Sparkles,
   Building2,
-  TrendingUp,
-  Phone,
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
@@ -33,14 +31,9 @@ import {
   ChevronsRight,
   Loader2,
   Target,
-  Globe,
-  ExternalLink,
   Trash2,
   MessageSquareWarning,
-  ChevronDown,
   CheckCircle,
-  MessageCircle,
-  X,
 } from "lucide-react";
 import {
   Dialog,
@@ -162,6 +155,7 @@ export default function CompaniesPage() {
   const [calls, setCalls] = useState<any[]>([]);
   const [totalCompaniesCount, setTotalCompaniesCount] = useState(0);
   const [companyStats, setCompanyStats] = useState<CompanyStats | null>(null);
+  const [allIndustries, setAllIndustries] = useState<string[]>([]);
 
   // Combined filter state for reduced re-renders
   const [filters, setFilters] = useState({
@@ -310,6 +304,12 @@ export default function CompaniesPage() {
       setDetectedCompanies(paginatedResult.data);
       setTotalCompaniesCount(paginatedResult.totalCount);
 
+      // Accumulate industries across all data loads for the filter dropdown
+      setAllIndustries(prev => {
+        const newIndustries = new Set([...prev, ...paginatedResult.data.map((c: any) => industryFromDomain(c.domain)).filter(Boolean)]);
+        return Array.from(newIndustries).sort();
+      });
+
       // Clear prediction state if companies exist
       if (paginatedResult.totalCount > 0) {
         localStorage.removeItem(PREDICTION_CLICKED_KEY);
@@ -424,7 +424,7 @@ export default function CompaniesPage() {
   }, [companyStats, totalCompaniesCount, combinedData]);
 
   // --------------------------------------------------
-  // Aggregate pain points from all companies
+  // Aggregate pain points from all companies into themed groups
   // --------------------------------------------------
   const aggregatedPainPoints = useMemo(() => {
     const painPointsWithCompany: { painPoint: string; companyName: string; companyId: number }[] = [];
@@ -444,9 +444,80 @@ export default function CompaniesPage() {
     return painPointsWithCompany;
   }, [detectedCompanies]);
 
-  // Pain points expanded state
-  const [painPointsExpanded, setPainPointsExpanded] = useState(false);
-  const PAIN_POINTS_COLLAPSED_COUNT = 5;
+  // Group pain points into common themes
+  const painPointThemes = useMemo(() => {
+    if (aggregatedPainPoints.length === 0) return [];
+
+    // Keywords to group by common themes
+    const themeKeywords: Record<string, string[]> = {
+      "CRM Configuration & Cleanliness": ["crm", "data quality", "messy", "disorganized", "clean", "organize", "views", "configuration"],
+      "Integration & Connectivity": ["integration", "connect", "api", "sync", "import", "export", "migrate", "compatibility"],
+      "User Experience & Usability": ["ux", "ui", "usability", "interface", "user experience", "confusing", "complicated", "hard to use", "navigation"],
+      "Reporting & Analytics": ["report", "analytics", "dashboard", "metric", "insight", "visibility", "tracking", "data"],
+      "Pricing & Cost Concerns": ["price", "pricing", "cost", "expensive", "budget", "roi", "value", "affordable"],
+      "Onboarding & Training": ["onboard", "training", "learn", "ramp", "adopt", "setup", "getting started"],
+      "Performance & Reliability": ["slow", "performance", "downtime", "reliable", "bug", "crash", "latency", "speed"],
+      "Support & Service": ["support", "service", "response time", "help", "ticket", "customer service"],
+      "Scalability & Growth": ["scale", "scalab", "grow", "enterprise", "volume", "capacity"],
+      "Security & Compliance": ["security", "compliance", "gdpr", "privacy", "encryption", "permission", "access"],
+    };
+
+    const themes: {
+      theme: string;
+      summary: string;
+      mentions: { painPoint: string; companyName: string; companyId: number }[];
+    }[] = [];
+    const assigned = new Set<number>();
+
+    // Match pain points to themes
+    for (const [theme, keywords] of Object.entries(themeKeywords)) {
+      const matches = aggregatedPainPoints.filter((item, idx) => {
+        if (assigned.has(idx)) return false;
+        const lower = item.painPoint.toLowerCase();
+        return keywords.some((kw) => lower.includes(kw));
+      });
+
+      if (matches.length > 0) {
+        matches.forEach((_, i) => {
+          const originalIdx = aggregatedPainPoints.findIndex(
+            (pp, idx) => !assigned.has(idx) && pp === matches[i]
+          );
+          if (originalIdx !== -1) assigned.add(originalIdx);
+        });
+
+        // Generate a short summary (max 20 words) from the first few pain points
+        const sampleTexts = matches.slice(0, 3).map((m) => m.painPoint);
+        const rawSummary = sampleTexts.join(". ").replace(/\.\./g, ".");
+        const words = rawSummary.split(/\s+/);
+        const summary = words.length > 20 ? words.slice(0, 20).join(" ") + "..." : rawSummary;
+
+        themes.push({ theme, summary, mentions: matches });
+      }
+    }
+
+    // Collect unmatched pain points into "Other Concerns"
+    const unmatched = aggregatedPainPoints.filter((_, idx) => !assigned.has(idx));
+    if (unmatched.length > 0) {
+      const sampleTexts = unmatched.slice(0, 3).map((m) => m.painPoint);
+      const rawSummary = sampleTexts.join(". ").replace(/\.\./g, ".");
+      const words = rawSummary.split(/\s+/);
+      const summary = words.length > 20 ? words.slice(0, 20).join(" ") + "..." : rawSummary;
+      themes.push({ theme: "Other Concerns", summary, mentions: unmatched });
+    }
+
+    // Sort by number of mentions (most common first)
+    themes.sort((a, b) => b.mentions.length - a.mentions.length);
+
+    return themes;
+  }, [aggregatedPainPoints]);
+
+  // Pain point detail popup state
+  const [painPointDetailOpen, setPainPointDetailOpen] = useState(false);
+  const [selectedPainPointTheme, setSelectedPainPointTheme] = useState<{
+    theme: string;
+    summary: string;
+    mentions: { painPoint: string; companyName: string; companyId: number }[];
+  } | null>(null);
 
   // --------------------------------------------------
   // Filters with debounced search
@@ -470,15 +541,23 @@ export default function CompaniesPage() {
   }, [filters, combinedData]);
 
   const industries = useMemo(
-    () => Array.from(new Set(combinedData.map((c) => c.industry))),
-    [combinedData]
+    () => allIndustries.length > 0 ? allIndustries : Array.from(new Set(combinedData.map((c) => c.industry).filter(Boolean))),
+    [allIndustries, combinedData]
   );
 
-  // Server-side pagination - no need to slice, data is already paginated
-  const maxPage = Math.ceil(totalCompaniesCount / pageSize) || 1;
+  // Pagination uses filtered count when client-side filters are active,
+  // otherwise falls back to the server-side total count
+  const hasClientFilters = filters.industry !== "all" || filters.risk !== "all";
+  const effectiveCount = hasClientFilters ? filtered.length : totalCompaniesCount;
+  const maxPage = Math.ceil(effectiveCount / pageSize) || 1;
   const startIndex = (page - 1) * pageSize;
-  const endIndex = Math.min(startIndex + pageSize, totalCompaniesCount);
+  const endIndex = Math.min(startIndex + pageSize, effectiveCount);
   const pageItems = filtered; // Already paginated from server
+
+  // Reset to page 1 when client-side filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filters.industry, filters.risk, filters.sortBy]);
 
   useEffect(() => {
     if (page > maxPage && maxPage > 0) setPage(1);
@@ -782,60 +861,13 @@ export default function CompaniesPage() {
         <SiteHeader heading="Companies" />
 
         <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-7xl mx-auto w-full">
-          {/* Your Company Banner */}
-          {myCompany && (
-            <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-primary/10 to-transparent shadow-sm">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <MyCompanyLogo url={myCompany.company_url} name={myCompany.company_name} />
-                    <div>
-                      <h3 className="font-semibold text-lg">{myCompany.company_name}</h3>
-                      <p className="text-sm text-muted-foreground flex items-center gap-1">
-                        <Globe className="h-3.5 w-3.5" />
-                        {myCompany.company_url || "No website added"}
-                      </p>
-                    </div>
-                  </div>
-                  {myCompany.company_url && (
-                    <Button variant="outline" size="sm" className="gap-2" asChild>
-                      <a href={myCompany.company_url} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-4 w-4" />
-                        Visit Website
-                      </a>
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           {/* Stats Cards */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-2">
             <StatsCard
               title="Total Companies"
               value={stats.totalCompanies}
               icon={<Building2 className="h-4 w-4" />}
               trend="Detected from calls"
-            />
-            <StatsCard
-              title="Total Calls"
-              value={stats.totalCalls}
-              icon={<Phone className="h-4 w-4" />}
-              trend="All time"
-            />
-            <StatsCard
-              title="Average Score"
-              value={stats.avgScore}
-              icon={<TrendingUp className="h-4 w-4" />}
-              trend="Across companies"
-              valueColor={
-                stats.avgScore >= 80
-                  ? "text-emerald-600"
-                  : stats.avgScore >= 60
-                  ? "text-amber-600"
-                  : "text-red-600"
-              }
             />
             <StatsCard
               title="At Risk"
@@ -854,59 +886,61 @@ export default function CompaniesPage() {
                   <MessageSquareWarning className="h-5 w-5 text-orange-500" />
                   Uncovered Pain Points
                 </CardTitle>
-                {aggregatedPainPoints.length > 0 && (
+                {painPointThemes.length > 0 && (
                   <Badge variant="outline" className="text-orange-600 border-orange-300 dark:border-orange-700">
-                    {aggregatedPainPoints.length} across all companies
+                    {painPointThemes.length} themes across {aggregatedPainPoints.length} mentions
                   </Badge>
                 )}
               </div>
               <CardDescription>
-                Customer challenges and concerns identified across all company calls
+                Common customer challenges identified and grouped by theme across all calls
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {aggregatedPainPoints.length > 0 ? (
-                <div className="space-y-3">
-                  {aggregatedPainPoints.slice(0, painPointsExpanded ? aggregatedPainPoints.length : PAIN_POINTS_COLLAPSED_COUNT).map((item, i) => (
-                    <div
-                      key={i}
-                      className="p-3 rounded-lg bg-orange-500/5 border border-orange-200/40 dark:border-orange-500/20 hover:bg-orange-500/10 transition-colors cursor-pointer"
-                      onClick={() => router.push(`/companies/${item.companyId}`)}
-                    >
-                      <div className="flex gap-3">
-                        <div className="h-6 w-6 rounded-full bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center shrink-0">
-                          <span className="text-xs font-medium text-orange-600 dark:text-orange-400">{i + 1}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-orange-700 dark:text-orange-300 leading-relaxed">
-                            {item.painPoint}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                            <Building2 className="h-3 w-3" />
-                            {item.companyName}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {aggregatedPainPoints.length > PAIN_POINTS_COLLAPSED_COUNT && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
-                      onClick={() => setPainPointsExpanded(!painPointsExpanded)}
-                    >
-                      <ChevronDown className={`h-4 w-4 mr-1 transition-transform ${painPointsExpanded ? 'rotate-180' : ''}`} />
-                      {painPointsExpanded
-                        ? 'View Less'
-                        : `View More (${aggregatedPainPoints.length - PAIN_POINTS_COLLAPSED_COUNT} more)`}
-                    </Button>
-                  )}
+              {painPointThemes.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {painPointThemes.map((theme, i) => (
+                      <Card
+                        key={i}
+                        className="border border-orange-200/40 dark:border-orange-500/20 bg-orange-500/5 hover:bg-orange-500/10 transition-colors"
+                      >
+                        <CardContent className="p-4 flex flex-col justify-between h-full">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="h-6 w-6 rounded-full bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center shrink-0">
+                                <span className="text-xs font-bold text-orange-600 dark:text-orange-400">{theme.mentions.length}</span>
+                              </div>
+                              <h4 className="font-semibold text-sm text-orange-700 dark:text-orange-300">
+                                {theme.theme}
+                              </h4>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                              {theme.summary}
+                            </p>
+                          </div>
+                          <div className="flex justify-end mt-3">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-orange-600 hover:text-orange-700 hover:bg-orange-500/10 px-2 py-1 h-auto"
+                              onClick={() => {
+                                setSelectedPainPointTheme(theme);
+                                setPainPointDetailOpen(true);
+                              }}
+                            >
+                              More
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                   {/* Footer Note */}
                   <div className="pt-2 border-t border-border/50">
                     <div className="flex items-start gap-2 text-xs text-muted-foreground">
                       <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
-                      <p>Pain points are automatically extracted from call transcripts using AI analysis.</p>
+                      <p>Pain points are automatically extracted from call transcripts using AI analysis and grouped by common themes.</p>
                     </div>
                   </div>
                 </div>
@@ -925,6 +959,37 @@ export default function CompaniesPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Pain Point Detail Dialog */}
+          <Dialog open={painPointDetailOpen} onOpenChange={setPainPointDetailOpen}>
+            <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquareWarning className="h-5 w-5 text-orange-500" />
+                  {selectedPainPointTheme?.theme}
+                </DialogTitle>
+                <DialogDescription>
+                  Mentioned {selectedPainPointTheme?.mentions.length} time{selectedPainPointTheme?.mentions.length !== 1 ? "s" : ""} across calls
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 mt-2">
+                {selectedPainPointTheme?.mentions.map((mention, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-lg bg-orange-500/5 border border-orange-200/40 dark:border-orange-500/20"
+                  >
+                    <p className="text-sm text-foreground leading-relaxed italic">
+                      &ldquo;{mention.painPoint}&rdquo;
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                      <Building2 className="h-3 w-3" />
+                      {mention.companyName}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {/* Header + Actions */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1191,11 +1256,11 @@ export default function CompaniesPage() {
           </ErrorBoundary>
 
           {/* Pagination */}
-          {totalCompaniesCount > 0 && (
+          {effectiveCount > 0 && (
             <div className="flex items-center justify-between py-4">
                   <p className="text-sm text-muted-foreground">
                     Showing {startIndex + 1} to {endIndex} of{" "}
-                    {totalCompaniesCount} companies
+                    {effectiveCount} companies
                   </p>
                   <div className="flex items-center gap-2">
                     <Select

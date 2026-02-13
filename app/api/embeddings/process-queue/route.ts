@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ingestTranscript, ingestCompany } from "@/lib/embeddings";
+import { authenticateCronRequest } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -28,17 +29,12 @@ function getSupabaseAdmin() {
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const { batchSize = 10, apiKey } = body;
+    // Authenticate cron request - fail closed
+    const cronAuth = authenticateCronRequest(req);
+    if (!cronAuth.ok) return cronAuth.response!;
 
-    // Simple API key authentication for cron jobs
-    const expectedKey = process.env.CRON_SECRET_KEY;
-    if (expectedKey && apiKey !== expectedKey) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const body = await req.json().catch(() => ({}));
+    const { batchSize = 10 } = body;
 
     const supabase = getSupabaseAdmin();
 
@@ -129,15 +125,90 @@ export async function POST(req: NextRequest) {
 
 // Also support GET for easy cron triggering
 export async function GET(req: NextRequest) {
-  // Check for API key in query params
-  const url = new URL(req.url);
-  const apiKey = url.searchParams.get("apiKey");
+  try {
+    // Authenticate cron request - fail closed
+    const cronAuth = authenticateCronRequest(req);
+    if (!cronAuth.ok) return cronAuth.response!;
 
-  const fakeRequest = new Request(req.url, {
-    method: "POST",
-    body: JSON.stringify({ apiKey, batchSize: 10 }),
-    headers: { "Content-Type": "application/json" },
-  });
+    const supabase = getSupabaseAdmin();
 
-  return POST(fakeRequest as NextRequest);
+    // Fetch pending items from queue
+    const { data: pendingItems, error: fetchError } = await supabase
+      .from("embedding_queue")
+      .select("*")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(10);
+
+    if (fetchError) {
+      console.error("[Queue] Error fetching pending items:", fetchError);
+      throw fetchError;
+    }
+
+    if (!pendingItems || pendingItems.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: "No pending items in queue",
+        processed: 0,
+      });
+    }
+
+    console.log(`[Queue] Processing ${pendingItems.length} items`);
+
+    let processed = 0;
+    let failed = 0;
+
+    for (const item of pendingItems) {
+      try {
+        await supabase
+          .from("embedding_queue")
+          .update({ status: "processing", attempts: item.attempts + 1 })
+          .eq("id", item.id);
+
+        if (item.source_type === "transcript") {
+          await ingestTranscript(parseInt(item.source_id));
+        } else if (item.source_type === "company") {
+          await ingestCompany(item.source_id, item.user_id);
+        }
+
+        await supabase
+          .from("embedding_queue")
+          .update({ status: "completed", processed_at: new Date().toISOString() })
+          .eq("id", item.id);
+
+        processed++;
+        console.log(`[Queue] Processed ${item.source_type} ${item.source_id}`);
+      } catch (error) {
+        console.error(`[Queue] Failed to process ${item.source_type} ${item.source_id}:`, error);
+
+        const newStatus = item.attempts >= 3 ? "failed" : "pending";
+        await supabase
+          .from("embedding_queue")
+          .update({
+            status: newStatus,
+            error_message: error instanceof Error ? error.message : "Unknown error",
+          })
+          .eq("id", item.id);
+
+        failed++;
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Processed ${processed} items, ${failed} failed`,
+      processed,
+      failed,
+      total: pendingItems.length,
+    });
+  } catch (error) {
+    console.error("[Queue API] Error:", error);
+    return NextResponse.json(
+      {
+        error: "Failed to process queue",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
 }

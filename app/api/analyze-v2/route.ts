@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { runAnalysisPipeline, PipelineResult } from "@/lib/analysis-pipeline";
 import { CallType } from "@/types/extraction-outputs";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 // Allow longer execution for the full pipeline
 export const maxDuration = 120; // 2 minutes
@@ -70,10 +71,13 @@ interface AnalyzeResponse {
  *   error?: string
  * }
  */
-export async function POST(req: Request): Promise<NextResponse<AnalyzeResponse>> {
+export async function POST(req: NextRequest): Promise<NextResponse<AnalyzeResponse>> {
   console.log("[API/analyze-v2] Received request");
 
   try {
+    const auth = await authenticateRequest(req);
+    if (auth.error) return unauthorizedResponse(auth.error) as NextResponse<AnalyzeResponse>;
+
     // Parse and validate request body
     const body = await req.json();
     const parseResult = AnalyzeRequestSchema.safeParse(body);

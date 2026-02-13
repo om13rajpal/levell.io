@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { semanticSearch, getRelevantContext } from "@/lib/embeddings";
+import { authenticateRequest, unauthorizedResponse } from "@/lib/auth";
 
 /**
  * POST /api/embeddings/search
@@ -16,6 +17,9 @@ import { semanticSearch, getRelevantContext } from "@/lib/embeddings";
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await authenticateRequest(req);
+    if (auth.error) return unauthorizedResponse(auth.error);
+
     const body = await req.json();
     const {
       query,

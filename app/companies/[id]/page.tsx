@@ -135,8 +135,10 @@ function getDomainFromUrl(url: string): string {
 function CompanyLogo({ domain, companyName, size = "lg" }: { domain: string; companyName: string; size?: "sm" | "lg" }) {
   const [imageError, setImageError] = useState(false);
 
+  // Check if domain looks like a valid website domain (has a TLD like .com, .io, etc.)
   const cleanDomain = getDomainFromUrl(domain);
-  const logoUrl = cleanDomain ? `https://logo.clearbit.com/${cleanDomain}` : null;
+  const isValidDomain = cleanDomain && /\.[a-z]{2,}$/i.test(cleanDomain);
+  const logoUrl = isValidDomain ? `https://logo.clearbit.com/${cleanDomain}` : null;
 
   const sizeClasses = size === "lg" ? "h-16 w-16" : "h-8 w-8";
 

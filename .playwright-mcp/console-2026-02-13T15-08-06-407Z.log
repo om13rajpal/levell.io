@@ -1,0 +1,12 @@
+[      71ms] [ERROR] Error loading transcript: {message: TypeError: Failed to fetch, details: TypeError: Failed to fetch
+    at http://localhost…:3001/_next/static/chunks/_d9f408a0._.js:5844:57), hint: , code: } @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:3117
+[    3318ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aspen.com:0
+[    3320ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/acescholarships.org:0
+[    3320ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aetherapparel.com:0
+[    3320ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/afncu.com:0
+[    3320ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/aegisfinancial.com:0
+[    3320ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/5star.bank:0
+[    3433ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/amerind.com:0
+[    3434ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/americanfinancing.net:0
+[    3434ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/alpinebank.com:0
+[    3434ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://logo.clearbit.com/anbbank.com:0

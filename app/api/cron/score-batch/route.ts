@@ -1,27 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "@/lib/inngest";
+import { authenticateCronRequest } from "@/lib/auth";
 
 // GET /api/cron/score-batch
 // Cron endpoint to trigger batch transcript scoring
 // The Inngest function also has a built-in cron trigger (every 2 hours)
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret - fail closed (require CRON_SECRET to be configured)
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (!cronSecret) {
-      console.error("[Cron] CRON_SECRET environment variable not configured");
-      return NextResponse.json(
-        { error: "Cron endpoint not configured" },
-        { status: 500 }
-      );
-    }
-
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      console.error("[Cron] Invalid or missing authorization");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const cronAuth = authenticateCronRequest(request);
+    if (!cronAuth.ok) return cronAuth.response!;
 
     console.log("[Cron] Triggering batch scoring");
 

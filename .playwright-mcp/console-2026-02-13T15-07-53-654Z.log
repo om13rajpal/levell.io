@@ -1,0 +1,4 @@
+[     130ms] [ERROR] Error fetching paginated companies: {message: TypeError: Failed to fetch, details: TypeError: Failed to fetch
+    at http://localhost…:3001/_next/static/chunks/_dee95d4d._.js:5257:41), hint: , code: } @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:3117
+[     133ms] [ERROR] Error fetching company stats: {message: TypeError: Failed to fetch, details: TypeError: Failed to fetch
+    at http://localhost…:3001/_next/static/chunks/_dee95d4d._.js:5222:39), hint: , code: } @ http://localhost:3001/_next/static/chunks/node_modules_next_dist_7a8122d0._.js:3117
